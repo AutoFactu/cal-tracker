@@ -44,6 +44,10 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Patrol generated bundles
+/patrol_test/test_bundle.dart
+/integration_test/patrol_test_bundle.dart
+
 # iOS generated files
 /ios/Flutter/Generated.xcconfig
 /ios/Flutter/ephemeral/

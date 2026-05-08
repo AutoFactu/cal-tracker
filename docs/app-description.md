@@ -182,7 +182,7 @@ PostgreSQL stores users, meals, meal items, proposals, templates, food memories,
 
 pgvector stores embeddings used to retrieve user-specific semantic memories. Vector rows must point back to structured relational records.
 
-Embedding generation is backend-owned infrastructure. The MVP uses a self-hosted server-side `bge-m3` embedding model with 1024-dimensional vectors for multilingual food memory retrieval. Flutter must never generate embeddings or call an embedding model directly.
+Embedding generation is provided by OpenRouter using `openai/text-embedding-3-small`. The model is not hosted by us; the backend requests embeddings from OpenRouter and stores the returned 1536-dimensional vectors for multilingual food memory retrieval. Flutter must never generate embeddings or call an embedding model provider directly.
 
 ### LLM Provider
 
@@ -790,7 +790,7 @@ pgvector = semantic retrieval
 templates = structured recurring user defaults
 nutrition providers = factual nutrition source
 LLM = interpretation and tool-selection layer
-self-hosted bge-m3 = multilingual embedding generation
+OpenRouter openai/text-embedding-3-small = multilingual embedding generation
 ```
 
 Vector memory is for fuzzy retrieval of:

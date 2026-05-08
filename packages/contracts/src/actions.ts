@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   dailySummarySchema,
+  foodCandidateSchema,
+  foodMentionSchema,
   mealItemSchema,
   mealProposalSchema,
   mealSchema,
@@ -54,7 +56,8 @@ export const searchNutritionDatabaseInputSchema = z.object({
   barcode: z.string().optional()
 });
 export const searchNutritionDatabaseOutputSchema = z.object({
-  items: z.array(mealItemSchema)
+  items: z.array(mealItemSchema),
+  candidates: z.array(foodCandidateSchema).optional()
 });
 
 export const proposeMealLogInputSchema = z.object({
@@ -62,8 +65,12 @@ export const proposeMealLogInputSchema = z.object({
   occurredAt: z.string().datetime().optional()
 });
 export const proposeMealLogOutputSchema = z.object({
-  proposal: mealProposalSchema,
-  autoCommittedMeal: mealSchema.nullable()
+  proposal: mealProposalSchema.optional(),
+  autoCommittedMeal: mealSchema.nullable().optional(),
+  clarificationRequired: z.boolean().optional(),
+  unresolvedMentions: z.array(foodMentionSchema).optional(),
+  options: z.array(foodCandidateSchema).optional(),
+  message: z.string().optional()
 });
 
 export const commitMealInputSchema = z.object({

@@ -56,9 +56,15 @@ CREATE TABLE IF NOT EXISTS food_items (
   user_id uuid REFERENCES users(id) ON DELETE CASCADE,
   name text NOT NULL,
   normalized_name text NOT NULL,
+  canonical_name text,
   brand text,
   barcode text,
   source text NOT NULL,
+  external_source text,
+  external_id text,
+  source_url text,
+  license text,
+  fetched_at timestamptz,
   serving_grams numeric(10,2) NOT NULL DEFAULT 100,
   calories integer NOT NULL,
   protein_grams numeric(10,2) NOT NULL,
@@ -71,6 +77,7 @@ CREATE TABLE IF NOT EXISTS meal_proposals (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   phrase text NOT NULL,
+  title text NOT NULL,
   status text NOT NULL,
   confidence numeric(5,4) NOT NULL,
   requires_confirmation boolean NOT NULL DEFAULT true,
@@ -93,7 +100,16 @@ CREATE TABLE IF NOT EXISTS meal_proposal_items (
   calories integer NOT NULL,
   protein_grams numeric(10,2) NOT NULL,
   carbs_grams numeric(10,2) NOT NULL,
-  fat_grams numeric(10,2) NOT NULL
+  fat_grams numeric(10,2) NOT NULL,
+  source text NOT NULL DEFAULT 'snapshot',
+  original_text text,
+  canonical_name text,
+  external_source text,
+  external_id text,
+  source_url text,
+  license text,
+  confidence numeric(5,4),
+  needs_review boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE IF NOT EXISTS meals (
@@ -123,7 +139,16 @@ CREATE TABLE IF NOT EXISTS meal_items (
   calories integer NOT NULL,
   protein_grams numeric(10,2) NOT NULL,
   carbs_grams numeric(10,2) NOT NULL,
-  fat_grams numeric(10,2) NOT NULL
+  fat_grams numeric(10,2) NOT NULL,
+  source text NOT NULL DEFAULT 'snapshot',
+  original_text text,
+  canonical_name text,
+  external_source text,
+  external_id text,
+  source_url text,
+  license text,
+  confidence numeric(5,4),
+  needs_review boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE IF NOT EXISTS meal_templates (
@@ -149,7 +174,16 @@ CREATE TABLE IF NOT EXISTS meal_template_items (
   calories integer NOT NULL,
   protein_grams numeric(10,2) NOT NULL,
   carbs_grams numeric(10,2) NOT NULL,
-  fat_grams numeric(10,2) NOT NULL
+  fat_grams numeric(10,2) NOT NULL,
+  source text NOT NULL DEFAULT 'snapshot',
+  original_text text,
+  canonical_name text,
+  external_source text,
+  external_id text,
+  source_url text,
+  license text,
+  confidence numeric(5,4),
+  needs_review boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE IF NOT EXISTS food_memories (

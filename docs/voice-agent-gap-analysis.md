@@ -621,7 +621,7 @@ Tasks:
 
 * Implement exact normalized memory lookup first.
 * Implement temporal lookup for "same as yesterday".
-* Implement embedding generation with self-hosted server-side `bge-m3` embeddings.
+* Implement embedding generation through OpenRouter using `openai/text-embedding-3-small`.
 * Store vectors in `food_memory_embeddings`.
 * Add outbox job processing or synchronous dev mode.
 * Add confidence/reranking rules.
@@ -648,10 +648,10 @@ OPENROUTER_API_KEY=<real OpenRouter key>
 OPENROUTER_MODEL=<tool-calling-capable model>
 OPENAI_API_KEY=<real OpenAI key>
 OPENAI_TRANSCRIPTION_MODEL=<chosen transcription model>
-EMBEDDING_PROVIDER=local
-EMBEDDING_MODEL=bge-m3
-EMBEDDING_DIMENSIONS=1024
-EMBEDDING_BASE_URL=<server-side embedding service URL>
+EMBEDDING_PROVIDER=openrouter
+EMBEDDING_MODEL=openai/text-embedding-3-small
+EMBEDDING_DIMENSIONS=1536
+EMBEDDING_BASE_URL=https://openrouter.ai/api/v1
 ```
 
 Recommended config changes:

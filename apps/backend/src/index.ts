@@ -5,18 +5,36 @@ import { loadConfig } from "./config/env.js";
 import { LocalBgeM3EmbeddingProvider } from "./embeddings/provider.js";
 import { createApp } from "./http/app.js";
 import { MemoryRetrievalService } from "./memory/retrieval.js";
-import { LocalNutritionProvider, NutritionProviderChain, OpenFoodFactsProvider, UsdaNutritionProvider } from "./nutrition/provider.js";
+import {
+  CompositeFoodTextExtractor,
+  DeterministicFoodTextExtractor,
+  FoodResolver,
+  LocalFoodDataProvider,
+  OpenFoodFactsFoodDataProvider,
+  OpenRouterFoodTextExtractor,
+  UsdaFoodDataProvider
+} from "./nutrition/foodResolver.js";
+import { ResolverNutritionProvider } from "./nutrition/provider.js";
 import { PostgresRepository } from "./repository/postgres.js";
 import { RemoteSpeechToTextProvider } from "./stt/speechToTextProvider.js";
 
 const config = loadConfig();
 const repository = new PostgresRepository(config.DATABASE_URL);
 const authService = new AuthService(config, repository);
-const nutritionProvider = new NutritionProviderChain([
-  new OpenFoodFactsProvider(),
-  new LocalNutritionProvider(repository),
-  new UsdaNutritionProvider(),
-]);
+const foodResolver = new FoodResolver(
+  new CompositeFoodTextExtractor([
+    new DeterministicFoodTextExtractor(),
+    new OpenRouterFoodTextExtractor(config.OPENROUTER_API_KEY, config.OPENROUTER_MODEL)
+  ]),
+  [
+    new LocalFoodDataProvider(repository),
+    new OpenFoodFactsFoodDataProvider(config.OPENFOODFACTS_BASE_URL, config.OPENFOODFACTS_USER_AGENT),
+    new UsdaFoodDataProvider(config.USDA_FDC_API_KEY)
+  ],
+  repository,
+  config.FOOD_RESOLVER_MIN_CONFIDENCE
+);
+const nutritionProvider = new ResolverNutritionProvider(foodResolver);
 const embeddingProvider = config.EMBEDDING_BASE_URL
   ? new LocalBgeM3EmbeddingProvider(config.EMBEDDING_BASE_URL, config.EMBEDDING_MODEL, config.EMBEDDING_DIMENSIONS)
   : undefined;

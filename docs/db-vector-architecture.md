@@ -680,12 +680,12 @@ Stores embedding model metadata.
 Closed MVP decision:
 
 ```text
-provider = local
-model = bge-m3
-dimensions = 1024
+provider = openrouter
+model = openai/text-embedding-3-small
+dimensions = 1536
 ```
 
-The application will generate embeddings server-side with a self-hosted `bge-m3` model deployed in the backend/server environment near PostgreSQL. `bge-m3` is the active embedding model because it supports multilingual retrieval, including Spanish and English meal aliases. Flutter must never generate embeddings or call an embedding provider directly.
+The application will request embeddings from OpenRouter using `openai/text-embedding-3-small`. The embedding model is not hosted by us. The backend owns provider calls, API keys, retries, and persistence of returned vectors; Flutter must never generate embeddings or call an embedding provider directly.
 
 Required fields:
 
@@ -700,7 +700,7 @@ created_at
 retired_at
 ```
 
-Embedding dimensions are not merely metadata. A pgvector column declared as `vector(1024)` cannot store vectors of another dimension. If the embedding model changes dimensions, add a new embedding table or column and backfill.
+Embedding dimensions are not merely metadata. A pgvector column declared as `vector(1536)` cannot store vectors of another dimension. If the embedding model changes dimensions, add a new embedding table or column and backfill.
 
 ### `food_memory_embeddings`
 
@@ -718,14 +718,14 @@ created_at
 updated_at
 ```
 
-Active MVP DDL using self-hosted `bge-m3`:
+Active MVP DDL using OpenRouter `openai/text-embedding-3-small`:
 
 ```sql
 CREATE TABLE food_memory_embeddings (
   id uuid PRIMARY KEY,
   memory_id uuid NOT NULL REFERENCES food_memories(id) ON DELETE CASCADE,
   embedding_model_id uuid NOT NULL REFERENCES embedding_models(id),
-  embedding vector(1024) NOT NULL,
+  embedding vector(1536) NOT NULL,
   embedded_text_hash text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),

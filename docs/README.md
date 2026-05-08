@@ -73,7 +73,7 @@ Minimum OS versions: Android 10/API 29 for core app, iOS 17.0 for core app.
 OS-agent spikes: Android AppFunctions on API 36+, iOS App Intents on iOS 17+.
 Nutrition source priority: user data first, then OpenFoodFacts, manual values, generic databases, backend estimates, LLM fallback.
 Production database: self-hosted PostgreSQL + pgvector in Docker on the VPS.
-Embeddings: self-hosted server-side bge-m3 with 1024-dimensional vectors.
+Embeddings: OpenRouter `openai/text-embedding-3-small` with 1536-dimensional vectors; the embedding model is not hosted by us.
 Trusted auto-commit: included in MVP, off by default, safe familiar templates only.
 ```
 

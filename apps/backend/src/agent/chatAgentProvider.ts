@@ -39,7 +39,8 @@ export interface ChatAgentProvider {
 export class RemoteChatAgentProvider implements ChatAgentProvider {
   constructor(
     private readonly apiKey: string,
-    private readonly baseUrl: string = "https://openrouter.ai/api/v1"
+    private readonly baseUrl: string = "https://openrouter.ai/api/v1",
+    private readonly timeoutMs = 10000
   ) {}
 
   async runWithTools(input: {
@@ -50,6 +51,7 @@ export class RemoteChatAgentProvider implements ChatAgentProvider {
   }): Promise<AgentToolDecision> {
     const res = await fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
+      signal: timeoutSignal(this.timeoutMs),
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
@@ -98,4 +100,8 @@ export class RemoteChatAgentProvider implements ChatAgentProvider {
       rawResponse: json,
     };
   }
+}
+
+function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
+  return (AbortSignal as typeof AbortSignal & { timeout?: (milliseconds: number) => AbortSignal }).timeout?.(timeoutMs);
 }

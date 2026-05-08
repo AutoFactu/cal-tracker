@@ -1,11 +1,33 @@
 import type { MealItem } from "@cal-tracker/contracts";
 import type { AppRepository, FoodItemRecord } from "../repository/types.js";
+import type { FoodResolutionResult, FoodResolver } from "./foodResolver.js";
 import { normalizeText } from "../utils/normalize.js";
 import { scaleFood } from "../utils/nutrition.js";
 
 export interface NutritionProvider {
   search(userId: string, query: string, barcode?: string): Promise<MealItem[]>;
   estimateMeal(userId: string, text: string): Promise<MealItem[]>;
+}
+
+export interface MealTextResolutionProvider extends NutritionProvider {
+  resolveMealText(userId: string, text: string): Promise<FoodResolutionResult>;
+}
+
+export class ResolverNutritionProvider implements MealTextResolutionProvider {
+  constructor(private readonly resolver: FoodResolver) {}
+
+  search(userId: string, query: string, barcode?: string): Promise<MealItem[]> {
+    return this.resolver.search(userId, query, barcode);
+  }
+
+  async estimateMeal(userId: string, text: string): Promise<MealItem[]> {
+    const result = await this.resolver.resolveMealText(userId, text);
+    return result.clarificationRequired ? [] : result.items;
+  }
+
+  resolveMealText(userId: string, text: string): Promise<FoodResolutionResult> {
+    return this.resolver.resolveMealText(userId, text);
+  }
 }
 
 export class NutritionProviderChain implements NutritionProvider {
@@ -46,16 +68,13 @@ export class LocalNutritionProvider implements NutritionProvider {
     const egg = findFood(foods, "egg");
     const oats = findFood(foods, "oats");
     const milk = findFood(foods, "milk");
+    const bread = findFood(foods, "bread");
+    const butter = findFood(foods, "butter");
+    const ham = findFood(foods, "ham");
 
-    if (normalized.includes("chicken")) {
-      const grams = extractGramsNear(normalized, "chicken") ?? 150;
-      items.push(scaleFood(chicken, grams));
-    }
-    if (normalized.includes("rice")) {
-      const grams = extractGramsNear(normalized, "rice") ?? 150;
-      items.push(scaleFood(rice, grams));
-    }
-    if (normalized.includes("egg")) {
+    addFoodIfMentioned(items, chicken, normalized, ["chicken breast", "chicken", "pechuga de pollo", "pechuga", "pollo", "carne"], 150);
+    addFoodIfMentioned(items, rice, normalized, ["cooked rice", "rice", "arroz"], 150);
+    if (includesAny(normalized, ["egg", "huevo"])) {
       const count = normalized.includes("two egg") || normalized.includes("2 egg") ? 2 : 1;
       items.push({
         ...scaleFood(egg, 50 * count, "egg"),
@@ -63,11 +82,18 @@ export class LocalNutritionProvider implements NutritionProvider {
         unit: "egg"
       });
     }
-    if (normalized.includes("oat")) {
-      items.push(scaleFood(oats, extractGramsNear(normalized, "oat") ?? 60));
-    }
-    if (normalized.includes("milk")) {
+    addFoodIfMentioned(items, oats, normalized, ["oats", "oat", "avena"], 60);
+    if (includesAny(normalized, ["milk", "leche"])) {
       items.push(scaleFood(milk, 250, "ml"));
+    }
+    if (includesAny(normalized, ["bread", "pan"])) {
+      items.push(scaleFood(bread, extractGramsNearAny(normalized, ["bread", "pan"]) ?? 100));
+    }
+    if (includesAny(normalized, ["butter", "mantequilla"])) {
+      items.push(scaleFood(butter, extractGramsNearAny(normalized, ["butter", "mantequilla"]) ?? 10));
+    }
+    if (includesAny(normalized, ["ham", "jamon"])) {
+      items.push(scaleFood(ham, extractGramsNearAny(normalized, ["ham", "jamon"]) ?? 50));
     }
 
     if (items.length === 0) {
@@ -173,9 +199,39 @@ function findFood(foods: FoodItemRecord[], normalizedName: string): FoodItemReco
 }
 
 function extractGramsNear(text: string, keyword: string): number | undefined {
-  const after = new RegExp(`${keyword}\\D{0,20}(\\d{2,4})\\s*(g|gram|grams)`).exec(text);
-  if (after) return Number(after[1]);
-  const before = new RegExp(`(\\d{2,4})\\s*(g|gram|grams)\\D{0,20}${keyword}`).exec(text);
+  const unit = "(?:gramos|gramo|grams|gram|gr|g)";
+  const escaped = escapeRegExp(keyword);
+  const before = new RegExp(`(\\d{1,4})\\s*${unit}\\b\\D{0,30}\\b${escaped}\\b`).exec(text);
   if (before) return Number(before[1]);
+  const after = new RegExp(`\\b${escaped}\\b\\D{0,30}(\\d{1,4})\\s*${unit}\\b`).exec(text);
+  if (after) return Number(after[1]);
   return undefined;
+}
+
+function includesAny(text: string, keywords: string[]): boolean {
+  return keywords.some((keyword) => new RegExp(`\\b${escapeRegExp(keyword)}\\b`).test(text));
+}
+
+function extractGramsNearAny(text: string, keywords: string[]): number | undefined {
+  for (const keyword of keywords) {
+    const grams = extractGramsNear(text, keyword);
+    if (grams) return grams;
+  }
+  return undefined;
+}
+
+function addFoodIfMentioned(
+  items: MealItem[],
+  food: FoodItemRecord,
+  normalizedText: string,
+  aliases: string[],
+  defaultGrams: number
+) {
+  if (!includesAny(normalizedText, aliases)) return;
+  const grams = extractGramsNearAny(normalizedText, aliases) ?? defaultGrams;
+  items.push(scaleFood(food, grams));
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

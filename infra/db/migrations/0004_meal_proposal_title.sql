@@ -1,0 +1,5 @@
+ALTER TABLE meal_proposals
+  ADD COLUMN IF NOT EXISTS title text NOT NULL DEFAULT 'Meal';
+
+ALTER TABLE meal_proposals
+  ALTER COLUMN title DROP DEFAULT;

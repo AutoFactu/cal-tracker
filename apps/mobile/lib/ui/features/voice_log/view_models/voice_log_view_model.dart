@@ -18,6 +18,7 @@ enum VoiceLogState {
   agentRunning,
   proposalReady,
   autoCommitted,
+  resultReady,
   clarificationRequired,
   error,
 }
@@ -34,8 +35,14 @@ class VoiceLogUiState {
     this.summary,
     this.remaining,
     this.meals,
+    this.items,
+    this.templates,
+    this.template,
+    this.matches,
+    this.deleted,
     this.confirmationActionId,
     this.confirmationInput,
+    this.candidateGroups,
   });
 
   final VoiceLogState phase;
@@ -48,8 +55,14 @@ class VoiceLogUiState {
   final DailySummary? summary;
   final NutritionSnapshot? remaining;
   final List<Meal>? meals;
+  final List<MealItem>? items;
+  final List<MealTemplate>? templates;
+  final MealTemplate? template;
+  final List<dynamic>? matches;
+  final bool? deleted;
   final String? confirmationActionId;
   final Object? confirmationInput;
+  final List<FoodCandidateGroup>? candidateGroups;
 
   bool get isLoading =>
       phase == VoiceLogState.transcribing ||
@@ -67,22 +80,58 @@ class VoiceLogUiState {
     Object? summary = _unchanged,
     Object? remaining = _unchanged,
     Object? meals = _unchanged,
+    Object? items = _unchanged,
+    Object? templates = _unchanged,
+    Object? template = _unchanged,
+    Object? matches = _unchanged,
+    Object? deleted = _unchanged,
     Object? confirmationActionId = _unchanged,
     Object? confirmationInput = _unchanged,
+    Object? candidateGroups = _unchanged,
   }) {
     return VoiceLogUiState(
       phase: phase ?? this.phase,
-      errorMessage: identical(errorMessage, _unchanged) ? this.errorMessage : errorMessage as String?,
-      message: identical(message, _unchanged) ? this.message : message as String?,
+      errorMessage: identical(errorMessage, _unchanged)
+          ? this.errorMessage
+          : errorMessage as String?,
+      message:
+          identical(message, _unchanged) ? this.message : message as String?,
       transcript: transcript ?? this.transcript,
       recordingDuration: recordingDuration ?? this.recordingDuration,
-      proposal: identical(proposal, _unchanged) ? this.proposal : proposal as MealProposal?,
-      autoCommittedMeal: identical(autoCommittedMeal, _unchanged) ? this.autoCommittedMeal : autoCommittedMeal as Meal?,
-      summary: identical(summary, _unchanged) ? this.summary : summary as DailySummary?,
-      remaining: identical(remaining, _unchanged) ? this.remaining : remaining as NutritionSnapshot?,
+      proposal: identical(proposal, _unchanged)
+          ? this.proposal
+          : proposal as MealProposal?,
+      autoCommittedMeal: identical(autoCommittedMeal, _unchanged)
+          ? this.autoCommittedMeal
+          : autoCommittedMeal as Meal?,
+      summary: identical(summary, _unchanged)
+          ? this.summary
+          : summary as DailySummary?,
+      remaining: identical(remaining, _unchanged)
+          ? this.remaining
+          : remaining as NutritionSnapshot?,
       meals: identical(meals, _unchanged) ? this.meals : meals as List<Meal>?,
-      confirmationActionId: identical(confirmationActionId, _unchanged) ? this.confirmationActionId : confirmationActionId as String?,
-      confirmationInput: identical(confirmationInput, _unchanged) ? this.confirmationInput : confirmationInput,
+      items:
+          identical(items, _unchanged) ? this.items : items as List<MealItem>?,
+      templates: identical(templates, _unchanged)
+          ? this.templates
+          : templates as List<MealTemplate>?,
+      template: identical(template, _unchanged)
+          ? this.template
+          : template as MealTemplate?,
+      matches: identical(matches, _unchanged)
+          ? this.matches
+          : matches as List<dynamic>?,
+      deleted: identical(deleted, _unchanged) ? this.deleted : deleted as bool?,
+      confirmationActionId: identical(confirmationActionId, _unchanged)
+          ? this.confirmationActionId
+          : confirmationActionId as String?,
+      confirmationInput: identical(confirmationInput, _unchanged)
+          ? this.confirmationInput
+          : confirmationInput,
+      candidateGroups: identical(candidateGroups, _unchanged)
+          ? this.candidateGroups
+          : candidateGroups as List<FoodCandidateGroup>?,
     );
   }
 }
@@ -124,6 +173,14 @@ class VoiceLogViewModel extends ChangeNotifier {
 
   List<Meal>? get meals => _uiState.meals;
 
+  List<MealItem>? get items => _uiState.items;
+
+  List<MealTemplate>? get templates => _uiState.templates;
+
+  MealTemplate? get template => _uiState.template;
+
+  List<FoodCandidateGroup>? get candidateGroups => _uiState.candidateGroups;
+
   bool get isLoading => _uiState.isLoading;
 
   Future<void> toggleRecording() async {
@@ -141,6 +198,7 @@ class VoiceLogViewModel extends ChangeNotifier {
       state == VoiceLogState.error ||
       state == VoiceLogState.proposalReady ||
       state == VoiceLogState.autoCommitted ||
+      state == VoiceLogState.resultReady ||
       state == VoiceLogState.clarificationRequired;
 
   Future<void> _startRecording() async {
@@ -153,14 +211,22 @@ class VoiceLogViewModel extends ChangeNotifier {
       summary: null,
       remaining: null,
       meals: null,
+      items: null,
+      templates: null,
+      template: null,
+      matches: null,
+      deleted: null,
       confirmationActionId: null,
       confirmationInput: null,
+      candidateGroups: null,
     ));
     try {
       await _audioRecorderService.start();
       _setUiState(_uiState.copyWith(recordingDuration: Duration.zero));
       _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-        _setUiState(_uiState.copyWith(recordingDuration: _uiState.recordingDuration + const Duration(seconds: 1)));
+        _setUiState(_uiState.copyWith(
+            recordingDuration:
+                _uiState.recordingDuration + const Duration(seconds: 1)));
       });
       _setState(VoiceLogState.recording);
     } on RecorderException catch (e) {
@@ -195,7 +261,8 @@ class VoiceLogViewModel extends ChangeNotifier {
     _setState(VoiceLogState.transcribing);
     try {
       final transcript = await _nutritionRepository.transcribeAudio(File(path));
-      _setUiState(_uiState.copyWith(transcript: transcript, errorMessage: null));
+      _setUiState(
+          _uiState.copyWith(transcript: transcript, errorMessage: null));
       _setState(VoiceLogState.transcriptReady);
     } catch (e) {
       _setError('Transcription failed: ${e.toString()}');
@@ -225,8 +292,14 @@ class VoiceLogViewModel extends ChangeNotifier {
       summary: null,
       remaining: null,
       meals: null,
+      items: null,
+      templates: null,
+      template: null,
+      matches: null,
+      deleted: null,
       confirmationActionId: null,
       confirmationInput: null,
+      candidateGroups: null,
     ));
     try {
       final result = await _nutritionRepository.logText(text);
@@ -245,7 +318,14 @@ class VoiceLogViewModel extends ChangeNotifier {
         case 'summary':
         case 'remaining_targets':
         case 'history':
-          nextState = VoiceLogState.clarificationRequired;
+        case 'food_memory':
+        case 'nutrition_search':
+        case 'templates':
+        case 'template_saved':
+        case 'template_deleted':
+        case 'meal_deleted':
+        case 'meal_corrected':
+          nextState = VoiceLogState.resultReady;
           break;
         default:
           nextState = VoiceLogState.clarificationRequired;
@@ -257,10 +337,16 @@ class VoiceLogViewModel extends ChangeNotifier {
         summary: result.summary,
         remaining: result.remaining,
         meals: result.meals,
+        items: result.items,
+        templates: result.templates,
+        template: result.template,
+        matches: result.matches,
+        deleted: result.deleted,
         message: result.message,
         errorMessage: null,
         confirmationActionId: result.actionId,
         confirmationInput: result.input,
+        candidateGroups: result.candidateGroups,
       ));
     } catch (error) {
       _setError('Agent failed: ${error.toString()}');
@@ -285,12 +371,31 @@ class VoiceLogViewModel extends ChangeNotifier {
     }
   }
 
+  Future<void> updateProposalItems(List<MealItem> items) async {
+    final proposal = _uiState.proposal;
+    if (proposal == null) return;
+    _setState(VoiceLogState.agentRunning);
+    try {
+      final updated =
+          await _nutritionRepository.updateProposalItems(proposal.id, items);
+      _setUiState(_uiState.copyWith(
+        phase: VoiceLogState.proposalReady,
+        proposal: updated,
+        message: 'Proposal updated.',
+        errorMessage: null,
+      ));
+    } catch (error) {
+      _setError('Proposal edit failed: ${error.toString()}');
+    }
+  }
+
   void clearResult() {
     _setUiState(const VoiceLogUiState());
   }
 
   void retry() {
-    _setUiState(_uiState.copyWith(phase: VoiceLogState.idle, errorMessage: null));
+    _setUiState(
+        _uiState.copyWith(phase: VoiceLogState.idle, errorMessage: null));
   }
 
   void _setState(VoiceLogState value) {
@@ -298,7 +403,8 @@ class VoiceLogViewModel extends ChangeNotifier {
   }
 
   void _setError(String message) {
-    _setUiState(_uiState.copyWith(phase: VoiceLogState.error, errorMessage: message));
+    _setUiState(
+        _uiState.copyWith(phase: VoiceLogState.error, errorMessage: message));
   }
 
   void _setUiState(VoiceLogUiState value) {

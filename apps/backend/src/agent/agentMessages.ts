@@ -9,7 +9,8 @@ export function buildSystemMessage(context: ActionContext): AgentMessage {
 
 Rules:
 - Select exactly one tool to fulfill the user's request.
-- For meal logging, use propose_meal_log.
+- For meal logging, use propose_meal_log. This includes Spanish and English requests such as "quiero añadir un desayuno", "he comido", "I ate", "I had", "log", "add", "registrar", or meals with quantities.
+- Do not use query_food_memory or search_nutrition_database as the final action for a complete meal logging request. Those tools only answer lookup/search requests.
 - For questions about calories left, use get_remaining_targets.
 - For history lookup, use get_meal_history.
 - For deletion, use delete_meal (the user will be asked to confirm).

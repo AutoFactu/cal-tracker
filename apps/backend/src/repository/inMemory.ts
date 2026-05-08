@@ -37,7 +37,10 @@ export class InMemoryRepository implements AppRepository {
       { id: newId(), name: "Chicken breast", normalizedName: "chicken breast", source: "generic_usda", servingGrams: 100, calories: 165, proteinGrams: 31, carbsGrams: 0, fatGrams: 3.6 },
       { id: newId(), name: "Cooked rice", normalizedName: "rice", source: "generic_usda", servingGrams: 100, calories: 130, proteinGrams: 2.7, carbsGrams: 28, fatGrams: 0.3 },
       { id: newId(), name: "Oats", normalizedName: "oats", source: "generic_usda", servingGrams: 100, calories: 389, proteinGrams: 16.9, carbsGrams: 66.3, fatGrams: 6.9 },
-      { id: newId(), name: "Milk", normalizedName: "milk", source: "generic_usda", servingGrams: 250, calories: 122, proteinGrams: 8.1, carbsGrams: 12, fatGrams: 4.8 }
+      { id: newId(), name: "Milk", normalizedName: "milk", source: "generic_usda", servingGrams: 250, calories: 122, proteinGrams: 8.1, carbsGrams: 12, fatGrams: 4.8 },
+      { id: newId(), name: "Bread", normalizedName: "bread", source: "generic_usda", servingGrams: 100, calories: 265, proteinGrams: 9, carbsGrams: 49, fatGrams: 3.2 },
+      { id: newId(), name: "Butter", normalizedName: "butter", source: "generic_usda", servingGrams: 100, calories: 717, proteinGrams: 0.9, carbsGrams: 0.1, fatGrams: 81.1 },
+      { id: newId(), name: "Ham", normalizedName: "ham", source: "generic_usda", servingGrams: 100, calories: 145, proteinGrams: 21, carbsGrams: 1.5, fatGrams: 5.5 }
     ];
     for (const food of foods) this.foods.set(food.id, food);
   }
@@ -129,8 +132,30 @@ export class InMemoryRepository implements AppRepository {
     const normalized = normalizeText(query);
     return [...this.foods.values()].filter((food) => {
       if (barcode && food.barcode === barcode) return true;
-      return food.normalizedName.includes(normalized) || normalized.includes(food.normalizedName);
+      const canonical = food.canonicalName ? normalizeText(food.canonicalName) : food.normalizedName;
+      return food.normalizedName.includes(normalized) ||
+        normalized.includes(food.normalizedName) ||
+        canonical.includes(normalized) ||
+        normalized.includes(canonical);
     });
+  }
+
+  async upsertFoodItem(input: Omit<FoodItemRecord, "id">): Promise<FoodItemRecord> {
+    const normalized = normalizeText(input.normalizedName || input.name);
+    const existing = [...this.foods.values()].find((food) => {
+      if (input.externalSource && input.externalId) {
+        return food.externalSource === input.externalSource && food.externalId === input.externalId;
+      }
+      return food.userId === input.userId && food.normalizedName === normalized && food.source === input.source;
+    });
+    if (existing) {
+      const updated = { ...existing, ...input, normalizedName: normalized };
+      this.foods.set(existing.id, updated);
+      return updated;
+    }
+    const food = { ...input, id: newId(), normalizedName: normalized };
+    this.foods.set(food.id, food);
+    return food;
   }
 
   async getNutritionTarget(userId: string): Promise<NutritionSnapshot> {

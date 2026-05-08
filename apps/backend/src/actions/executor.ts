@@ -19,7 +19,7 @@ import {
   type MealProposal
 } from "@cal-tracker/contracts";
 import type { AppConfig } from "../config/env.js";
-import type { NutritionProvider } from "../nutrition/provider.js";
+import type { MealTextResolutionProvider, NutritionProvider } from "../nutrition/provider.js";
 import type { AppRepository } from "../repository/types.js";
 import type { MemoryRetrievalService } from "../memory/retrieval.js";
 import { newId } from "../utils/ids.js";
@@ -178,14 +178,25 @@ export class ActionExecutor {
     }
   }
 
-  private async proposeMeal(input: unknown, context: ActionContext): Promise<{ proposal: MealProposal; autoCommittedMeal: Meal | null }> {
+  private async proposeMeal(input: unknown, context: ActionContext): Promise<Record<string, unknown>> {
     const parsed = proposeMealLogInputSchema.parse(input);
     const normalized = normalizeText(parsed.text);
     const memories = (await this.queryMemory(context.actorUserId, normalized)).matches;
     const memory = memories[0];
     const template = memory?.template ?? null;
     const fromTemplate = Boolean(template && memory && memory.confidence >= 0.75);
-    const items: MealItem[] = template ? template.items : await this.nutritionProvider.estimateMeal(context.actorUserId, parsed.text);
+    const resolution = template ? null : await this.resolveMealText(context.actorUserId, parsed.text);
+    if (resolution?.clarificationRequired) {
+      return {
+        clarificationRequired: true,
+        unresolvedMentions: resolution.unresolvedMentions,
+        options: resolution.candidateGroups,
+        message: resolution.unresolvedMentions.length > 0
+          ? "I could not confidently match every ingredient. Please choose a food match or rephrase the meal."
+          : "I could not identify the ingredients in that meal. Please add quantities and food names."
+      };
+    }
+    const items: MealItem[] = template ? template.items : resolution?.items ?? await this.nutritionProvider.estimateMeal(context.actorUserId, parsed.text);
     const nutrition = sumNutrition(items);
     const trustedAutoCommitEligible = Boolean(
       template &&
@@ -223,6 +234,18 @@ export class ActionExecutor {
     }
 
     return { proposal, autoCommittedMeal };
+  }
+
+  private async resolveMealText(userId: string, text: string) {
+    if (hasMealTextResolution(this.nutritionProvider)) {
+      return this.nutritionProvider.resolveMealText(userId, text);
+    }
+    return {
+      items: await this.nutritionProvider.estimateMeal(userId, text),
+      unresolvedMentions: [],
+      candidateGroups: [],
+      clarificationRequired: false
+    };
   }
 
   private async correctMeal(input: unknown, context: ActionContext) {
@@ -267,6 +290,10 @@ export class ActionExecutor {
   }
 }
 
+function hasMealTextResolution(provider: NutritionProvider): provider is MealTextResolutionProvider {
+  return typeof (provider as Partial<MealTextResolutionProvider>).resolveMealText === "function";
+}
+
 function applyCorrection(items: MealItem[], correctionText: string): MealItem[] {
   const normalized = normalizeText(correctionText);
   const chickenGrams = /chicken\D{0,20}(\d{2,4})\s*(g|gram|grams)|(\d{2,4})\s*(g|gram|grams)\D{0,20}chicken/.exec(normalized);
@@ -289,6 +316,7 @@ function applyCorrection(items: MealItem[], correctionText: string): MealItem[] 
 function inferTitle(text: string, items: MealItem[]): string {
   if (items.length === 1) return items[0]!.name;
   if (normalizeText(text).includes("chicken") && normalizeText(text).includes("rice")) return "Chicken and rice";
+  if (items.length === 2) return `${items[0]!.name} and ${items[1]!.name}`;
   return "Meal";
 }
 

@@ -4,118 +4,102 @@ This file contains environment-specific instructions for coding agents working o
 
 ---
 
+## Flutter E2E Testing and Visual Validation
+
+For Flutter mobile features, use **Patrol** as the main E2E testing framework. Whenever a new feature, screen, permission flow, navigation flow, or critical user interaction is implemented, add or update Patrol tests to verify the behavior on Android/iOS where relevant. Patrol should be used for real end-to-end flows, especially those involving native dialogs, permissions, authentication, recording/audio flows, backend interactions, and multi-screen journeys. Use stable finders such as keys, semantic labels, and visible text; avoid fragile selectors.
+
+Use **Marionette MCP** as a development and visual-validation tool for the coding agent. After implementing UI changes, the agent should use Marionette to interact with the running Flutter app, take screenshots, inspect the visible UI, tap/scroll/type where needed, and verify that the implemented changes are visually correct. Marionette is not a replacement for Patrol tests; it is used to give the agent “eyes and hands” during development so it can detect layout issues, bad spacing, overflow, broken visual states, or screens that do not update correctly after changes. The expected workflow is: implement the feature, run/analyze Flutter checks, use Marionette MCP to visually inspect and interact with the app, fix any visual or interaction issues, then add/update Patrol E2E tests for the final behavior.
+
+
+---
+
 ## Android Emulator Initialization
 
-> **Critical:** The Android emulator must be started with the process fully detached from the shell. Running it in the foreground or with a simple `&` will cause the emulator to be killed when the shell command times out.
+Required local assumptions:
 
-### Prerequisites
+- Android SDK: `/home/javier/Android/Sdk`
+- AVD: `cal_tracker_api36`
+- Device ID after boot: `emulator-5554`
+- KVM must be available at `/dev/kvm`
 
-- Android SDK installed at `/home/javier/Android/Sdk`
-- Emulator binary at `/home/javier/Android/Sdk/emulator/emulator`
-- ADB at `/home/javier/Android/Sdk/platform-tools/adb`
-- AVD configured: `cal_tracker_api36` (API 36, x86_64)
-- KVM acceleration available (`/dev/kvm` exists)
-
-### Step-by-Step Initialization
-
-#### 1. Export required PATH
+Use this exact startup sequence for voice-capable testing. Start the emulator as a transient user systemd service so it is not tied to the coding agent command process.
 
 ```bash
 export PATH="/home/javier/Android/Sdk/emulator:/home/javier/Android/Sdk/platform-tools:$PATH"
-```
 
-#### 2. Kill any existing emulator process
-
-Always clean up stale processes first:
-
-```bash
-ps aux | grep qemu | grep -v grep | awk '{print $2}' | xargs kill -9 2>/dev/null
+# Remove stale emulator processes only.
+systemctl --user stop cal-tracker-emulator.service 2>/dev/null || true
+ps aux | awk '/qemu-system/ && !/awk/ {print $2}' | xargs -r kill -9
 sleep 2
+
+systemd-run --user --unit=cal-tracker-emulator --collect \
+  --working-directory=/home/javier/dev/cal-tracker \
+  -E PATH=/home/javier/Android/Sdk/emulator:/home/javier/Android/Sdk/platform-tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  -E DISPLAY=:1 \
+  -E XAUTHORITY=/run/user/1000/gdm/Xauthority \
+  -E XDG_RUNTIME_DIR=/run/user/1000 \
+  -E DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+  -p StandardOutput=append:/tmp/emulator-systemd.log \
+  -p StandardError=append:/tmp/emulator-systemd.log \
+  /home/javier/Android/Sdk/emulator/emulator -avd cal_tracker_api36 -no-snapshot -no-snapshot-save -allow-host-audio -no-boot-anim -gpu software -accel on
+
+adb wait-for-device
+adb -s emulator-5554 shell 'while [[ $(getprop sys.boot_completed) != 1 ]]; do sleep 1; done; echo Boot completed'
+adb -s emulator-5554 shell 'pm list packages -f | grep android | wc -l'
+adb -s emulator-5554 shell echo alive
 ```
 
-#### 3. Start the emulator fully detached
+Important constraints:
 
-Use `nohup` to detach from the shell, redirect all output to a log file, and run in background:
+- Always cold boot with `-no-snapshot -no-snapshot-save`; corrupted snapshots have caused missing Android services.
+- Do not use `-no-audio` when testing Whisper/STT or microphone flows. `-no-audio` disables emulator audio support.
+- Use `-allow-host-audio` for voice testing. Without it, Android Emulator can zero out host microphone input before it reaches the virtual device.
+- Use `-gpu software` on this emulator version. `-gpu swiftshader_indirect` has caused host `RenderThread` segfaults when opening the Stats UI on Android Emulator 36.5.11.
+- Keep emulator logs in `/tmp/emulator-systemd.log` and inspect the service with `systemctl --user status cal-tracker-emulator.service`.
+- Wait for `sys.boot_completed == 1` before `adb install`, `flutter run`, or package-manager checks.
+- Do not use broad kill patterns such as `pkill -f bun`; they may kill the backend.
+
+### Emulator Microphone Setup
+
+For Whisper/STT manual testing, the host microphone must be available to the emulator:
+
+1. Start the emulator with the voice-capable command above.
+2. Confirm the Linux desktop session allows microphone access for the Android Emulator or its `qemu-system-*` process.
+3. After installing the app, grant microphone permission if the runtime prompt is not convenient:
 
 ```bash
-nohup emulator -avd cal_tracker_api36 \
-  -no-snapshot \
-  -no-snapshot-save \
-  -no-audio \
-  -no-boot-anim \
-  -gpu swiftshader_indirect \
-  -accel on \
-  > /tmp/emulator.log 2>&1 &
+adb -s emulator-5554 shell pm grant com.example.cal_tracker_mobile android.permission.RECORD_AUDIO
 ```
 
-**Why these flags:**
-- `-no-snapshot` / `-no-snapshot-save`: Forces a **cold boot** every time. This is the most reliable method — snapshot restore has been observed to corrupt the Android system state, leading to "Can't find service: package" errors.
-- `-no-audio`: Prevents audio device conflicts on the host.
-- `-no-boot-anim`: Speeds up boot by skipping the animation.
-- `-gpu swiftshader_indirect`: Software GPU rendering. The host GPU (NVIDIA RTX 2060) works with `-gpu host` but `swiftshader_indirect` is more stable for this environment.
-- `-accel on`: Enables CPU hardware acceleration (KVM). Critical for acceptable performance.
+4. Open the app, tap the microphone control, speak into the host machine microphone, stop recording, and submit the transcript flow.
 
-**Why `nohup`:**
-The emulator process must survive shell disconnects and command timeouts. A simple `&` is not sufficient — the process may still receive SIGHUP when the shell session ends. `nohup` ensures the emulator continues running.
-
-#### 4. Wait for full boot
-
-The emulator appears in `adb devices` as `emulator-5554` long before Android services are ready. Wait for `sys.boot_completed`:
+If the emulator boots but records silence, cold boot again with an explicit Linux audio backend:
 
 ```bash
-sleep 45
-adb devices
-adb -s emulator-5554 shell "while [[ \$(getprop sys.boot_completed) != 1 ]]; do sleep 1; done; echo 'Boot completed'"
+systemd-run --user --unit=cal-tracker-emulator --collect \
+  --working-directory=/home/javier/dev/cal-tracker \
+  -E PATH=/home/javier/Android/Sdk/emulator:/home/javier/Android/Sdk/platform-tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  -E DISPLAY=:1 \
+  -E XAUTHORITY=/run/user/1000/gdm/Xauthority \
+  -E XDG_RUNTIME_DIR=/run/user/1000 \
+  -E DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+  -p StandardOutput=append:/tmp/emulator-systemd.log \
+  -p StandardError=append:/tmp/emulator-systemd.log \
+  /home/javier/Android/Sdk/emulator/emulator -avd cal_tracker_api36 -no-snapshot -no-snapshot-save -allow-host-audio -audio alsa -no-boot-anim -gpu software -accel on
 ```
 
-This typically takes 45–60 seconds total.
-
-#### 5. Verify health
-
-```bash
-# Check package manager is responsive
-adb -s emulator-5554 shell "pm list packages -f | grep android | wc -l"
-# Should return ~240+ packages
-
-# Test shell responsiveness
-adb -s emulator-5554 shell echo "alive"
-```
-
-#### 6. What NOT to do
-
-- ❌ Do NOT run `emulator ... &` without `nohup` — the process will be killed on shell timeout.
-- ❌ Do NOT use snapshot boot (`-no-snapshot-load` alone is not enough) — corrupted snapshots cause "Can't find service: package" errors.
-- ❌ Do NOT try to `adb install` or `flutter run` immediately after `adb devices` shows the device — wait for `sys.boot_completed == 1`.
-- ❌ Do NOT kill the emulator with broad patterns like `pkill -9 -f "bun"` — this will kill unrelated processes including the backend.
+Use `-no-audio` only for non-voice tests where microphone input is irrelevant.
 
 ### Installing and Running the Flutter App
-
-#### Build APK
 
 ```bash
 cd /home/javier/dev/cal-tracker/apps/mobile
 flutter build apk --debug --dart-define=API_BASE_URL=http://10.0.2.2:3000
-```
-
-#### Install APK
-
-```bash
 adb -s emulator-5554 install -r build/app/outputs/flutter-apk/app-debug.apk
-```
-
-#### Launch App
-
-```bash
 adb -s emulator-5554 shell am start -n com.example.cal_tracker_mobile/.MainActivity
 ```
 
-#### Alternative: Use `flutter run`
-
-```bash
-flutter run --debug --dart-define=API_BASE_URL=http://10.0.2.2:3000 -d emulator-5554
-```
-
-Note: `flutter run` handles build, install, and attach automatically, but will disconnect if the process is backgrounded.
+Use `flutter run --debug --dart-define=API_BASE_URL=http://10.0.2.2:3000 -d emulator-5554` only when you need a live debug session.
 
 ### Taking Screenshots
 
@@ -126,21 +110,10 @@ adb -s emulator-5554 pull /data/local/tmp/screen.png /tmp/emulator_screen.png
 
 ### Troubleshooting
 
-**Problem: Emulator shows `offline` in `adb devices`**
-- The emulator is still booting. Wait 30–45 more seconds and retry.
-
-**Problem: `adb install` fails with "Can't find service: package"**
-- Android system services are not fully initialized. Wait for `sys.boot_completed == 1`.
-- If this persists, the snapshot may be corrupted. Kill the emulator and cold boot with `-no-snapshot`.
-
-**Problem: App installs but UI is sluggish**
-- Normal for software GPU rendering. The emulator is functional but frame drops are expected.
-
-**Problem: `adb` command not found**
-- PATH is not set. Run:
-  ```bash
-  export PATH="/home/javier/Android/Sdk/emulator:/home/javier/Android/Sdk/platform-tools:$PATH"
-  ```
+- `offline` in `adb devices`: still booting; wait and retry.
+- `Can't find service: package`: Android services are not ready; wait for `sys.boot_completed` or cold boot again.
+- Sluggish UI is expected with software GPU rendering.
+- `adb` not found: export the Android SDK `PATH` shown above.
 
 ---
 
@@ -203,44 +176,24 @@ docker ps | grep postgres
 
 ## Full Development Environment Startup
 
-Run these in separate terminals (or background them with `nohup`):
+Run these services in separate terminals or detached sessions. For emulator details, use the Android section above.
 
 ```bash
-# Terminal 1: Database
+# Database
 cd /home/javier/dev/cal-tracker && docker compose up -d postgres
 
-# Terminal 2: Backend
+# Backend
 cd /home/javier/dev/cal-tracker/apps/backend
 unset STT_API_KEY OPENROUTER_API_KEY
 bun --env-file=.env src/index.ts
 
-# Terminal 3: Emulator
-export PATH="/home/javier/Android/Sdk/emulator:/home/javier/Android/Sdk/platform-tools:$PATH"
-ps aux | grep qemu | grep -v grep | awk '{print $2}' | xargs kill -9 2>/dev/null; sleep 2
-nohup emulator -avd cal_tracker_api36 -no-snapshot -no-snapshot-save -no-audio -no-boot-anim -gpu swiftshader_indirect -accel on > /tmp/emulator.log 2>&1 &
-sleep 50
-adb devices
+# Emulator
+# Follow "Android Emulator Initialization".
 
-# Terminal 4: Flutter (after emulator boots)
+# Flutter app
 cd /home/javier/dev/cal-tracker/apps/mobile
 flutter run --debug --dart-define=API_BASE_URL=http://10.0.2.2:3000 -d emulator-5554
 ```
-
----
-
-## Key Project Paths
-
-| Component | Path |
-|-----------|------|
-| Project root | `/home/javier/dev/cal-tracker` |
-| Backend | `/home/javier/dev/cal-tracker/apps/backend` |
-| Mobile | `/home/javier/dev/cal-tracker/apps/mobile` |
-| Backend env | `/home/javier/dev/cal-tracker/apps/backend/.env` |
-| Android SDK | `/home/javier/Android/Sdk` |
-| AVD | `/home/javier/.android/avd/cal_tracker_api36.avd` |
-| Emulator log | `/tmp/emulator.log` |
-| Backend log | `/tmp/backend.log` |
-| Docker compose | `/home/javier/dev/cal-tracker/docker-compose.yml` |
 
 ---
 
@@ -260,6 +213,48 @@ cd /home/javier/dev/cal-tracker/apps/mobile
 flutter test
 ```
 
+### Patrol E2E Tests
+
+Patrol tests and `apps/mobile/lib/main_test.dart` must use `CalTrackerBootstrap(apiConfig: ApiConfig(baseUrl: 'http://10.0.2.2:3000'))` directly. Do not depend on a Patrol `--dart-define` for the backend URL; Patrol also injects its own app/test server ports, and those must never become the API base URL. If a Patrol auth failure shows a URL such as `http://10.0.2.2:<random-port>/v1/auth/...`, the test entrypoint is using the wrong API config.
+
+Before running Patrol, verify the backend is reachable from the host on port 3000 and restart it if needed:
+
+```bash
+curl -s http://localhost:3000/v1/health
+```
+
+Expected response:
+
+```json
+{"ok":true,"service":"cal-tracker-backend"}
+```
+
+If the backend is not healthy, start it using the Backend Startup section above. Then run Patrol:
+
+```bash
+cd /home/javier/dev/cal-tracker/apps/mobile
+export PATH="/home/javier/Android/Sdk/emulator:/home/javier/Android/Sdk/platform-tools:$HOME/.pub-cache/bin:$PATH"
+export ANDROID_HOME=/home/javier/Android/Sdk ANDROID_SDK_ROOT=/home/javier/Android/Sdk PATROL_ANALYTICS_ENABLED=false
+
+# Stop stale Patrol/Gradle test runs only. Do not kill the emulator or backend.
+ps aux | awk '/patrol test|connectedDebugAndroidTest|test_bundle.dart/ && !/awk/ {print $2}' | xargs -r kill
+sleep 2
+
+patrol test --target patrol_test/patrol_smoke_test.dart --device emulator-5554 --no-label
+```
+
+If Patrol reports `ClassNotFoundException: androidx.test.services.shellexecutor.ShellMain`, `DELETE_FAILED_INTERNAL_ERROR`, or `Total: 0`, the emulator package manager/test-services state is corrupted. Cold boot the emulator using the Android Emulator Initialization section, then rerun Patrol. Do not keep retrying on the corrupted emulator instance.
+
+### Marionette MCP
+
+```bash
+cd /home/javier/dev/cal-tracker/apps/mobile
+export PATH="$HOME/.pub-cache/bin:$PATH"
+marionette_mcp
+```
+
+Run the Flutter app in debug mode first and use the VM Service `ws://.../ws` URI printed by `flutter run` with Marionette's `connect` tool.
+
 ### Groq STT Isolation Test
 
 ```bash
@@ -267,22 +262,5 @@ cd /home/javier/dev/cal-tracker/apps/backend
 bun --env-file=.env scripts/test-groq-whisper.ts
 ```
 
-### API Quick Checks
-
-```bash
-# Health
-curl -s http://localhost:3000/v1/health
-
-# Login
-TOKEN=$(curl -s -X POST http://localhost:3000/v1/auth/login -H 'Content-Type: application/json' -d '{"email":"demo@example.com","password":"password123"}' | grep -o '"accessToken":"[^"]*' | cut -d'"' -f4)
-echo $TOKEN
-
-# STT (requires valid audio file)
-curl -s -X POST http://localhost:3000/v1/stt/transcriptions \
-  -H "Authorization: Bearer $TOKEN" \
-  -F "audio=@/tmp/test_audio.m4a;type=audio/m4a"
-```
-
----
 
 *Last updated: 2026-05-08*

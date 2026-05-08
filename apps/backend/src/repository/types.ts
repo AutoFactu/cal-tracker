@@ -29,9 +29,15 @@ export type FoodItemRecord = {
   userId?: string;
   name: string;
   normalizedName: string;
+  canonicalName?: string;
   brand?: string;
   barcode?: string;
   source: string;
+  externalSource?: string;
+  externalId?: string;
+  sourceUrl?: string;
+  license?: string;
+  fetchedAt?: string;
   servingGrams: number;
   calories: number;
   proteinGrams: number;
@@ -88,6 +94,7 @@ export interface AppRepository {
 
   listFoods(userId: string): Promise<FoodItemRecord[]>;
   searchFoods(userId: string, query: string, barcode?: string): Promise<FoodItemRecord[]>;
+  upsertFoodItem(input: Omit<FoodItemRecord, "id">): Promise<FoodItemRecord>;
 
   getNutritionTarget(userId: string): Promise<NutritionSnapshot>;
   listMeals(userId: string, limit?: number): Promise<Meal[]>;

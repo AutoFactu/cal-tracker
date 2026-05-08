@@ -2,7 +2,8 @@ import { ActionExecutor } from "../actions/executor.js";
 import { AuthService } from "../auth/service.js";
 import { loadConfig } from "../config/env.js";
 import { createApp } from "../http/app.js";
-import { LocalNutritionProvider, NutritionProviderChain, UsdaNutritionProvider } from "../nutrition/provider.js";
+import { DeterministicFoodTextExtractor, FoodResolver, LocalFoodDataProvider } from "../nutrition/foodResolver.js";
+import { ResolverNutritionProvider } from "../nutrition/provider.js";
 import { InMemoryRepository } from "../repository/inMemory.js";
 import type { SpeechToTextProvider, TranscriptionResult } from "../stt/speechToTextProvider.js";
 import type { ChatAgentProvider, AgentToolDecision } from "../agent/chatAgentProvider.js";
@@ -24,10 +25,13 @@ export function buildTestApp(options?: { agentProvider?: ChatAgentProvider }) {
   const config = loadConfig({ NODE_ENV: "test" } as NodeJS.ProcessEnv);
   const repository = InMemoryRepository.seeded();
   const authService = new AuthService(config, repository);
-  const nutritionProvider = new NutritionProviderChain([
-    new LocalNutritionProvider(repository),
-    new UsdaNutritionProvider(),
-  ]);
+  const foodResolver = new FoodResolver(
+    new DeterministicFoodTextExtractor(),
+    [new LocalFoodDataProvider(repository)],
+    repository,
+    config.FOOD_RESOLVER_MIN_CONFIDENCE
+  );
+  const nutritionProvider = new ResolverNutritionProvider(foodResolver);
   const actionExecutor = new ActionExecutor(config, repository, nutritionProvider);
   const sttProvider = new FakeSpeechToTextProvider();
   const defaultAgentProvider = new FakeChatAgentProvider({

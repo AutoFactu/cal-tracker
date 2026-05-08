@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   dailySummarySchema,
+  foodCandidateSchema,
+  mealItemSchema,
   mealProposalSchema,
   mealSchema,
   mealTemplateSchema,
@@ -37,9 +39,15 @@ export const agentRunResponseSchema = z.object({
   kind: z.enum([
     "proposal",
     "meal_committed",
+    "meal_corrected",
     "summary",
     "remaining_targets",
     "history",
+    "food_memory",
+    "nutrition_search",
+    "templates",
+    "template_saved",
+    "template_deleted",
     "confirmation_required",
     "meal_deleted",
     "clarification_required"
@@ -50,9 +58,14 @@ export const agentRunResponseSchema = z.object({
   summary: dailySummarySchema.optional(),
   remaining: nutritionSnapshotSchema.optional(),
   meals: z.array(mealSchema).optional(),
+  items: z.array(mealItemSchema).optional(),
+  templates: z.array(mealTemplateSchema).optional(),
+  template: mealTemplateSchema.optional(),
+  matches: z.array(z.unknown()).optional(),
+  deleted: z.boolean().optional(),
   actionId: z.string().optional(),
   input: z.unknown().optional(),
-  options: z.array(z.unknown()).optional()
+  options: z.array(z.union([foodCandidateSchema, z.unknown()])).optional()
 });
 
 export const transcriptionResponseSchema = z.object({

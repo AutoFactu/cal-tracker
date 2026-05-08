@@ -17,36 +17,53 @@ import 'router.dart';
 import 'theme.dart';
 
 class CalTrackerBootstrap extends StatelessWidget {
-  const CalTrackerBootstrap({super.key});
+  const CalTrackerBootstrap({
+    super.key,
+    this.apiConfig = const ApiConfig.fromEnvironment(),
+  });
+
+  final ApiConfig apiConfig;
 
   @override
   Widget build(BuildContext context) {
     const tokenStorage = SecureTokenStorage();
     final apiClient = CalTrackerApiClient(
-      config: const ApiConfig.fromEnvironment(),
+      config: apiConfig,
       tokenStorage: tokenStorage,
     );
-    final authRepository = AuthRepository(apiClient: apiClient, tokenStorage: tokenStorage);
+    final authRepository =
+        AuthRepository(apiClient: apiClient, tokenStorage: tokenStorage);
     final nutritionRepository = NutritionRepository(apiClient: apiClient);
 
     return MultiProvider(
       providers: [
         Provider<AuthRepository>.value(value: authRepository),
         Provider<NutritionRepository>.value(value: nutritionRepository),
-        ChangeNotifierProvider(create: (_) => AuthViewModel(authRepository: authRepository)..restoreSession()),
-        ChangeNotifierProvider(create: (_) => VoiceLogViewModel(
-          nutritionRepository: nutritionRepository,
-          audioRecorderService: AudioRecorderService(),
-        )),
-        ChangeNotifierProvider(create: (_) => DashboardViewModel(nutritionRepository: nutritionRepository)),
-        ChangeNotifierProvider(create: (_) => MealHistoryViewModel(nutritionRepository: nutritionRepository)),
-        ChangeNotifierProvider(create: (_) => MealTemplatesViewModel(nutritionRepository: nutritionRepository)),
-        ChangeNotifierProvider(create: (_) => SettingsViewModel(authRepository: authRepository)),
+        ChangeNotifierProvider(
+            create: (_) => AuthViewModel(authRepository: authRepository)
+              ..restoreSession()),
+        ChangeNotifierProvider(
+            create: (_) => VoiceLogViewModel(
+                  nutritionRepository: nutritionRepository,
+                  audioRecorderService: AudioRecorderService(),
+                )),
+        ChangeNotifierProvider(
+            create: (_) =>
+                DashboardViewModel(nutritionRepository: nutritionRepository)),
+        ChangeNotifierProvider(
+            create: (_) =>
+                MealHistoryViewModel(nutritionRepository: nutritionRepository)),
+        ChangeNotifierProvider(
+            create: (_) => MealTemplatesViewModel(
+                nutritionRepository: nutritionRepository)),
+        ChangeNotifierProvider(
+            create: (_) => SettingsViewModel(authRepository: authRepository)),
       ],
       child: Consumer<AuthViewModel>(
         builder: (context, authViewModel, _) {
           return MaterialApp.router(
             title: 'Cal Tracker',
+            debugShowCheckedModeBanner: false,
             theme: buildTheme(),
             routerConfig: buildRouter(authViewModel),
           );

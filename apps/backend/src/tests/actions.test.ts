@@ -38,6 +38,35 @@ describe("action loop", () => {
     expect(audits.some((event) => event.eventType === "action.commit_meal")).toBe(true);
   });
 
+  it("preserves explicit Spanish gram quantities for meat and rice", async () => {
+    const { request } = buildTestApp();
+    const auth = await registerAndAuth(request);
+
+    const proposalResponse = await request("http://localhost/v1/actions/propose_meal_log/execute", {
+      method: "POST",
+      headers: auth.authHeader,
+      body: JSON.stringify({
+        input: {
+          text: "Añada al almuerzo 100 gramos de carne y 100 gramos de arroz",
+        },
+        source: "flutter",
+      }),
+    });
+
+    expect(proposalResponse.status).toBe(200);
+    const body = await proposalResponse.json() as {
+      output: {
+        proposal: {
+          items: { name: string; quantity: number }[];
+        };
+      };
+    };
+    expect(body.output.proposal.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "Chicken breast", quantity: 100 }),
+      expect.objectContaining({ name: "Cooked rice", quantity: 100 }),
+    ]));
+  });
+
   it("corrects chicken grams on a committed meal", async () => {
     const { request } = buildTestApp();
     const auth = await registerAndAuth(request);

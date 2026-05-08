@@ -10,6 +10,17 @@ export const nutritionSnapshotSchema = z.object({
   fatGrams: z.number().nonnegative()
 });
 
+export const foodResolutionProvenanceSchema = z.object({
+  originalText: z.string().optional(),
+  canonicalName: z.string().optional(),
+  externalSource: z.string().optional(),
+  externalId: z.string().optional(),
+  sourceUrl: z.string().url().optional(),
+  license: z.string().optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  needsReview: z.boolean().optional()
+});
+
 export const mealItemSchema = z.object({
   id: uuidSchema.optional(),
   name: z.string().min(1),
@@ -19,7 +30,32 @@ export const mealItemSchema = z.object({
   proteinGrams: z.number().nonnegative(),
   carbsGrams: z.number().nonnegative(),
   fatGrams: z.number().nonnegative(),
-  source: z.string().default("backend_estimate")
+  source: z.string().default("backend_estimate"),
+  originalText: foodResolutionProvenanceSchema.shape.originalText,
+  canonicalName: foodResolutionProvenanceSchema.shape.canonicalName,
+  externalSource: foodResolutionProvenanceSchema.shape.externalSource,
+  externalId: foodResolutionProvenanceSchema.shape.externalId,
+  sourceUrl: foodResolutionProvenanceSchema.shape.sourceUrl,
+  license: foodResolutionProvenanceSchema.shape.license,
+  confidence: foodResolutionProvenanceSchema.shape.confidence,
+  needsReview: foodResolutionProvenanceSchema.shape.needsReview
+});
+
+export const foodMentionSchema = z.object({
+  originalText: z.string().min(1),
+  canonicalEnglishName: z.string().min(1),
+  quantity: z.number().positive(),
+  unit: z.string().min(1),
+  brand: z.string().optional(),
+  barcode: z.string().optional(),
+  confidence: z.number().min(0).max(1),
+  marketProduct: z.boolean().default(false)
+});
+
+export const foodCandidateSchema = z.object({
+  mention: foodMentionSchema,
+  candidates: z.array(mealItemSchema),
+  reason: z.string().optional()
 });
 
 export const mealProposalSchema = z.object({
@@ -64,7 +100,10 @@ export const mealTemplateSchema = z.object({
 });
 
 export type NutritionSnapshot = z.infer<typeof nutritionSnapshotSchema>;
+export type FoodResolutionProvenance = z.infer<typeof foodResolutionProvenanceSchema>;
 export type MealItem = z.infer<typeof mealItemSchema>;
+export type FoodMention = z.infer<typeof foodMentionSchema>;
+export type FoodCandidateGroup = z.infer<typeof foodCandidateSchema>;
 export type MealProposal = z.infer<typeof mealProposalSchema>;
 export type Meal = z.infer<typeof mealSchema>;
 export type DailySummary = z.infer<typeof dailySummarySchema>;

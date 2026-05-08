@@ -132,9 +132,73 @@ export class PostgresRepository implements AppRepository {
       : await this.sql`
           SELECT * FROM food_items
           WHERE (user_id IS NULL OR user_id = ${userId})
-            AND (${normalized} LIKE '%' || normalized_name || '%' OR normalized_name LIKE '%' || ${normalized} || '%')
+            AND (
+              ${normalized} LIKE '%' || normalized_name || '%'
+              OR normalized_name LIKE '%' || ${normalized} || '%'
+              OR ${normalized} LIKE '%' || COALESCE(canonical_name, normalized_name) || '%'
+              OR COALESCE(canonical_name, normalized_name) LIKE '%' || ${normalized} || '%'
+            )
         `;
     return rows.map(mapFood);
+  }
+
+  async upsertFoodItem(input: Omit<FoodItemRecord, "id">): Promise<FoodItemRecord> {
+    const normalizedName = normalizeText(input.normalizedName || input.name);
+    const [existing] = input.externalSource && input.externalId
+      ? await this.sql`
+          SELECT * FROM food_items
+          WHERE external_source = ${input.externalSource}
+            AND external_id = ${input.externalId}
+            AND (user_id IS NULL OR user_id = ${input.userId ?? null})
+          LIMIT 1
+        `
+      : await this.sql`
+          SELECT * FROM food_items
+          WHERE normalized_name = ${normalizedName}
+            AND source = ${input.source}
+            AND user_id IS NOT DISTINCT FROM ${input.userId ?? null}
+          LIMIT 1
+        `;
+    if (existing) {
+      const [row] = await this.sql`
+        UPDATE food_items
+        SET name = ${input.name},
+            normalized_name = ${normalizedName},
+            canonical_name = ${input.canonicalName ?? input.name},
+            brand = ${input.brand ?? null},
+            barcode = ${input.barcode ?? null},
+            source = ${input.source},
+            external_source = ${input.externalSource ?? null},
+            external_id = ${input.externalId ?? null},
+            source_url = ${input.sourceUrl ?? null},
+            license = ${input.license ?? null},
+            fetched_at = ${input.fetchedAt ?? new Date().toISOString()},
+            serving_grams = ${input.servingGrams},
+            calories = ${input.calories},
+            protein_grams = ${input.proteinGrams},
+            carbs_grams = ${input.carbsGrams},
+            fat_grams = ${input.fatGrams}
+        WHERE id = ${existing.id as string}
+        RETURNING *
+      `;
+      return mapFood(row);
+    }
+    const [row] = await this.sql`
+      INSERT INTO food_items (
+        user_id, name, normalized_name, canonical_name, brand, barcode, source,
+        external_source, external_id, source_url, license, fetched_at,
+        serving_grams, calories, protein_grams, carbs_grams, fat_grams
+      )
+      VALUES (
+        ${input.userId ?? null}, ${input.name}, ${normalizedName}, ${input.canonicalName ?? input.name},
+        ${input.brand ?? null}, ${input.barcode ?? null}, ${input.source},
+        ${input.externalSource ?? null}, ${input.externalId ?? null}, ${input.sourceUrl ?? null},
+        ${input.license ?? null}, ${input.fetchedAt ?? new Date().toISOString()},
+        ${input.servingGrams}, ${input.calories}, ${input.proteinGrams}, ${input.carbsGrams}, ${input.fatGrams}
+      )
+      RETURNING *
+    `;
+    return mapFood(row);
   }
 
   async getNutritionTarget(userId: string): Promise<NutritionSnapshot> {
@@ -161,14 +225,14 @@ export class PostgresRepository implements AppRepository {
     return this.sql.begin(async (tx) => {
       const id = newId();
       const [row] = await tx`
-        INSERT INTO meal_proposals (id, user_id, phrase, status, confidence, requires_confirmation, trusted_auto_commit_eligible, source, calories, protein_grams, carbs_grams, fat_grams)
-        VALUES (${id}, ${userId}, ${proposal.phrase}, ${proposal.status}, ${proposal.confidence}, ${proposal.requiresConfirmation}, ${proposal.trustedAutoCommitEligible}, ${proposal.source}, ${proposal.nutrition.calories}, ${proposal.nutrition.proteinGrams}, ${proposal.nutrition.carbsGrams}, ${proposal.nutrition.fatGrams})
+        INSERT INTO meal_proposals (id, user_id, phrase, title, status, confidence, requires_confirmation, trusted_auto_commit_eligible, source, calories, protein_grams, carbs_grams, fat_grams)
+        VALUES (${id}, ${userId}, ${proposal.phrase}, ${proposal.title}, ${proposal.status}, ${proposal.confidence}, ${proposal.requiresConfirmation}, ${proposal.trustedAutoCommitEligible}, ${proposal.source}, ${proposal.nutrition.calories}, ${proposal.nutrition.proteinGrams}, ${proposal.nutrition.carbsGrams}, ${proposal.nutrition.fatGrams})
         RETURNING *
       `;
       for (const item of proposal.items) {
         await insertProposalItem(tx, id, item);
       }
-      return this.mapProposal(row, proposal.title);
+      return this.mapProposal(row, proposal.title, tx);
     });
   }
 
@@ -201,7 +265,7 @@ export class PostgresRepository implements AppRepository {
       `;
       for (const item of items) await insertMealItem(tx, id, item);
       await tx`UPDATE meal_proposals SET status = 'committed' WHERE id = ${proposal.id}`;
-      return this.mapMeal(row);
+      return this.mapMeal(row, tx);
     });
   }
 
@@ -348,8 +412,8 @@ export class PostgresRepository implements AppRepository {
     });
   }
 
-  private async mapMeal(row: Record<string, unknown>): Promise<Meal> {
-    const items = await this.sql`SELECT * FROM meal_items WHERE meal_id = ${row.id as string}`;
+  private async mapMeal(row: Record<string, unknown>, sqlClient: Sql | any = this.sql): Promise<Meal> {
+    const items = await sqlClient`SELECT * FROM meal_items WHERE meal_id = ${row.id as string}`;
     return {
       id: row.id as string,
       title: row.title as string,
@@ -361,12 +425,12 @@ export class PostgresRepository implements AppRepository {
     };
   }
 
-  private async mapProposal(row: Record<string, unknown>, fallbackTitle = "Meal"): Promise<MealProposal> {
-    const items = await this.sql`SELECT * FROM meal_proposal_items WHERE proposal_id = ${row.id as string}`;
+  private async mapProposal(row: Record<string, unknown>, fallbackTitle = "Meal", sqlClient: Sql | any = this.sql): Promise<MealProposal> {
+    const items = await sqlClient`SELECT * FROM meal_proposal_items WHERE proposal_id = ${row.id as string}`;
     return {
       id: row.id as string,
       phrase: row.phrase as string,
-      title: fallbackTitle,
+      title: row.title as string || fallbackTitle,
       status: row.status as MealProposal["status"],
       confidence: Number(row.confidence),
       requiresConfirmation: Boolean(row.requires_confirmation),
@@ -411,22 +475,43 @@ export class PostgresRepository implements AppRepository {
 
 async function insertProposalItem(sql: Sql | any, proposalId: string, item: MealItem) {
   await sql`
-    INSERT INTO meal_proposal_items (proposal_id, name, quantity, unit, calories, protein_grams, carbs_grams, fat_grams)
-    VALUES (${proposalId}, ${item.name}, ${item.quantity}, ${item.unit}, ${item.calories}, ${item.proteinGrams}, ${item.carbsGrams}, ${item.fatGrams})
+    INSERT INTO meal_proposal_items (
+      proposal_id, name, quantity, unit, calories, protein_grams, carbs_grams, fat_grams,
+      source, original_text, canonical_name, external_source, external_id, source_url, license, confidence, needs_review
+    )
+    VALUES (
+      ${proposalId}, ${item.name}, ${item.quantity}, ${item.unit}, ${item.calories}, ${item.proteinGrams}, ${item.carbsGrams}, ${item.fatGrams},
+      ${item.source}, ${item.originalText ?? null}, ${item.canonicalName ?? null}, ${item.externalSource ?? null}, ${item.externalId ?? null},
+      ${item.sourceUrl ?? null}, ${item.license ?? null}, ${item.confidence ?? null}, ${item.needsReview ?? false}
+    )
   `;
 }
 
 async function insertMealItem(sql: Sql | any, mealId: string, item: MealItem) {
   await sql`
-    INSERT INTO meal_items (meal_id, name, quantity, unit, calories, protein_grams, carbs_grams, fat_grams)
-    VALUES (${mealId}, ${item.name}, ${item.quantity}, ${item.unit}, ${item.calories}, ${item.proteinGrams}, ${item.carbsGrams}, ${item.fatGrams})
+    INSERT INTO meal_items (
+      meal_id, name, quantity, unit, calories, protein_grams, carbs_grams, fat_grams,
+      source, original_text, canonical_name, external_source, external_id, source_url, license, confidence, needs_review
+    )
+    VALUES (
+      ${mealId}, ${item.name}, ${item.quantity}, ${item.unit}, ${item.calories}, ${item.proteinGrams}, ${item.carbsGrams}, ${item.fatGrams},
+      ${item.source}, ${item.originalText ?? null}, ${item.canonicalName ?? null}, ${item.externalSource ?? null}, ${item.externalId ?? null},
+      ${item.sourceUrl ?? null}, ${item.license ?? null}, ${item.confidence ?? null}, ${item.needsReview ?? false}
+    )
   `;
 }
 
 async function insertTemplateItem(sql: Sql | any, templateId: string, item: MealItem) {
   await sql`
-    INSERT INTO meal_template_items (template_id, name, quantity, unit, calories, protein_grams, carbs_grams, fat_grams)
-    VALUES (${templateId}, ${item.name}, ${item.quantity}, ${item.unit}, ${item.calories}, ${item.proteinGrams}, ${item.carbsGrams}, ${item.fatGrams})
+    INSERT INTO meal_template_items (
+      template_id, name, quantity, unit, calories, protein_grams, carbs_grams, fat_grams,
+      source, original_text, canonical_name, external_source, external_id, source_url, license, confidence, needs_review
+    )
+    VALUES (
+      ${templateId}, ${item.name}, ${item.quantity}, ${item.unit}, ${item.calories}, ${item.proteinGrams}, ${item.carbsGrams}, ${item.fatGrams},
+      ${item.source}, ${item.originalText ?? null}, ${item.canonicalName ?? null}, ${item.externalSource ?? null}, ${item.externalId ?? null},
+      ${item.sourceUrl ?? null}, ${item.license ?? null}, ${item.confidence ?? null}, ${item.needsReview ?? false}
+    )
   `;
 }
 
@@ -436,9 +521,15 @@ function mapFood(row: Record<string, unknown>): FoodItemRecord {
     userId: row.user_id as string | undefined,
     name: row.name as string,
     normalizedName: row.normalized_name as string,
+    canonicalName: row.canonical_name as string | undefined,
     brand: row.brand as string | undefined,
     barcode: row.barcode as string | undefined,
     source: row.source as string,
+    externalSource: row.external_source as string | undefined,
+    externalId: row.external_id as string | undefined,
+    sourceUrl: row.source_url as string | undefined,
+    license: row.license as string | undefined,
+    fetchedAt: row.fetched_at ? toIso(row.fetched_at) : undefined,
     servingGrams: Number(row.serving_grams),
     calories: Number(row.calories),
     proteinGrams: Number(row.protein_grams),
@@ -465,7 +556,15 @@ function mapItem(row: Record<string, unknown>): MealItem {
     proteinGrams: Number(row.protein_grams),
     carbsGrams: Number(row.carbs_grams),
     fatGrams: Number(row.fat_grams),
-    source: "snapshot"
+    source: (row.source as string | undefined) ?? "snapshot",
+    originalText: row.original_text as string | undefined,
+    canonicalName: row.canonical_name as string | undefined,
+    externalSource: row.external_source as string | undefined,
+    externalId: row.external_id as string | undefined,
+    sourceUrl: row.source_url as string | undefined,
+    license: row.license as string | undefined,
+    confidence: row.confidence == null ? undefined : Number(row.confidence),
+    needsReview: row.needs_review == null ? undefined : Boolean(row.needs_review)
   };
 }
 

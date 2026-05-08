@@ -193,6 +193,35 @@ void main() {
         await viewModel.submitText('');
         expect(viewModel.state, VoiceLogState.idle);
       });
+
+      test('keeps resolver candidate groups on clarification', () async {
+        const groups = [
+          FoodCandidateGroup(
+            mention: FoodMention(
+              originalText: 'queso',
+              canonicalEnglishName: 'cheese',
+              quantity: 100,
+              unit: 'g',
+              confidence: 0.92,
+              marketProduct: false,
+            ),
+            candidates: [],
+          ),
+        ];
+        when(() => mockNutritionRepository.logText('100 gramos de queso'))
+            .thenAnswer(
+          (_) async => const AgentRunResult(
+            kind: 'clarification_required',
+            message: 'I could not confidently match every ingredient.',
+            candidateGroups: groups,
+          ),
+        );
+
+        await viewModel.submitText('100 gramos de queso');
+
+        expect(viewModel.state, VoiceLogState.clarificationRequired);
+        expect(viewModel.candidateGroups, groups);
+      });
     });
 
     group('commitProposal', () {
@@ -237,6 +266,74 @@ void main() {
       test('does nothing when no proposal exists', () async {
         await viewModel.commitProposal();
         expect(viewModel.state, VoiceLogState.idle);
+      });
+
+      test('updates proposal items before commit', () async {
+        const initialProposal = MealProposal(
+          id: 'prop_1',
+          title: 'Chicken and rice',
+          confidence: 0.85,
+          requiresConfirmation: true,
+          trustedAutoCommitEligible: false,
+          nutrition: NutritionSnapshot(
+              calories: 410, proteinGrams: 31, carbsGrams: 28, fatGrams: 5),
+          items: [
+            MealItem(
+              name: 'Chicken breast',
+              quantity: 150,
+              unit: 'g',
+              calories: 248,
+              proteinGrams: 46.5,
+              carbsGrams: 0,
+              fatGrams: 5.4,
+              source: 'generic_usda',
+            ),
+          ],
+        );
+        const editedItems = [
+          MealItem(
+            name: 'Chicken breast',
+            quantity: 100,
+            unit: 'g',
+            calories: 165,
+            proteinGrams: 31,
+            carbsGrams: 0,
+            fatGrams: 3.6,
+            source: 'generic_usda:manual_edit',
+          ),
+        ];
+        const updatedProposal = MealProposal(
+          id: 'prop_1',
+          title: 'Chicken and rice',
+          confidence: 0.85,
+          requiresConfirmation: true,
+          trustedAutoCommitEligible: false,
+          nutrition: NutritionSnapshot(
+              calories: 165, proteinGrams: 31, carbsGrams: 0, fatGrams: 3.6),
+          items: editedItems,
+        );
+        when(() => mockNutritionRepository.logText('chicken and rice'))
+            .thenAnswer(
+          (_) async => const AgentRunResult(
+            kind: 'proposal',
+            proposal: initialProposal,
+            message: 'Meal proposal created.',
+          ),
+        );
+        when(() => mockNutritionRepository.updateProposalItems(
+              'prop_1',
+              editedItems,
+            )).thenAnswer((_) async => updatedProposal);
+
+        await viewModel.submitText('chicken and rice');
+        await viewModel.updateProposalItems(editedItems);
+
+        expect(viewModel.state, VoiceLogState.proposalReady);
+        expect(viewModel.proposal, updatedProposal);
+        verify(() => mockNutritionRepository.updateProposalItems(
+              'prop_1',
+              editedItems,
+            )).called(1);
       });
     });
 

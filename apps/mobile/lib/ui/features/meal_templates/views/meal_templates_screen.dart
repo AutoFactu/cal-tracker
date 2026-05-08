@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../../domain/models/nutrition_models.dart';
 import '../../../core/content_frame.dart';
+import '../../../core/design_system.dart';
 import '../view_models/meal_templates_view_model.dart';
 
 class MealTemplatesScreen extends StatefulWidget {
@@ -16,51 +17,93 @@ class _MealTemplatesScreenState extends State<MealTemplatesScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => context.read<MealTemplatesViewModel>().load());
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => context.read<MealTemplatesViewModel>().load(),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final viewModel = context.watch<MealTemplatesViewModel>();
     return ContentFrame(
-      title: 'Usual Meals',
+      title: 'Usual meals',
+      subtitle: 'Safe familiar templates',
       actions: [
-        IconButton(onPressed: viewModel.load, icon: const Icon(Icons.refresh)),
-        IconButton(onPressed: () => _showCreateTemplateDialog(context, viewModel), icon: const Icon(Icons.add)),
+        FreshIconButton(
+          onPressed: viewModel.load,
+          icon: Icons.refresh_rounded,
+          tooltip: 'Refresh',
+        ),
+        FreshIconButton(
+          onPressed: () => _showCreateTemplateDialog(context, viewModel),
+          icon: Icons.add_rounded,
+          tooltip: 'Add usual meal',
+          backgroundColor: FreshColors.lime,
+        ),
       ],
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (viewModel.isLoading) const LinearProgressIndicator(),
-          if (viewModel.error != null) Text(viewModel.error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-          for (final template in viewModel.templates)
-            Card(
-              child: Column(
-                children: [
-                  SwitchListTile(
-                    title: Text(template.title),
-                    subtitle: Text('${template.nutrition.calories} kcal'),
-                    value: template.trustedAutoCommitEnabled,
-                    onChanged: (value) => viewModel.setTrustedMode(template, value),
+          FreshCard(
+            color: FreshColors.limeSoft,
+            radius: FreshRadii.xl,
+            child: Row(
+              children: [
+                const FreshIconChip(
+                  icon: Icons.star_rounded,
+                  color: FreshColors.limeDeep,
+                  backgroundColor: FreshColors.surface,
+                ),
+                const SizedBox(width: FreshSpacing.md),
+                Expanded(
+                  child: Text(
+                    'Templates keep recurring meals fast while preserving confirmation controls.',
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  OverflowBar(
-                    alignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton.icon(
-                        onPressed: () => _confirmDelete(context, viewModel, template),
-                        icon: const Icon(Icons.delete_outline),
-                        label: const Text('Delete'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
+          ),
+          const SizedBox(height: FreshSpacing.lg),
+          if (viewModel.isLoading) ...[
+            const LinearProgressIndicator(minHeight: 3),
+            const SizedBox(height: FreshSpacing.md),
+          ],
+          if (viewModel.error != null) ...[
+            FreshStatusBanner(
+              icon: Icons.error_outline_rounded,
+              title: 'Could not load usual meals',
+              message: viewModel.error!,
+              color: FreshColors.coral,
+            ),
+            const SizedBox(height: FreshSpacing.md),
+          ],
+          if (viewModel.templates.isEmpty)
+            const FreshEmptyState(
+              icon: Icons.restaurant_menu_rounded,
+              title: 'No usual meals yet',
+              message: 'Create one after you confirm a meal you repeat often.',
+            )
+          else
+            for (final template in viewModel.templates)
+              Padding(
+                padding: const EdgeInsets.only(bottom: FreshSpacing.md),
+                child: _TemplateCard(
+                  template: template,
+                  onTrustedChanged: (value) =>
+                      viewModel.setTrustedMode(template, value),
+                  onDelete: () => _confirmDelete(context, viewModel, template),
+                ),
+              ),
         ],
       ),
     );
   }
 
-  Future<void> _showCreateTemplateDialog(BuildContext context, MealTemplatesViewModel viewModel) async {
+  Future<void> _showCreateTemplateDialog(
+    BuildContext context,
+    MealTemplatesViewModel viewModel,
+  ) async {
     final titleController = TextEditingController();
     final aliasesController = TextEditingController();
     final submitted = await showDialog<bool>(
@@ -76,16 +119,24 @@ class _MealTemplatesScreenState extends State<MealTemplatesScreen> {
               autofocus: true,
               decoration: const InputDecoration(labelText: 'Title'),
             ),
+            const SizedBox(height: FreshSpacing.md),
             TextField(
               key: const ValueKey('template_aliases_field'),
               controller: aliasesController,
-              decoration: const InputDecoration(labelText: 'Aliases, comma-separated'),
+              decoration:
+                  const InputDecoration(labelText: 'Aliases, comma-separated'),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Create')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Create'),
+          ),
         ],
       ),
     );
@@ -102,15 +153,25 @@ class _MealTemplatesScreenState extends State<MealTemplatesScreen> {
     }
   }
 
-  Future<void> _confirmDelete(BuildContext context, MealTemplatesViewModel viewModel, MealTemplate template) async {
+  Future<void> _confirmDelete(
+    BuildContext context,
+    MealTemplatesViewModel viewModel,
+    MealTemplate template,
+  ) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete usual meal?'),
         content: Text(template.title),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Delete')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -118,4 +179,155 @@ class _MealTemplatesScreenState extends State<MealTemplatesScreen> {
       await viewModel.deleteTemplate(template);
     }
   }
+}
+
+class _TemplateCard extends StatelessWidget {
+  const _TemplateCard({
+    required this.template,
+    required this.onTrustedChanged,
+    required this.onDelete,
+  });
+
+  final MealTemplate template;
+  final ValueChanged<bool> onTrustedChanged;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    return FreshCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const FreshIconChip(
+                icon: Icons.local_fire_department_rounded,
+                color: FreshColors.orange,
+                backgroundColor: FreshColors.yellow,
+              ),
+              const SizedBox(width: FreshSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(template.title, style: textTheme.titleMedium),
+                    Text(
+                      template.aliases.isEmpty
+                          ? 'No aliases yet'
+                          : template.aliases.join(', '),
+                      style: textTheme.bodyMedium
+                          ?.copyWith(color: FreshColors.inkMuted),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const FreshFoodStack(
+                assets: [
+                  'assets/images/meal_breakfast.webp',
+                  'assets/images/meal_lunch.webp',
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: FreshSpacing.md),
+          Row(
+            children: [
+              Expanded(
+                child: _NutritionPill(
+                  label: 'Calories',
+                  value: '${template.nutrition.calories}',
+                  unit: 'Kcal',
+                  color: FreshColors.lime,
+                ),
+              ),
+              const SizedBox(width: FreshSpacing.sm),
+              Expanded(
+                child: _NutritionPill(
+                  label: 'Protein',
+                  value: _formatQuantity(template.nutrition.proteinGrams),
+                  unit: 'g',
+                  color: FreshColors.mint,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: FreshSpacing.sm),
+          SwitchListTile(
+            key: ValueKey('trusted_template_${template.id}'),
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Trusted auto-commit'),
+            subtitle: const Text('Allow this usual meal to log automatically.'),
+            value: template.trustedAutoCommitEnabled,
+            activeThumbColor: FreshColors.lime,
+            onChanged: onTrustedChanged,
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: onDelete,
+              icon: const Icon(Icons.delete_outline_rounded,
+                  color: FreshColors.coral),
+              label: const Text('Delete'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NutritionPill extends StatelessWidget {
+  const _NutritionPill({
+    required this.label,
+    required this.value,
+    required this.unit,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final String unit;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(FreshRadii.md),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: textTheme.labelMedium),
+          const SizedBox(height: FreshSpacing.xs),
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.end,
+            spacing: 4,
+            children: [
+              Text(
+                value,
+                style: textTheme.titleLarge?.copyWith(
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 3),
+                child: Text(unit, style: textTheme.bodyMedium),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _formatQuantity(double value) {
+  if (value == value.roundToDouble()) return value.toInt().toString();
+  return value.toStringAsFixed(1);
 }

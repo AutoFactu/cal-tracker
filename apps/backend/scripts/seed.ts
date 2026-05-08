@@ -22,7 +22,10 @@ await sql`
     ('Chicken breast', 'chicken breast', 'generic_usda', 100, 165, 31, 0, 3.6),
     ('Cooked rice', 'rice', 'generic_usda', 100, 130, 2.7, 28, 0.3),
     ('Oats', 'oats', 'generic_usda', 100, 389, 16.9, 66.3, 6.9),
-    ('Milk', 'milk', 'generic_usda', 250, 122, 8.1, 12, 4.8)
+    ('Milk', 'milk', 'generic_usda', 250, 122, 8.1, 12, 4.8),
+    ('Bread', 'bread', 'generic_usda', 100, 265, 9, 49, 3.2),
+    ('Butter', 'butter', 'generic_usda', 100, 717, 0.9, 0.1, 81.1),
+    ('Ham', 'ham', 'generic_usda', 100, 145, 21, 1.5, 5.5)
   ON CONFLICT DO NOTHING
 `;
 

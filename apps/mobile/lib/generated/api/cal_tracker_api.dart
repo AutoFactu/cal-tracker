@@ -71,6 +71,18 @@ class CalTrackerApiClient {
     return _post('/v1/meals/$mealId/correct', {'correctionText': correctionText});
   }
 
+  Future<Map<String, Object?>> correctProposal({
+    required String proposalId,
+    required String correctionText,
+    required List<Map<String, Object?>> items,
+  }) {
+    return executeAction('correct_meal', {
+      'proposalId': proposalId,
+      'correctionText': correctionText,
+      'items': items,
+    });
+  }
+
   Future<Map<String, Object?>> deleteMeal(String mealId, {bool confirmed = false}) {
     final suffix = confirmed ? '?confirmationToken=DELETE' : '';
     return _delete('/v1/meals/$mealId$suffix');
