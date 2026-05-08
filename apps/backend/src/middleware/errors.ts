@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
+import { errors } from "jose";
 import { ZodError } from "zod";
 import { ActionExecutionError } from "../actions/executor.js";
 import { AuthError } from "../auth/service.js";
@@ -12,6 +13,9 @@ export function formatErrorResponse(c: Context, error: unknown) {
   }
   if (error instanceof AuthError) {
     return c.json({ error: { code: error.code, message: error.message, traceId } }, 401);
+  }
+  if (error instanceof errors.JWTExpired || error instanceof errors.JWTClaimValidationFailed) {
+    return c.json({ error: { code: "token_expired", message: "Token expired or invalid", traceId } }, 401);
   }
   if (error instanceof ActionExecutionError) {
     const status = error.code === "permission_denied" ? 403 : 400;

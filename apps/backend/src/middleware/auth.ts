@@ -1,5 +1,6 @@
 import type { Context, Next } from "hono";
 import { HTTPException } from "hono/http-exception";
+import { errors } from "jose";
 import type { AppConfig } from "../config/env.js";
 import type { AppRepository, StoredUser } from "../repository/types.js";
 import { verifyAccessToken } from "../auth/tokens.js";
@@ -17,10 +18,17 @@ export function authMiddleware(config: AppConfig, repository: AppRepository) {
     if (!auth?.startsWith("Bearer ")) {
       throw new HTTPException(401, { message: "Missing bearer token" });
     }
-    const claims = await verifyAccessToken(config, auth.slice("Bearer ".length));
-    const user = await repository.findUserById(claims.sub);
-    if (!user) throw new HTTPException(401, { message: "Invalid bearer token" });
-    c.set("authUser", user);
-    await next();
+    try {
+      const claims = await verifyAccessToken(config, auth.slice("Bearer ".length));
+      const user = await repository.findUserById(claims.sub);
+      if (!user) throw new HTTPException(401, { message: "Invalid bearer token" });
+      c.set("authUser", user);
+      await next();
+    } catch (error) {
+      if (error instanceof errors.JWTExpired || error instanceof errors.JWTClaimValidationFailed) {
+        throw new HTTPException(401, { message: "Token expired or invalid" });
+      }
+      throw error;
+    }
   };
 }
