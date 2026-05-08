@@ -1,0 +1,24 @@
+{
+  "name": "cal-tracker",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/backend",
+    "packages/contracts"
+  ],
+  "scripts": {
+    "dev:backend": "bun run --cwd apps/backend dev",
+    "db:migrate": "bun run --cwd apps/backend db:migrate",
+    "db:seed": "bun run --cwd apps/backend db:seed",
+    "test:backend": "bun run --cwd apps/backend test",
+    "generate:openapi": "bun run --cwd packages/contracts generate:openapi",
+    "generate:flutter-client": "bun run --cwd apps/backend generate:flutter-client",
+    "node:test:backend": "npm --workspace apps/backend run test",
+    "node:generate:openapi": "npm --workspace packages/contracts run generate:openapi"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

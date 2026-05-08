@@ -1,0 +1,50 @@
+import { z } from "zod";
+import { isoDateTimeSchema, uuidSchema } from "./common.js";
+
+export const registerRequestSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+  displayName: z.string().min(1).max(120)
+});
+
+export const loginRequestSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1)
+});
+
+export const refreshRequestSchema = z.object({
+  refreshToken: z.string().min(32)
+});
+
+export const logoutRequestSchema = z.object({
+  refreshToken: z.string().min(32).optional()
+});
+
+export const passwordResetRequestSchema = z.object({
+  email: z.string().email()
+});
+
+export const passwordResetConfirmSchema = z.object({
+  token: z.string().min(32),
+  newPassword: z.string().min(8)
+});
+
+export const authUserSchema = z.object({
+  id: uuidSchema,
+  email: z.string().email(),
+  displayName: z.string(),
+  trustedModeEnabled: z.boolean(),
+  createdAt: isoDateTimeSchema
+});
+
+export const tokenPairSchema = z.object({
+  accessToken: z.string(),
+  refreshToken: z.string(),
+  expiresAt: isoDateTimeSchema,
+  user: authUserSchema
+});
+
+export type RegisterRequest = z.infer<typeof registerRequestSchema>;
+export type LoginRequest = z.infer<typeof loginRequestSchema>;
+export type TokenPair = z.infer<typeof tokenPairSchema>;
+export type AuthUser = z.infer<typeof authUserSchema>;

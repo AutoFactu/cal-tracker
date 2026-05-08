@@ -1,0 +1,306 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { zodToJsonSchema } from "zod-to-json-schema";
+import {
+  actionDefinitions,
+  agentRunRequestSchema,
+  agentRunResponseSchema,
+  errorResponseSchema,
+  executeActionRequestSchema,
+  executeActionResponseSchema,
+  loginRequestSchema,
+  passwordResetConfirmSchema,
+  passwordResetRequestSchema,
+  refreshRequestSchema,
+  registerRequestSchema,
+  settingsUpdateSchema,
+  tokenPairSchema,
+  transcriptionResponseSchema
+} from "./index.js";
+
+const schema = (name: string, zodSchema: Parameters<typeof zodToJsonSchema>[0]) =>
+  zodToJsonSchema(zodSchema, { name, $refStrategy: "none" }).definitions?.[name] ??
+  zodToJsonSchema(zodSchema, { $refStrategy: "none" });
+
+const actionSchemas = Object.fromEntries(
+  actionDefinitions.flatMap((action) => [
+    [`${action.id}_input`, schema(`${action.id}_input`, action.inputSchema)],
+    [`${action.id}_output`, schema(`${action.id}_output`, action.outputSchema)]
+  ])
+);
+
+const spec = {
+  openapi: "3.1.0",
+  info: {
+    title: "Cal Tracker API",
+    version: "0.1.0"
+  },
+  servers: [{ url: "http://localhost:3000" }],
+  components: {
+    securitySchemes: {
+      bearerAuth: {
+        type: "http",
+        scheme: "bearer",
+        bearerFormat: "JWT"
+      }
+    },
+    schemas: {
+      ErrorResponse: schema("ErrorResponse", errorResponseSchema),
+      RegisterRequest: schema("RegisterRequest", registerRequestSchema),
+      LoginRequest: schema("LoginRequest", loginRequestSchema),
+      RefreshRequest: schema("RefreshRequest", refreshRequestSchema),
+      PasswordResetRequest: schema("PasswordResetRequest", passwordResetRequestSchema),
+      PasswordResetConfirm: schema("PasswordResetConfirm", passwordResetConfirmSchema),
+      TokenPair: schema("TokenPair", tokenPairSchema),
+      SettingsUpdate: schema("SettingsUpdate", settingsUpdateSchema),
+      ExecuteActionRequest: schema("ExecuteActionRequest", executeActionRequestSchema),
+      ExecuteActionResponse: schema("ExecuteActionResponse", executeActionResponseSchema),
+      AgentRunRequest: schema("AgentRunRequest", agentRunRequestSchema),
+      AgentRunResponse: schema("AgentRunResponse", agentRunResponseSchema),
+      TranscriptionResponse: schema("TranscriptionResponse", transcriptionResponseSchema),
+      ...actionSchemas
+    }
+  },
+  paths: {
+    "/v1/health": {
+      get: {
+        operationId: "getHealth",
+        responses: {
+          "200": {
+            description: "Health status"
+          }
+        }
+      }
+    },
+    "/v1/auth/register": {
+      post: {
+        operationId: "register",
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/RegisterRequest" } } }
+        },
+        responses: {
+          "200": { description: "Token pair", content: { "application/json": { schema: { $ref: "#/components/schemas/TokenPair" } } } }
+        }
+      }
+    },
+    "/v1/auth/login": {
+      post: {
+        operationId: "login",
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/LoginRequest" } } }
+        },
+        responses: {
+          "200": { description: "Token pair", content: { "application/json": { schema: { $ref: "#/components/schemas/TokenPair" } } } }
+        }
+      }
+    },
+    "/v1/auth/refresh": {
+      post: {
+        operationId: "refresh",
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/RefreshRequest" } } }
+        },
+        responses: {
+          "200": { description: "Token pair", content: { "application/json": { schema: { $ref: "#/components/schemas/TokenPair" } } } }
+        }
+      }
+    },
+    "/v1/auth/me": {
+      get: {
+        operationId: "getMe",
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": { description: "Current user" }
+        }
+      }
+    },
+    "/v1/settings": {
+      put: {
+        operationId: "updateSettings",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/SettingsUpdate" } } }
+        },
+        responses: {
+          "200": { description: "Updated settings" }
+        }
+      }
+    },
+    "/v1/actions": {
+      get: {
+        operationId: "listActions",
+        security: [{ bearerAuth: [] }],
+        responses: { "200": { description: "Action metadata" } }
+      }
+    },
+    "/v1/actions/{actionId}/execute": {
+      post: {
+        operationId: "executeAction",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "actionId", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/ExecuteActionRequest" } } }
+        },
+        responses: {
+          "200": { description: "Action result", content: { "application/json": { schema: { $ref: "#/components/schemas/ExecuteActionResponse" } } } }
+        }
+      }
+    },
+    "/v1/agent/runs": {
+      post: {
+        operationId: "runAgent",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/AgentRunRequest" } } }
+        },
+        responses: {
+          "200": { description: "Agent result", content: { "application/json": { schema: { $ref: "#/components/schemas/AgentRunResponse" } } } }
+        }
+      }
+    },
+    "/v1/stt/transcriptions": {
+      post: {
+        operationId: "transcribeAudio",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                properties: { audio: { type: "string", format: "binary" }, source: { type: "string" } },
+                required: ["audio"]
+              }
+            }
+          }
+        },
+        responses: {
+          "200": { description: "Transcript", content: { "application/json": { schema: { $ref: "#/components/schemas/TranscriptionResponse" } } } }
+        }
+      }
+    },
+    "/v1/meals/proposals": {
+      post: {
+        operationId: "createMealProposal",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/propose_meal_log_input" } } }
+        },
+        responses: {
+          "200": { description: "Proposal action result", content: { "application/json": { schema: { $ref: "#/components/schemas/ExecuteActionResponse" } } } }
+        }
+      }
+    },
+    "/v1/meals/proposals/{proposalId}/commit": {
+      post: {
+        operationId: "commitMealProposal",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "proposalId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: {
+          "200": { description: "Commit action result", content: { "application/json": { schema: { $ref: "#/components/schemas/ExecuteActionResponse" } } } }
+        }
+      }
+    },
+    "/v1/meals/{mealId}/correct": {
+      post: {
+        operationId: "correctMeal",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "mealId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { type: "object", properties: { correctionText: { type: "string" } }, required: ["correctionText"] } } }
+        },
+        responses: {
+          "200": { description: "Correction action result", content: { "application/json": { schema: { $ref: "#/components/schemas/ExecuteActionResponse" } } } }
+        }
+      }
+    },
+    "/v1/meals/{mealId}": {
+      delete: {
+        operationId: "deleteMeal",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: "mealId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+          { name: "confirmationToken", in: "query", required: false, schema: { type: "string" } }
+        ],
+        responses: {
+          "200": { description: "Delete action result", content: { "application/json": { schema: { $ref: "#/components/schemas/ExecuteActionResponse" } } } }
+        }
+      }
+    },
+    "/v1/summary/daily": {
+      get: {
+        operationId: "getDailySummary",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "date", in: "query", required: false, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "Daily summary action result", content: { "application/json": { schema: { $ref: "#/components/schemas/ExecuteActionResponse" } } } }
+        }
+      }
+    },
+    "/v1/meals": {
+      get: {
+        operationId: "getMealHistory",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 100 } }],
+        responses: {
+          "200": { description: "Meal history action result", content: { "application/json": { schema: { $ref: "#/components/schemas/ExecuteActionResponse" } } } }
+        }
+      }
+    },
+    "/v1/meal-templates": {
+      get: {
+        operationId: "getMealTemplates",
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": { description: "Template action result", content: { "application/json": { schema: { $ref: "#/components/schemas/ExecuteActionResponse" } } } }
+        }
+      },
+      post: {
+        operationId: "createMealTemplate",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/create_meal_template_input" } } }
+        },
+        responses: {
+          "200": { description: "Template action result", content: { "application/json": { schema: { $ref: "#/components/schemas/ExecuteActionResponse" } } } }
+        }
+      }
+    },
+    "/v1/meal-templates/{templateId}": {
+      put: {
+        operationId: "updateMealTemplate",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "templateId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/update_meal_template_input" } } }
+        },
+        responses: {
+          "200": { description: "Template action result", content: { "application/json": { schema: { $ref: "#/components/schemas/ExecuteActionResponse" } } } }
+        }
+      },
+      delete: {
+        operationId: "deleteMealTemplate",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "templateId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: {
+          "200": { description: "Template delete action result", content: { "application/json": { schema: { $ref: "#/components/schemas/ExecuteActionResponse" } } } }
+        }
+      }
+    }
+  }
+};
+
+const outPath = resolve(process.cwd(), "openapi.json");
+mkdirSync(dirname(outPath), { recursive: true });
+writeFileSync(outPath, `${JSON.stringify(spec, null, 2)}\n`);
+console.log(`Wrote ${outPath}`);

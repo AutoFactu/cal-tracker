@@ -1,0 +1,32 @@
+{
+  "name": "@cal-tracker/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed": "tsx scripts/seed.ts",
+    "generate:flutter-client": "tsx scripts/generate-flutter-client.ts"
+  },
+  "dependencies": {
+    "@cal-tracker/contracts": "file:../../packages/contracts",
+    "@hono/node-server": "^1.19.6",
+    "@node-rs/argon2": "^2.0.2",
+    "drizzle-orm": "^0.44.7",
+    "hono": "^4.10.6",
+    "jose": "^6.1.2",
+    "postgres": "^3.4.7",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.25.2"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.7",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.15"
+  }
+}

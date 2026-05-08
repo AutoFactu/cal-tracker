@@ -1,0 +1,129 @@
+import { randomBytes } from "node:crypto";
+import { defaultUserScopes, type AuthUser, type LoginRequest, type RegisterRequest, type TokenPair } from "@cal-tracker/contracts";
+import type { AppConfig } from "../config/env.js";
+import type { AppRepository } from "../repository/types.js";
+import { newId } from "../utils/ids.js";
+import { hashPassword, verifyPassword } from "./passwords.js";
+import { createRefreshToken, hashRefreshToken, refreshExpiry, signAccessToken } from "./tokens.js";
+
+export class AuthError extends Error {
+  constructor(public readonly code: string, message = code) {
+    super(message);
+  }
+}
+
+export class AuthService {
+  constructor(
+    private readonly config: AppConfig,
+    private readonly repository: AppRepository
+  ) {}
+
+  async register(input: RegisterRequest): Promise<TokenPair> {
+    const passwordHash = await hashPassword(input.password);
+    const user = await this.repository.createUser({
+      email: input.email,
+      displayName: input.displayName,
+      passwordHash,
+      scopes: defaultUserScopes
+    });
+    await this.repository.recordAuditEvent({
+      userId: user.id,
+      eventType: "auth.registered",
+      metadata: { email: user.email },
+      traceId: "auth-register"
+    });
+    return this.issueTokenPair(publicUser(user), user.scopes);
+  }
+
+  async login(input: LoginRequest): Promise<TokenPair> {
+    const user = await this.repository.findUserByEmail(input.email);
+    if (!user || !(await verifyPassword(user.passwordHash, input.password))) {
+      throw new AuthError("invalid_credentials", "Invalid email or password");
+    }
+    await this.repository.recordAuditEvent({
+      userId: user.id,
+      eventType: "auth.login_succeeded",
+      metadata: { email: user.email },
+      traceId: "auth-login"
+    });
+    return this.issueTokenPair(publicUser(user), user.scopes);
+  }
+
+  async refresh(refreshToken: string): Promise<TokenPair> {
+    const hashValue = hashRefreshToken(this.config, refreshToken);
+    const session = await this.repository.findSessionByRefreshTokenHash(hashValue);
+    if (!session) throw new AuthError("invalid_refresh_token", "Refresh token is invalid or expired");
+    const user = await this.repository.findUserById(session.userId);
+    if (!user) throw new AuthError("invalid_refresh_token", "Refresh token user no longer exists");
+
+    const nextRefreshToken = createRefreshToken();
+    await this.repository.rotateSession(session.id, hashRefreshToken(this.config, nextRefreshToken), refreshExpiry());
+    const access = await signAccessToken(this.config, { sub: user.id, scopes: user.scopes });
+
+    return {
+      accessToken: access.token,
+      refreshToken: nextRefreshToken,
+      expiresAt: access.expiresAt,
+      user: publicUser(user)
+    };
+  }
+
+  async logout(refreshToken?: string): Promise<void> {
+    if (!refreshToken) return;
+    const session = await this.repository.findSessionByRefreshTokenHash(hashRefreshToken(this.config, refreshToken));
+    if (session) await this.repository.revokeSession(session.id);
+  }
+
+  async logoutAll(userId: string): Promise<void> {
+    await this.repository.revokeAllSessions(userId);
+  }
+
+  async requestPasswordReset(email: string): Promise<{ resetToken?: string }> {
+    const user = await this.repository.findUserByEmail(email);
+    if (!user) return {};
+    const resetToken = randomBytes(40).toString("base64url");
+    await this.repository.createPasswordReset({
+      userId: user.id,
+      tokenHash: hashRefreshToken(this.config, resetToken),
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString()
+    });
+    await this.repository.recordAuditEvent({
+      userId: user.id,
+      eventType: "auth.password_reset_requested",
+      metadata: {},
+      traceId: "auth-reset"
+    });
+    return this.config.NODE_ENV === "production" ? {} : { resetToken };
+  }
+
+  async confirmPasswordReset(token: string, newPassword: string): Promise<boolean> {
+    return this.repository.consumePasswordReset(hashRefreshToken(this.config, token), await hashPassword(newPassword));
+  }
+
+  private async issueTokenPair(user: AuthUser, scopes: typeof defaultUserScopes): Promise<TokenPair> {
+    const refreshToken = createRefreshToken();
+    const access = await signAccessToken(this.config, { sub: user.id, scopes });
+    await this.repository.createSession({
+      id: newId(),
+      userId: user.id,
+      refreshTokenHash: hashRefreshToken(this.config, refreshToken),
+      expiresAt: refreshExpiry()
+    });
+    return {
+      accessToken: access.token,
+      refreshToken,
+      expiresAt: access.expiresAt,
+      user
+    };
+  }
+}
+
+function publicUser(user: AuthUser): AuthUser {
+  return {
+    id: user.id,
+    email: user.email,
+    displayName: user.displayName,
+    trustedModeEnabled: user.trustedModeEnabled,
+    createdAt: user.createdAt
+  };
+}

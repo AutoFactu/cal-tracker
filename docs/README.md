@@ -1,0 +1,134 @@
+# Documentation Map
+
+This directory is the planning source of truth until implementation creates executable contracts, migrations, and tests.
+
+Coding agents should read this file first, then open only the document sections relevant to the task.
+
+## Current Structure Assessment
+
+The current two-file structure is acceptable for pre-implementation planning, but it is not enough by itself once implementation starts.
+
+Current authoritative files:
+
+| File | Owns | Does not own |
+| --- | --- | --- |
+| `app-description.md` | Product vision, MVP scope, system architecture, action-layer rules, Flutter/backend boundaries, mobile OS adapter strategy, API surface, scoped decisions, testing/development order. | Detailed SQL schema, vector index design, backup mechanics. |
+| `db-vector-architecture.md` | PostgreSQL/pgvector architecture, tables, field requirements, vector retrieval, migrations, local/production DB deployment, backup/restore rules. | Product UX, action semantics beyond DB effects, Flutter UI architecture. |
+| `voice-agent-gap-analysis.md` | Current implementation gaps for voice input, STT, OpenRouter agent orchestration, and the technical slices needed to align the code with the MVP plan. | General product scope, database table ownership, production deployment. |
+
+This split is intentional:
+
+```text
+app-description.md = what the app must do and which system boundaries matter
+db-vector-architecture.md = how persistent data and vector memory must work
+```
+
+The risk is that `app-description.md` is broad. If it grows much further, coding agents will need a more modular docs tree to avoid missing details or relying on stale sections.
+
+## Reading Order for Coding Agents
+
+For any task:
+
+```text
+1. Read this README.
+2. Read the relevant section of app-description.md.
+3. Read db-vector-architecture.md only if the task touches persistence, memory, search, migrations, auth/session storage, audit, or deployment.
+4. Prefer executable contracts, migrations, and tests over prose once those files exist.
+```
+
+Task-specific reading:
+
+| Task type | Required docs |
+| --- | --- |
+| Product behavior or MVP scope | `app-description.md` -> Project Summary, MVP Scope, Non-Negotiable Principle |
+| Backend action implementation | `app-description.md` -> Canonical Action Layer, Initial Canonical Actions, Confirmation Policy, Permissions |
+| Internal agent work | `app-description.md` -> Internal Agent Requirements, Safety Rules, Action Layer |
+| Voice input, STT, or OpenRouter agent work | `voice-agent-gap-analysis.md`; then `app-description.md` -> Internal Agent Requirements, Safety Rules, Action Layer |
+| Flutter UI work | `app-description.md` -> Flutter Architecture, API Requirements, Confirmation Policy |
+| Android AppFunctions or iOS App Intents | `app-description.md` -> Mobile OS Agent Integrations, Target Launch Platforms |
+| Database schema/migrations | `db-vector-architecture.md` -> Core Tables, Table Responsibilities, Required Constraints and Indexes |
+| Vector memory/retrieval | `db-vector-architecture.md` -> Retrieval Flow, User-Scoped Vector Query, Retrieval Ranking, Memory Creation and Update Rules |
+| Production deployment | `db-vector-architecture.md` -> Production Deployment, Backup and Restore |
+| Auth/session storage | `app-description.md` -> Authentication decision; `db-vector-architecture.md` -> users, user_credentials, auth_sessions, password_reset_tokens |
+
+## Authority and Conflict Rules
+
+If documents disagree:
+
+* `app-description.md` wins for product behavior, action semantics, UI/backend boundaries, and scoped architecture decisions.
+* `db-vector-architecture.md` wins for database tables, fields, indexes, vector search, migrations, backups, and deployment database behavior.
+* Generated schemas, migrations, and tests win over prose after implementation exists.
+* When a code change changes behavior, update the owning doc in the same task.
+
+Do not copy business logic into platform adapters or database scripts just because a doc example shows a flow. The backend action executor remains the implementation authority for app behavior.
+
+## Current Closed Decisions
+
+Closed decisions currently live in `app-description.md` under `Scoped Architecture Decisions`:
+
+```text
+Authentication: custom backend-owned sessions.
+Target launch platforms: Android and iOS mobile only.
+Minimum OS versions: Android 10/API 29 for core app, iOS 17.0 for core app.
+OS-agent spikes: Android AppFunctions on API 36+, iOS App Intents on iOS 17+.
+Nutrition source priority: user data first, then OpenFoodFacts, manual values, generic databases, backend estimates, LLM fallback.
+Production database: self-hosted PostgreSQL + pgvector in Docker on the VPS.
+Embeddings: self-hosted server-side bge-m3 with 1024-dimensional vectors.
+Trusted auto-commit: included in MVP, off by default, safe familiar templates only.
+```
+
+`app-description.md` also contains the current Open Decisions section. It should remain explicit even when there are no blocking open decisions.
+
+## When to Split the Docs Further
+
+Do not split files just to make the tree look complete. Split when a section becomes an implementation surface that coding agents will edit or reference independently.
+
+Recommended future structure:
+
+```text
+docs/
+  README.md
+  app-description.md
+  db-vector-architecture.md
+
+  architecture/
+    action-layer.md
+    backend-agent.md
+    mobile-os-integrations.md
+    confirmation-policy.md
+
+  api/
+    actions.md
+    rest-api.md
+
+  mobile/
+    flutter-architecture.md
+    app-intents-appfunctions.md
+
+  operations/
+    deployment.md
+    backups-restore.md
+
+  decisions/
+    0001-custom-backend-auth.md
+    0002-self-hosted-postgres.md
+    0003-trusted-auto-commit.md
+```
+
+Split triggers:
+
+* Action definitions start being generated from code.
+* API contracts become large enough to need their own changelog.
+* Mobile OS adapter implementation begins.
+* Deployment scripts are added.
+* Multiple developers or agents edit the same large document frequently.
+* A decision needs history, alternatives, or reversal criteria.
+
+## Documentation Rules
+
+* Keep docs concise enough that an agent can find the relevant rule quickly.
+* Keep closed decisions separate from open questions.
+* Prefer tables for ownership, priority, and compatibility rules.
+* Prefer executable examples only when they define a contract or migration-relevant behavior.
+* Do not duplicate long schemas across multiple docs. Link to the owning doc instead.
+* When implementation starts, keep prose docs aligned with code-generated schemas and migrations.

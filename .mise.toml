@@ -1,0 +1,67 @@
+[tools]
+node = "22.22.2"
+bun = "1.3.13"
+flutter = "3.41.9"
+java = "17.0.2"
+
+[env]
+_.file = ".env"
+ANDROID_HOME = "/home/javier/Android/Sdk"
+ANDROID_SDK_ROOT = "/home/javier/Android/Sdk"
+
+[tasks.install]
+description = "Install JavaScript workspace dependencies"
+run = "npm install"
+
+[tasks.backend-dev]
+description = "Run the backend API server"
+run = "npm --workspace apps/backend run start"
+
+[tasks.backend-test]
+description = "Run backend tests"
+run = "npm --workspace apps/backend run test"
+
+[tasks.backend-typecheck]
+description = "Type-check backend TypeScript"
+run = "npm --workspace apps/backend run typecheck"
+
+[tasks.contracts-typecheck]
+description = "Type-check shared contracts"
+run = "npm --workspace packages/contracts run typecheck"
+
+[tasks.openapi]
+description = "Generate OpenAPI from contract schemas"
+run = "npm --workspace packages/contracts run generate:openapi"
+
+[tasks.flutter-client]
+description = "Copy OpenAPI artifact into the Flutter generated API folder"
+run = "npm --workspace apps/backend run generate:flutter-client"
+
+[tasks.flutter-pub-get]
+description = "Resolve Flutter dependencies"
+run = "flutter pub get"
+dir = "apps/mobile"
+
+[tasks.flutter-analyze]
+description = "Analyze Flutter code"
+run = "flutter analyze"
+dir = "apps/mobile"
+depends = ["flutter-pub-get"]
+
+[tasks.flutter-test]
+description = "Run Flutter widget tests"
+run = "flutter test"
+dir = "apps/mobile"
+depends = ["flutter-pub-get"]
+
+[tasks.db-migrate]
+description = "Apply local PostgreSQL migrations"
+run = "npm --workspace apps/backend run db:migrate"
+
+[tasks.db-seed]
+description = "Seed local PostgreSQL development data"
+run = "npm --workspace apps/backend run db:seed"
+
+[tasks.verify]
+description = "Run backend, contracts, OpenAPI, and Flutter validation checks"
+depends = ["backend-test", "backend-typecheck", "contracts-typecheck", "openapi", "flutter-client", "flutter-analyze", "flutter-test"]

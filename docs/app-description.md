@@ -1,148 +1,111 @@
-````markdown
+# Application Specification and Architecture
+
+## Architectural Review Corrections Applied
+
+This document keeps the original product direction, but corrects several architectural risks:
+
+* The Markdown wrapper fences and stray prompt text were removed so the document is a valid specification.
+* Mobile OS integrations are now described as future adapters, not as assumptions the MVP depends on.
+* The `app_intents` Flutter package is treated as a candidate adapter library, not as the source of truth or an unavoidable dependency.
+* User identity was removed from action input payloads. The backend must inject identity, permissions, locale, timezone, and trust settings through an authenticated `ActionContext`.
+* Shared TypeScript schemas are no longer assumed to be directly consumable by Flutter. Flutter must consume generated Dart DTOs or an OpenAPI-generated client.
+* Flutter is specified as an MVVM presentation client with API repositories and thin platform adapters. It must not perform agent reasoning, nutrition calculation, database access, or vector retrieval.
+* Write actions are now proposal-first, idempotent, auditable, and transaction-backed.
+* Privacy, security, observability, testing, and deployment boundaries were made explicit.
+
 ## Project Summary
 
-This project is a **Flutter mobile calorie tracking application** designed around an **agent-first architecture**.
+The project is a Flutter mobile calorie and nutrition tracking application designed around an agent-operable action layer.
 
-The app is not just a traditional calorie tracker with an AI chatbot added on top. The main product idea is to build a calorie/nutrition tracking system where the user can interact naturally through voice/text, and an agent decides which app action/tool to execute.
+The app should not be a traditional calorie tracker with a chatbot bolted on. The product should expose structured nutrition capabilities that can be operated safely by:
 
-The product must support:
+* the Flutter UI,
+* the backend internal agent,
+* future Android AppFunctions,
+* future iOS App Intents,
+* future trusted REST or automation clients.
 
-1. **An internal app agent now**
-   - The internal agent will live in our backend.
-   - It will use an external LLM provider, initially something like OpenRouter with DeepSeek Flash/V4 or another low-latency model.
-   - The agent will receive user requests, inspect available tools/actions, choose the right action, and execute it through the backend tool/action layer.
+For the MVP, the primary agent is an internal backend agent. Future mobile OS agents must be thin adapters over the same backend action API.
 
-2. **Future mobile OS agents later**
-   - Android: Gemini or other Android system agents via Android AppFunctions.
-   - iOS: Siri / Apple Intelligence via iOS App Intents.
-   - The app must be architected so future mobile agent integrations are thin adapters over the same internal action/tool system.
+## Product Vision
 
-3. **Flutter as the mobile frontend**
-   - Flutter/Dart is used for the UI and client-side app code.
-   - Flutter should not own the core agent/nutrition logic.
-   - Flutter should call backend APIs and handle user-facing interactions.
-
-4. **Bun + TypeScript backend**
-   - The backend owns the agent, action registry, tool execution, meal memory, nutrition logic, persistence, and safety policies.
-
-5. **`flutter_intents` / `app_intents` package**
-   - The Flutter intents package is used as a bridge to expose app actions/intents from Flutter/Dart to Android AppFunctions and iOS App Intents where possible.
-   - It should be treated as an adapter, not as the core architecture.
-   - The real source of truth must remain the backend action/tool layer.
-
----
-
-## Core Product Vision
-
-The long-term vision is:
+The target user experience is natural meal logging:
 
 ```text
-User
-  ↓
-Preferred agent
-  ↓
-Declared app actions/tools
-  ↓
-Calorie tracker action layer
-  ↓
-Nutrition memory + structured meal logs
-````
-
-For the MVP, because OS-level mobile agents are not fully open/reliable yet, we simulate that future flow with our own internal backend agent:
-
-```text
-User
-  ↓
-Flutter app voice/text input
-  ↓
-Backend internal agent
-  ↓
-Canonical action/tool registry
-  ↓
-Tool executor
-  ↓
-Database + nutrition memory
+"I had my usual breakfast."
+"Log 150 grams of chicken and rice."
+"Same lunch as yesterday."
+"I had two eggs, toast, and a protein shake."
+"After the gym I ate my normal chicken meal."
+"Actually, the chicken was 200 grams, not 150."
+"Delete the snack I just added."
+"How many calories do I have left today?"
 ```
 
-Future mobile-agent flow:
-
-```text
-User
-  ↓
-Gemini / Siri / Apple Intelligence
-  ↓
-Android AppFunctions / iOS App Intents
-  ↓
-Flutter intents bridge / native adapter
-  ↓
-Backend action/tool API
-  ↓
-Same tool executor
-  ↓
-Same database + nutrition memory
-```
-
-The critical principle:
-
-> One canonical app action layer, many interfaces.
-
-The same app capabilities must be usable by:
-
-* Flutter UI
-* backend internal agent
-* Android AppFunctions
-* iOS App Intents
-* future mobile agents
-* possibly REST integrations
-
-MCP is not part of the current MVP. The app is not currently intended to expose tools to desktop or third-party external agents outside the mobile/internal-agent context.
-
----
-
-## Main User Experience
-
-The user should be able to interact naturally:
-
-```text
-“I had my usual breakfast.”
-“Log 150 grams of chicken and rice.”
-“Same lunch as yesterday.”
-“I had two eggs, toast, and a protein shake.”
-“After the gym I ate my normal chicken meal.”
-“Actually, the chicken was 200 grams, not 150.”
-“Delete the snack I just added.”
-“How many calories do I have left today?”
-```
-
-The ideal flow:
+The ideal flow is:
 
 ```text
 User speaks or types
-  ↓
-Agent understands intent
-  ↓
-Agent retrieves user-specific meal memory
-  ↓
-Agent creates structured meal proposal
-  ↓
-User confirms/corrects
-  ↓
-Meal is committed
-  ↓
-System learns from corrections
+  -> backend agent interprets the request
+  -> backend action layer retrieves relevant user memory
+  -> backend creates a structured meal proposal
+  -> user confirms or corrects
+  -> backend commits the meal
+  -> memory/templates improve when appropriate
 ```
 
-The app should minimize manual UI control. The UI exists mainly for:
+The UI should minimize manual data entry, but it must preserve user trust. Confirmation, correction, history, permission controls, and auditability are product features, not secondary details.
 
-* voice/text input,
-* confirmation,
-* correction,
-* dashboard,
-* meal history,
-* permissions,
-* user trust.
+## Core Principles
 
----
+* One canonical action layer, many interfaces.
+* Backend action handlers are the only place where writes happen.
+* The LLM may select tools and propose structured data, but it must not directly mutate the database.
+* Flutter owns presentation, user interaction, and thin platform bridges only.
+* PostgreSQL is the source of truth.
+* pgvector is semantic retrieval infrastructure, not application truth.
+* All user memory and action execution must be scoped to the authenticated user.
+* Ambiguous or destructive operations require confirmation.
+* Nutrition values must come from known nutrition sources, user custom foods, templates, or explicit user input. The LLM must not invent authoritative nutrition facts.
+
+## MVP Scope
+
+The MVP must prove this product hypothesis:
+
+```text
+Users can log recurring meals faster and more reliably through an agentic flow than through a traditional calorie tracking UI.
+```
+
+MVP must include:
+
+* Flutter mobile app.
+* Android and iOS mobile launch targets.
+* Bun + TypeScript backend.
+* PostgreSQL + pgvector.
+* Docker Compose local development.
+* Internal backend agent.
+* Replaceable LLM provider abstraction.
+* Text input, with voice input added once the action flow is stable.
+* Canonical action registry.
+* Meal proposal generation.
+* User confirmation, correction, and rejection.
+* Meal commit flow.
+* Daily calorie and macro summary.
+* Basic meal templates and semantic memory.
+* Audit logging for action calls and mutations.
+* Generated API contracts or DTOs for Flutter.
+
+MVP should not require:
+
+* production Android AppFunctions support,
+* production iOS App Intents support,
+* MCP server,
+* photo recognition,
+* barcode scanning,
+* wearable integrations,
+* nutritionist dashboard,
+* medical claims,
+* microservices.
 
 ## Tech Stack
 
@@ -151,25 +114,30 @@ The app should minimize manual UI control. The UI exists mainly for:
 ```text
 Flutter
 Dart
-flutter_intents / app_intents package
+Generated API client / DTOs
+Candidate OS intent adapter: app_intents
+Native Kotlin/Swift adapters as fallback
 ```
 
 Flutter responsibilities:
 
-* mobile UI,
-* voice/text input screen,
-* meal proposal confirmation screen,
-* correction UI,
+* voice/text input UI,
+* proposal confirmation and correction UI,
 * dashboard,
 * meal history,
-* usual meals/templates UI,
-* settings,
-* agent permissions UI,
-* platform intent/action bridge.
+* meal template management UI,
+* settings and permission controls,
+* API calls to the backend,
+* thin Android/iOS platform action adapters.
 
-Flutter must not contain the core nutrition reasoning or agent execution logic.
+Flutter must not:
 
----
+* connect directly to PostgreSQL,
+* perform vector search,
+* own nutrition calculations,
+* run the canonical action executor,
+* bypass backend confirmation policy,
+* duplicate Android/iOS action business logic.
 
 ### Backend
 
@@ -178,38 +146,47 @@ Bun
 TypeScript
 PostgreSQL
 pgvector
-Optional Redis
 Docker
+Optional Redis
 ```
 
 Backend responsibilities:
 
+* authentication and user context resolution,
 * internal agent orchestration,
 * LLM provider integration,
-* canonical action/tool registry,
+* STT provider integration if voice audio is sent to the backend,
+* canonical action registry,
+* action permission checks,
 * action execution,
-* nutrition lookup,
-* meal proposal creation,
-* meal commit/correction/delete workflow,
+* nutrition lookup and calculation,
+* meal proposal, commit, correction, and delete workflows,
 * user-specific meal memory,
-* vector retrieval,
+* vector retrieval and reranking,
 * audit logging,
 * confirmation policy,
 * API endpoints,
-* future mobile-agent adapter support.
+* future mobile OS adapter support.
 
----
+Redis is optional and should be used only for operational concerns such as background jobs, rate limits, short-lived caches, or queues. Redis must not become the source of truth for nutrition or meal data.
+
+### Database
+
+```text
+PostgreSQL 16 or newer
+pgvector extension
+SQL migrations managed by the backend
+```
+
+PostgreSQL stores users, meals, meal items, proposals, templates, food memories, nutrition targets, action calls, confirmations, corrections, audit events, and custom foods.
+
+pgvector stores embeddings used to retrieve user-specific semantic memories. Vector rows must point back to structured relational records.
+
+Embedding generation is backend-owned infrastructure. The MVP uses a self-hosted server-side `bge-m3` embedding model with 1024-dimensional vectors for multilingual food memory retrieval. Flutter must never generate embeddings or call an embedding model directly.
 
 ### LLM Provider
 
-Initial provider:
-
-```text
-OpenRouter
-DeepSeek Flash / DeepSeek V4 / similar fast model
-```
-
-The backend must not be hardcoded to one provider.
+The initial provider may be OpenRouter with a low-latency model, but the backend must not be hardcoded to OpenRouter, DeepSeek, or any single model.
 
 Use a provider abstraction:
 
@@ -223,27 +200,33 @@ Possible implementations:
 
 ```text
 OpenRouterProvider
-GeminiProvider
 OpenAIProvider
+GeminiProvider
 AnthropicProvider
 LocalProvider
 ```
 
----
+Provider requirements:
+
+* supports structured tool calling or a reliable structured-output fallback,
+* has timeout and retry controls,
+* exposes latency, token, and cost metrics,
+* supports model configuration outside code,
+* can be swapped without changing action handlers.
 
 ### Speech-to-Text
 
-Initial options:
+Initial STT options:
 
 ```text
 Whisper-compatible API
-OpenAI Whisper
-Groq Whisper
+OpenAI audio transcription
+Groq Whisper-compatible endpoint
 Deepgram
 Native mobile speech APIs later if useful
 ```
 
-Speech-to-text should be abstracted behind an interface:
+Use a provider abstraction:
 
 ```ts
 interface STTProvider {
@@ -251,44 +234,52 @@ interface STTProvider {
 }
 ```
 
-The MVP can also support text input to validate the agent/tool flow before perfecting voice.
+The MVP should support typed input before voice. This validates the agent and action flow before adding audio latency, permission prompts, and device-specific speech behavior.
 
----
+## System Architecture
+
+Current MVP flow:
+
+```text
+Flutter app
+  -> backend API
+  -> internal backend agent
+  -> canonical action registry
+  -> deterministic action executor
+  -> PostgreSQL + pgvector + nutrition providers
+```
+
+Future mobile OS flow:
+
+```text
+Gemini / Siri / Apple Intelligence
+  -> Android AppFunction or iOS App Intent
+  -> Flutter/native adapter
+  -> backend action API
+  -> same deterministic action executor
+  -> same PostgreSQL + pgvector + nutrition providers
+```
+
+The future OS path must not introduce a second action system.
 
 ## Repository Structure
 
 Recommended monorepo:
 
 ```text
-nutrition-agent/
+cal-tracker/
   README.md
   AGENTS.md
-  .gitignore
   .env.example
   docker-compose.yml
 
   docs/
-    product/
-      prd.md
-      mvp-scope.md
-      positioning.md
+    README.md
+    app-description.md
+    db-vector-architecture.md
 
     architecture/
-      overview.md
-      action-layer.md
-      data-model.md
-      safety-model.md
-      mobile-agent-integrations.md
-      flutter-intents.md
-
-    api/
-      rest-api.md
-      action-schemas.md
-
-    agents/
-      internal-agent.md
-      prompt-contracts.md
-      evaluation.md
+      # Future split: action layer, backend agent, mobile OS integrations
 
   apps/
     mobile/
@@ -298,107 +289,65 @@ nutrition-agent/
       # Bun + TypeScript backend
 
   packages/
-    shared/
-      # Canonical shared schemas, action definitions, DTOs, permissions
+    contracts/
+      # TypeScript source schemas and generated OpenAPI/JSON Schema
 
     prompts/
-      # Versioned prompts/system instructions
+      # Versioned agent prompts and evaluation fixtures
 
   infra/
-    nginx/
-    docker/
-    scripts/
     db/
-
-  .github/
-    workflows/
+      init.sql
+    nginx/
+    scripts/
 ```
 
-Do not add an MCP server unless the product direction changes to support external desktop/third-party agents.
+`packages/contracts` is the canonical contract package for backend and API schemas. Flutter should consume generated Dart models or an OpenAPI-generated client. Flutter should not import TypeScript or Zod directly.
 
----
+## Canonical Action Layer
 
-## Architecture Overview
+Every app capability that an agent can operate must be represented as a canonical backend action.
 
-```text
-                         ┌──────────────────────────┐
-                         │ Future Mobile OS Agents  │
-                         │ Gemini / Siri            │
-                         └────────────┬─────────────┘
-                                      │
-                 ┌────────────────────┴────────────────────┐
-                 │                                         │
-      ┌──────────▼──────────┐                  ┌───────────▼───────────┐
-      │ Android AppFunctions│                  │ iOS App Intents        │
-      │ via Flutter bridge  │                  │ via Flutter bridge     │
-      └──────────┬──────────┘                  └───────────┬───────────┘
-                 │                                         │
-                 └────────────────────┬────────────────────┘
-                                      │
-                         ┌────────────▼────────────┐
-                         │ Backend Action API       │
-                         │ Canonical app actions    │
-                         └────────────┬────────────┘
-                                      │
-                         ┌────────────▼────────────┐
-                         │ Tool/Action Executor     │
-                         │ deterministic code       │
-                         └────────────┬────────────┘
-                                      │
-           ┌──────────────────────────┼──────────────────────────┐
-           │                          │                          │
-┌──────────▼──────────┐    ┌──────────▼──────────┐    ┌──────────▼──────────┐
-│ PostgreSQL           │    │ pgvector memory      │    │ Nutrition sources   │
-│ source of truth      │    │ semantic recall      │    │ food facts          │
-└─────────────────────┘    └─────────────────────┘    └─────────────────────┘
-
-
-Current MVP path:
-
-┌──────────────────────┐
-│ Flutter App           │
-│ voice/text UI         │
-└──────────┬───────────┘
-           │
-┌──────────▼───────────┐
-│ Backend Internal Agent│
-│ OpenRouter/LLM        │
-└──────────┬───────────┘
-           │
-┌──────────▼───────────┐
-│ Same Action Registry  │
-└──────────────────────┘
-```
-
----
-
-## Core Architectural Principle
-
-The app must be built around a **Canonical App Action Layer**.
-
-This layer should be structurally similar to Android AppFunctions and iOS App Intents:
-
-Each action must have:
+Each action definition must include:
 
 * stable ID,
-* title,
-* description,
-* typed parameters,
-* typed result,
+* semantic version,
+* title and description,
+* input schema,
+* result schema,
 * permission scope,
 * confirmation policy,
 * side-effect classification,
 * deterministic backend handler.
 
-Example:
+The action executor receives an authenticated context from the backend. Action input schemas must not include `userId` fields supplied by the client or LLM.
 
 ```ts
-type AppActionDefinition = {
+type ActionSource =
+  | "flutter"
+  | "internal_agent"
+  | "android_appfunctions"
+  | "ios_appintents"
+  | "rest";
+
+type ActionContext = {
+  actorUserId: string;
+  actorType: "user" | "internal_agent" | "external_agent";
+  source: ActionSource;
+  scopes: string[];
+  timezone: string;
+  locale: string;
+  trustedModeEnabled: boolean;
+  traceId: string;
+  idempotencyKey?: string;
+};
+
+type AppActionDefinition<Input, Result> = {
   id: string;
   version: string;
   title: string;
   description: string;
-  parametersSchema: unknown;
+  inputSchema: unknown;
   resultSchema: unknown;
   permissionScope: string;
   confirmationPolicy:
@@ -408,210 +357,86 @@ type AppActionDefinition = {
     | "trusted_mode_only";
   sideEffect: "read" | "propose" | "write" | "delete";
   executionMode: "foreground" | "background" | "either";
+  handler: (ctx: ActionContext, input: Input) => Promise<Result>;
 };
 ```
 
-This internal structure is intentionally designed to map later to:
+The LLM sees action names, descriptions, and input schemas. It must not receive direct database access, service clients, or privileged context fields.
 
-```text
-Android AppFunctions
-iOS App Intents
-Internal LLM tools
-Flutter UI actions
-REST endpoints
+## Initial Canonical Actions
+
+| Action | Side effect | Confirmation | Purpose |
+| --- | --- | --- | --- |
+| `query_food_memory` | read | never | Retrieve user-scoped semantic meal memories. |
+| `search_nutrition_database` | read | never | Search food data sources and custom foods. |
+| `propose_meal_log` | propose | before_commit | Create a pending meal proposal from text or resolved memory. |
+| `commit_meal` | write | before_commit / trusted_mode_only | Commit a pending proposal to meal records. |
+| `correct_meal` | write | before_commit | Apply a correction to a proposal or meal. |
+| `delete_meal` | delete | always | Soft-delete or remove a meal. |
+| `get_daily_summary` | read | never | Return calories/macros for a day. |
+| `get_remaining_targets` | read | never | Return remaining daily targets. |
+| `get_meal_history` | read | never | Return committed meal history. |
+| `get_usual_meals` | read | never | Return templates and aliases. |
+| `create_meal_template` | write | before_commit | Create a reusable meal template. |
+| `update_meal_template` | write | before_commit | Update a recurring template. |
+| `delete_meal_template` | delete | always | Archive a template and its semantic aliases. |
+| `update_nutrition_targets` | write | always | Modify calorie and macro targets. |
+| `export_user_data` | read | always | Export user data. |
+| `delete_account` | delete | always | Delete account data and embeddings. |
+
+## Action Examples
+
+`propose_meal_log` input should omit `userId`:
+
+```ts
+type ProposeMealLogInput = {
+  text: string;
+  occurredAt?: string;
+  mealType?: "breakfast" | "lunch" | "dinner" | "snack" | "post_workout" | "unknown";
+};
 ```
 
----
+The backend derives `actorUserId`, timezone, locale, scopes, and source from `ActionContext`.
 
-## `flutter_intents` / `app_intents` Usage
+Expected output:
 
-The Flutter intents package should be used to help expose app actions/intents from the Flutter project to mobile OS systems.
-
-The package’s role:
-
-```text
-Mobile OS action/intents layer
-  ↓
-flutter_intents bridge
-  ↓
-Dart handler
-  ↓
-Backend action API
+```ts
+type MealProposalResult = {
+  proposalId: string;
+  items: Array<{
+    foodName: string;
+    quantity: number;
+    unit: string;
+    state?: "raw" | "cooked" | "unknown";
+    calories: number;
+    proteinG: number;
+    carbsG: number;
+    fatG: number;
+    confidence: number;
+    source: "nutrition_database" | "user_template" | "manual" | "unknown";
+  }>;
+  totalCalories: number;
+  totalProteinG: number;
+  totalCarbsG: number;
+  totalFatG: number;
+  confidence: number;
+  requiresConfirmation: boolean;
+  reason?: string;
+};
 ```
 
-The package should not contain core business logic.
+`commit_meal` should accept only a proposal ID and confirmation metadata:
 
-Correct usage:
-
-```text
-Gemini/Siri invokes log_meal
-  ↓
-flutter_intents receives/bridges the action
-  ↓
-Dart handler receives params
-  ↓
-Dart calls backend action API
-  ↓
-Backend creates meal proposal
+```ts
+type CommitMealInput = {
+  proposalId: string;
+  confirmationSource: "user_tap" | "user_voice" | "trusted_auto_commit" | "external_agent_confirmed";
+};
 ```
 
-Incorrect usage:
+The handler must verify that the proposal belongs to `ctx.actorUserId`.
 
-```text
-Gemini/Siri invokes log_meal
-  ↓
-flutter_intents
-  ↓
-Dart handler calculates nutrition, updates DB, manages memory
-```
-
-Core rule:
-
-> Intent handlers should be thin. They should forward action requests to the backend.
-
----
-
-## Android and iOS Platform Differences
-
-Flutter projects have separate platform folders:
-
-```text
-apps/mobile/
-  lib/       # shared Dart code
-  android/   # Android-only native code
-  ios/       # iOS-only native code
-```
-
-Android builds use:
-
-```text
-lib/
-android/
-```
-
-iOS builds use:
-
-```text
-lib/
-ios/
-```
-
-Android does not compile Swift files.
-
-iOS does not compile Kotlin files.
-
-This allows us to keep Android AppFunctions and iOS App Intents in the same Flutter project without conflict.
-
----
-
-## Android AppFunctions Strategy
-
-Android AppFunctions should expose selected app capabilities to Gemini/Android agents when available.
-
-Future Android actions:
-
-```text
-log_meal
-correct_meal
-delete_meal
-get_daily_summary
-get_usual_meals
-create_meal_template
-```
-
-Android flow:
-
-```text
-Gemini / Android agent
-  ↓
-Android AppFunction
-  ↓
-flutter_intents bridge or native adapter
-  ↓
-Dart handler
-  ↓
-Backend action API
-  ↓
-Backend tool executor
-```
-
-The Android adapter must not duplicate business logic.
-
----
-
-## iOS App Intents Strategy
-
-iOS App Intents should expose selected app capabilities to Siri, Shortcuts, Spotlight, and Apple Intelligence where supported.
-
-Future iOS intents:
-
-```text
-LogMealIntent
-CorrectLastMealIntent
-DeleteLastMealIntent
-ShowDailySummaryIntent
-CreateUsualMealIntent
-```
-
-iOS flow:
-
-```text
-Siri / Apple Intelligence
-  ↓
-iOS AppIntent
-  ↓
-flutter_intents bridge or Swift adapter
-  ↓
-Dart handler
-  ↓
-Backend action API
-  ↓
-Backend tool executor
-```
-
-Important note:
-
-iOS App Intents may still require static Swift declarations so that Siri/Shortcuts can discover the actions. The Flutter intents package can reduce native work and bridge to Dart, but it may not eliminate all Swift declarations.
-
-Therefore:
-
-* keep iOS-specific intent declarations inside `ios/`,
-* keep business logic out of Swift,
-* forward everything to Dart/backend.
-
----
-
-## Backend Action Layer
-
-The backend action layer is the core of the application.
-
-It must define and execute canonical actions.
-
-Initial actions:
-
-```text
-query_food_memory
-search_nutrition_database
-propose_meal_log
-commit_meal
-correct_meal
-delete_meal
-get_daily_summary
-get_remaining_targets
-get_meal_history
-get_usual_meals
-create_meal_template
-update_meal_template
-delete_meal_template
-```
-
-The internal agent and future OS agents must operate through these actions.
-
-The LLM must never directly mutate the database.
-
----
-
-## Backend Folder Structure
+## Backend Architecture
 
 Recommended backend structure:
 
@@ -626,51 +451,27 @@ apps/backend/
 
     db/
       client.ts
-      schema/
-        users.ts
-        meals.ts
-        meal_items.ts
-        meal_proposals.ts
-        meal_proposal_items.ts
-        food_items.ts
-        meal_templates.ts
-        meal_template_items.ts
-        food_memories.ts
-        corrections.ts
-        nutrition_targets.ts
-        action_calls.ts
-        confirmation_requests.ts
-        audit_events.ts
       migrations/
+      schema/
 
     modules/
       auth/
       users/
-      meals/
-      nutrition/
-      memory/
       actions/
       agent/
       confirmations/
-      audit/
+      meals/
+      memory/
+      nutrition/
       summaries/
+      audit/
+      jobs/
 
     integrations/
       llm/
-        provider.ts
-        openrouter.provider.ts
-        deepseek.provider.ts
-        gemini.provider.ts
-        openai.provider.ts
-
       stt/
-        provider.ts
-        whisper.provider.ts
-
       nutrition_sources/
-        usda.provider.ts
-        openfoodfacts.provider.ts
-        custom.provider.ts
+      embeddings/
 
     routes/
       health.routes.ts
@@ -678,677 +479,20 @@ apps/backend/
       actions.routes.ts
       meals.routes.ts
       summaries.routes.ts
-      memory.routes.ts
+      templates.routes.ts
 ```
 
----
-
-## Shared Package
-
-`packages/shared` is mandatory.
-
-It should contain:
-
-```text
-packages/shared/
-  src/
-    domain/
-      user.ts
-      food.ts
-      meal.ts
-      nutrition.ts
-      memory.ts
-      audit.ts
-
-    actions/
-      names.ts
-      schemas.ts
-      registry.ts
-      permissions.ts
-      descriptions.ts
-      confirmation-policy.ts
-
-    api/
-      dto.ts
-      errors.ts
-
-    validation/
-      common.ts
-
-    index.ts
-```
-
-Use shared schemas for:
-
-* backend validation,
-* Flutter DTOs,
-* internal LLM tool definitions,
-* Android/iOS action mapping,
-* tests,
-* documentation.
-
-Prefer a schema validation library such as Zod if the backend and shared package are TypeScript-based.
-
----
-
-## Example Action Definition
-
-```ts
-export const ProposeMealLogAction = {
-  id: "propose_meal_log",
-  version: "1.0.0",
-  title: "Propose Meal Log",
-  description: "Create a pending meal log proposal from natural language food input.",
-  permissionScope: "nutrition.write.propose",
-  confirmationPolicy: "before_commit",
-  sideEffect: "propose",
-  executionMode: "either",
-  parametersSchema: ProposeMealLogInputSchema,
-  resultSchema: MealProposalSchema,
-} as const;
-```
-
-The same action should later map to:
-
-```text
-Internal agent tool
-REST endpoint
-Android AppFunction
-iOS AppIntent
-Flutter UI action
-```
-
----
-
-## Canonical Actions
-
-### `query_food_memory`
-
-Purpose:
-
-Retrieve user-specific meal memories related to a concept.
-
-Example user phrases:
-
-```text
-“usual breakfast”
-“post-gym meal”
-“same as yesterday”
-“my chicken meal”
-```
-
-Input:
-
-```ts
-{
-  userId: string;
-  concept: string;
-  limit?: number;
-}
-```
-
-Output:
-
-```ts
-{
-  memories: Array<{
-    id: string;
-    label: string;
-    description: string;
-    confidence: number;
-    linkedTemplateId?: string;
-    lastUsedAt?: string;
-  }>;
-}
-```
-
----
-
-### `search_nutrition_database`
-
-Purpose:
-
-Search food/nutrition sources.
-
-Input:
-
-```ts
-{
-  query: string;
-  locale?: string;
-  brand?: string;
-  barcode?: string;
-}
-```
-
-Output:
-
-```ts
-{
-  results: Array<{
-    foodId: string;
-    name: string;
-    source: "usda" | "openfoodfacts" | "custom" | "manual";
-    caloriesPer100g?: number;
-    proteinPer100g?: number;
-    carbsPer100g?: number;
-    fatPer100g?: number;
-  }>;
-}
-```
-
-The LLM must not invent nutrition data when authoritative or user-specific data is available.
-
----
-
-### `propose_meal_log`
-
-Purpose:
-
-Create a pending meal proposal from natural language.
-
-Input:
-
-```ts
-{
-  userId: string;
-  text: string;
-  occurredAt?: string;
-  mealType?: "breakfast" | "lunch" | "dinner" | "snack" | "post_workout" | "unknown";
-  timezone?: string;
-  source: "flutter" | "internal_agent" | "android_appfunctions" | "ios_appintents" | "rest";
-}
-```
-
-Output:
-
-```ts
-{
-  proposalId: string;
-  items: Array<{
-    foodName: string;
-    quantity: number;
-    unit: string;
-    state?: "raw" | "cooked" | "unknown";
-    calories: number;
-    proteinG: number;
-    carbsG: number;
-    fatG: number;
-    confidence: number;
-    source: string;
-  }>;
-  totalCalories: number;
-  totalProteinG: number;
-  totalCarbsG: number;
-  totalFatG: number;
-  confidence: number;
-  requiresConfirmation: boolean;
-  reason?: string;
-}
-```
-
-This action should create a proposal, not directly commit a meal, unless trusted auto-commit is explicitly enabled.
-
----
-
-### `commit_meal`
-
-Purpose:
-
-Commit a pending meal proposal after confirmation.
-
-Input:
-
-```ts
-{
-  userId: string;
-  proposalId: string;
-  confirmationSource: "user_tap" | "user_voice" | "trusted_auto_commit" | "external_agent_confirmed";
-}
-```
-
-Output:
-
-```ts
-{
-  mealId: string;
-  committedAt: string;
-  summary: {
-    calories: number;
-    proteinG: number;
-    carbsG: number;
-    fatG: number;
-  };
-}
-```
-
----
-
-### `correct_meal`
-
-Purpose:
-
-Apply a user correction to a proposal or committed meal.
-
-Input:
-
-```ts
-{
-  userId: string;
-  mealId?: string;
-  proposalId?: string;
-  correction: string;
-}
-```
-
-Output:
-
-```ts
-{
-  updatedMealId?: string;
-  updatedProposalId?: string;
-  changes: Array<{
-    field: string;
-    before: unknown;
-    after: unknown;
-  }>;
-  shouldUpdateMemory: boolean;
-}
-```
-
-Corrections should update memory/templates when appropriate.
-
-Example:
-
-```text
-User: “No, my protein shake uses 300ml milk, not 250ml.”
-
-System:
-- correct current meal/proposal
-- update protein shake template/default if recurring
-```
-
----
-
-### `delete_meal`
-
-Purpose:
-
-Delete or mark a meal as removed.
-
-Input:
-
-```ts
-{
-  userId: string;
-  mealId?: string;
-  selector?: "last" | "today_breakfast" | "today_lunch" | "today_dinner" | "today_snack";
-}
-```
-
-Output:
-
-```ts
-{
-  deletedMealId?: string;
-  requiresConfirmation: boolean;
-  reason?: string;
-}
-```
-
-Destructive actions usually require confirmation.
-
----
-
-### `get_daily_summary`
-
-Purpose:
-
-Return calories/macros for one day.
-
-Input:
-
-```ts
-{
-  userId: string;
-  date: string;
-}
-```
-
-Output:
-
-```ts
-{
-  date: string;
-  caloriesConsumed: number;
-  proteinG: number;
-  carbsG: number;
-  fatG: number;
-  targetCalories?: number;
-  targetProteinG?: number;
-  remainingCalories?: number;
-  meals: Array<{
-    mealId: string;
-    mealType: string;
-    calories: number;
-  }>;
-}
-```
-
----
-
-### `get_usual_meals`
-
-Purpose:
-
-Return learned/user-created meal templates.
-
-Input:
-
-```ts
-{
-  userId: string;
-}
-```
-
-Output:
-
-```ts
-{
-  templates: Array<{
-    id: string;
-    name: string;
-    aliases: string[];
-    items: Array<{
-      foodName: string;
-      quantity: number;
-      unit: string;
-    }>;
-    usageCount: number;
-    lastUsedAt?: string;
-  }>;
-}
-```
-
----
-
-## Internal Agent Requirements
-
-The internal agent is used in the MVP.
-
-It must:
-
-1. receive the user’s natural language input,
-2. load available actions/tools,
-3. load relevant user context,
-4. call the LLM provider,
-5. validate selected tool/action arguments,
-6. execute deterministic backend actions,
-7. return a structured response to Flutter.
-
-The internal agent should support tool calling.
-
-Expected flow:
-
-```text
-User: “Log my usual breakfast.”
-
-Backend agent:
-1. reads action registry
-2. calls query_food_memory("usual breakfast")
-3. calls propose_meal_log(...)
-4. returns meal proposal
-```
-
-The internal agent must not directly update the database outside the action executor.
-
----
-
-## LLM Safety Rules
-
-The LLM must not:
-
-* directly write to the database,
-* invent nutrition values without lookup,
-* bypass confirmation policy,
-* delete meals without confirmation,
-* modify nutrition targets without confirmation,
-* expose one user’s data to another user,
-* silently commit ambiguous meals.
-
-The LLM may:
-
-* interpret natural language,
-* select tools/actions,
-* ask clarification questions,
-* summarize results,
-* propose structured meal logs,
-* explain uncertainty.
-
----
-
-## Confirmation Policy
-
-The app must be proposal-first.
-
-Default write flow:
-
-```text
-Natural language input
-  ↓
-Meal proposal
-  ↓
-User confirmation/correction
-  ↓
-Committed meal
-```
-
-Confidence levels:
-
-```text
-Level 0 — Read-only
-No confirmation needed.
-Example: get_daily_summary.
-
-Level 1 — Safe proposal
-Agent can create a pending proposal.
-No permanent write.
-
-Level 2 — Trusted write
-Agent may commit common/high-confidence meals only if user explicitly enabled trusted mode.
-Example: “usual breakfast.”
-
-Level 3 — Sensitive/destructive
-Always confirm.
-Examples:
-- delete meal
-- modify targets
-- export history
-```
-
-Examples that require confirmation:
-
-```text
-“I ate chicken and rice.”
-“I had a slice of cake.”
-“Delete the last meal.”
-“Change my calorie target.”
-```
-
-Examples that may be eligible for trusted auto-commit:
-
-```text
-“Log my usual breakfast.”
-“Same protein shake as always.”
-```
-
----
-
-## Data Model Requirements
-
-Minimum tables:
-
-```text
-users
-nutrition_targets
-food_items
-meals
-meal_items
-meal_proposals
-meal_proposal_items
-meal_templates
-meal_template_items
-food_memories
-corrections
-action_calls
-confirmation_requests
-audit_events
-agent_connections
-```
-
-### Meals
-
-Committed source-of-truth meal records.
-
-Must include:
-
-* user ID,
-* meal type,
-* timestamp,
-* source,
-* total calories/macros,
-* confirmation metadata.
-
-### Meal Proposals
-
-Pending meal logs before final commit.
-
-Statuses:
-
-```text
-pending
-confirmed
-corrected
-rejected
-expired
-committed
-```
-
-### Food Memories
-
-Semantic/personal memory records.
-
-Must include:
-
-* user ID,
-* label/text,
-* embedding,
-* linked template/meal if relevant,
-* confidence,
-* usage count,
-* last used timestamp.
-
-### Action Calls
-
-Every tool/action call must be logged.
-
-Must include:
-
-* user ID,
-* action name,
-* source interface,
-* input JSON,
-* output JSON or error,
-* model/provider if agent-initiated,
-* timestamp,
-* latency,
-* confirmation status.
-
-### Audit Events
-
-Every important mutation must create an audit event.
-
-Examples:
-
-```text
-meal_proposal_created
-meal_committed
-meal_corrected
-meal_deleted
-template_created
-memory_updated
-agent_connection_created
-agent_connection_revoked
-```
-
----
-
-## Memory System
-
-Use hybrid memory:
-
-```text
-PostgreSQL = source of truth
-pgvector = semantic retrieval
-Rules/templates = learned user defaults
-Nutrition DB/API = factual nutrition source
-LLM = interpretation layer
-```
-
-Do not use vector memory as the source of truth.
-
-Vector memory is for fuzzy retrieval of:
-
-* usual meal phrases,
-* meal aliases,
-* repeated meal patterns,
-* vague references,
-* contextual habits.
-
-Examples:
-
-```text
-“usual breakfast”
-“post-gym meal”
-“cafeteria sandwich”
-“chicken and rice after training”
-```
-
----
-
-## Nutrition Data
-
-Initial sources:
-
-```text
-USDA FoodData Central
-OpenFoodFacts
-custom user foods
-manual entries
-```
-
-For Spain/Europe, OpenFoodFacts and custom foods are important.
-
-The system must support:
-
-* generic foods,
-* branded foods,
-* user custom foods,
-* raw/cooked state,
-* unit conversion,
-* correction-based personalization.
-
-Do not over-optimize the nutrition database before validating the logging loop.
-
-The core advantage is:
-
-```text
-personal meal memory + correction learning + low-friction agent logging
-```
-
----
-
-## Flutter App Requirements
+Backend implementation rules:
+
+* Action handlers must be deterministic and unit-testable without LLM calls.
+* The agent module can decide which action to call, but it cannot bypass the action executor.
+* Every write action must log an `action_call` and an `audit_event`.
+* Write actions must use database transactions.
+* Commit/correction/delete endpoints must be idempotent where retries are possible.
+* Nutrition calculation should live in the nutrition module, not in agent prompts.
+* Prompt text and model names must be versioned and logged for agent-initiated action calls.
+
+## Flutter Architecture
 
 Recommended Flutter structure:
 
@@ -1362,131 +506,421 @@ apps/mobile/
       router.dart
       theme.dart
 
-    core/
-      config/
-      networking/
-        api_client.dart
-      auth/
-      errors/
-      utils/
+    data/
+      models/
+      repositories/
+      services/
 
-    features/
-      onboarding/
-      auth/
-      voice_log/
-      meal_confirmation/
-      dashboard/
-      meal_history/
-      meal_templates/
-      agent_permissions/
-      settings/
+    domain/
+      models/
+      use_cases/
+
+    ui/
+      core/
+      features/
+        voice_log/
+          view_models/
+          views/
+        meal_confirmation/
+          view_models/
+          views/
+        dashboard/
+          view_models/
+          views/
+        meal_history/
+          view_models/
+          views/
+        meal_templates/
+          view_models/
+          views/
+        settings/
+          view_models/
+          views/
 
     platform/
       intents/
-        app_intents_adapter.dart
         action_bridge.dart
+        android_appfunctions_adapter.dart
+        ios_appintents_adapter.dart
 
-    models/
-      meal.dart
-      meal_proposal.dart
-      daily_summary.dart
+    generated/
+      api/
 ```
 
-### `voice_log`
+Flutter should use an MVVM-style presentation layer:
 
-Responsibilities:
+* Views render UI and handle local visual state only.
+* ViewModels expose immutable state snapshots and command methods.
+* Repositories call backend API services and transform DTOs into domain models.
+* Platform adapters translate Android/iOS intent invocations into backend action requests.
 
-* record voice,
-* submit audio or text to backend,
-* show loading/progress,
-* display resulting proposal.
+No meal parsing, nutrition reasoning, vector retrieval, or committed data mutation should happen inside Flutter.
 
-No meal parsing should happen locally.
+### Flutter Development Skills
 
-### `meal_confirmation`
+Flutter implementation work must use the existing project skills under `.agents/skills` when the task matches them:
 
-Responsibilities:
+* Use `flutter-apply-architecture-best-practices` when creating or refactoring the Flutter MVVM structure.
+* Use `flutter-setup-declarative-routing` when adding app navigation, deep links, or route guards.
+* Use `flutter-use-http-package` when implementing backend API access outside the generated client runtime.
+* Use `flutter-build-responsive-layout` for mobile/tablet layout work and adaptive screens.
+* Use `flutter-fix-layout-issues` whenever Flutter reports layout overflow or unbounded constraint errors.
+* Use `flutter-add-widget-test` for component-level widget behavior and rendering tests.
+* Use `flutter-add-integration-test` for end-to-end flows such as login, text logging, proposal confirmation, correction, and dashboard refresh.
+* Use `flutter-add-widget-preview` when building reusable or visually complex widgets.
+* Use `flutter-setup-localization` before introducing user-visible strings that need localization.
+* Use `flutter-implement-json-serialization` only for small manual DTOs not covered by the generated OpenAPI client.
 
-* display proposal,
-* confirm,
-* correct,
-* reject,
-* call backend commit/correct endpoints.
+## Mobile OS Agent Integrations
 
-### `dashboard`
+### Platform Reality Check
 
-Responsibilities:
+As of this review on 2026-05-08:
 
-* show today’s calories/macros,
-* remaining targets,
-* daily meals.
+* Android AppFunctions are an Android 16 / API 36+ capability and must be feature-detected.
+* Authorized Android callers require the platform permission to discover and execute AppFunctions.
+* Apple App Intents are the native route for exposing app capabilities to Siri, Shortcuts, Spotlight, widgets, controls, and Apple Intelligence experiences.
+* The current `app_intents` Flutter package advertises iOS App Intents and Android AppFunctions support, but also lists iOS 17+ and Android API 36+ requirements.
 
-### `meal_history`
+Therefore, OS-agent integration must be a feature-flagged adapter layer. The MVP must remain fully usable through the Flutter UI and backend internal agent on devices that do not support these OS features.
 
-Responsibilities:
+The intended stance is:
 
-* show committed meals,
-* allow correction/deletion through backend.
+```text
+Do not depend on OS integrations for MVP usability.
+Do prototype OS integrations during the MVP if tooling and devices allow it.
+```
 
-### `meal_templates`
+The MVP may include an experimental App Intents/AppFunctions spike as long as it remains a thin adapter over the backend action layer and does not block the core Flutter + backend agent flow.
 
-Responsibilities:
+### Experimental MVP Spike
 
-* show usual meals,
-* allow manual template creation/editing.
+Goal:
 
-### `agent_permissions`
+```text
+Prove that the backend action registry can be exposed through real mobile OS action systems without changing backend business logic.
+```
 
-Responsibilities:
+Required constraints:
 
-* show connected agents/adapters,
-* show trusted mode settings,
-* show scopes/permissions,
-* revoke access.
+* The spike must be feature-flagged.
+* The app must work without the spike.
+* The spike must call the same backend action API used by Flutter and the internal agent.
+* The spike must not commit meals directly from native Kotlin, Swift, or Flutter adapter code.
+* The spike must not duplicate nutrition lookup, memory retrieval, confirmation policy, or action execution.
+* Any native/generated declarations must be treated as adapters generated from or mapped to the canonical action registry.
 
----
+Recommended initial OS-exposed actions:
+
+| Action | Why | Confirmation behavior |
+| --- | --- | --- |
+| `get_daily_summary` | Read-only and easy to validate. | No confirmation. |
+| `get_usual_meals` | Read-only and useful for OS agent/entity tests. | No confirmation. |
+| `propose_meal_log` | Tests natural app capability without permanent writes. | Creates proposal only. |
+
+Do not expose these actions in the first spike:
+
+```text
+commit_meal
+delete_meal
+update_nutrition_targets
+delete_account
+export_user_data
+```
+
+Those require the confirmation system, session handling, user messaging, and audit trail to be mature first.
+
+Spike success criteria:
+
+* A real iOS App Intent can call the backend and return a result through Shortcuts/Siri where supported.
+* A real Android AppFunction can call the backend on API 36+ tooling/device support where available.
+* The backend logs each OS-originated action with source `ios_appintents` or `android_appfunctions`.
+* The same action handler produces equivalent results when called by Flutter, the internal agent, and the OS adapter.
+* Unsupported devices hide or disable OS integration entry points without affecting the core app.
+
+### Android AppFunctions
+
+Android AppFunctions are an adapter for Android devices that support the platform feature. The MVP app must not require AppFunctions to work, but an experimental AppFunction spike may be included.
+
+Android flow:
+
+```text
+Gemini / authorized Android caller
+  -> Android AppFunction
+  -> Kotlin adapter or generated app_intents adapter
+  -> Flutter action bridge if app process is available
+  -> backend action API
+  -> canonical action executor
+```
+
+Implementation rules:
+
+* Keep Android-specific declarations under `apps/mobile/android/`.
+* Treat AppFunctions availability as feature-detected and feature-flagged.
+* Target Android API 36+ only for AppFunctions-specific code.
+* Keep the normal Flutter app minimum Android version independent from AppFunctions support.
+* Prefer generated Kotlin declarations from `app_intents_codegen` only if the generated code cleanly maps to backend action definitions.
+* Do not duplicate backend action logic in Kotlin.
+* The adapter must call the backend with the currently authenticated app user.
+* The backend must still enforce scopes, confirmation policy, and ownership.
+* If an AppFunction is invoked while the user is not authenticated, return a structured "authentication required" result and request foreground continuation where the platform supports it.
+* Test with one read action before exposing proposal actions.
+
+### iOS App Intents
+
+iOS App Intents are an adapter for Siri, Shortcuts, Spotlight, widgets, and Apple Intelligence experiences. The MVP app must not require Siri/App Intents to work, but an experimental App Intent spike should be prioritized before Android if only one OS spike is feasible because iOS App Intents can be tested through Shortcuts/Siri flows today.
+
+iOS flow:
+
+```text
+Siri / Shortcuts / Apple Intelligence
+  -> App Intent
+  -> Swift declaration or generated adapter
+  -> Flutter action bridge if available
+  -> backend action API
+  -> canonical action executor
+```
+
+Implementation rules:
+
+* Keep iOS-specific declarations under `apps/mobile/ios/`.
+* Expect some static Swift declarations or generated Swift code for discoverability.
+* Prefer generated Swift declarations from `app_intents_codegen` only if the generated code cleanly maps to backend action definitions.
+* Use App Groups only if an extension process needs shared state.
+* Do not put nutrition or action execution logic in Swift.
+* The backend must still enforce scopes, confirmation policy, and ownership.
+* If an App Intent is invoked while the user is not authenticated, return a clear authentication-required dialog/result and open the app when supported.
+* Test first with `get_daily_summary`, then `propose_meal_log`.
+* Treat Siri/Apple Intelligence natural language behavior as platform-dependent. The deterministic test surface is the App Intent appearing and running from Shortcuts.
+
+### `app_intents` Package Position
+
+The `app_intents` Flutter package can be evaluated as an adapter because it advertises iOS App Intents and Android AppFunctions support. It should not be treated as the core architecture because:
+
+* the backend action layer is the source of truth,
+* OS API availability is platform- and version-dependent,
+* native declarations/code generation may still be needed,
+* the package may need fallback native implementations if it lacks required behavior.
+
+Before production use, pin the package version, build a proof of concept for one read action and one write/proposal action, and verify behavior on real Android and iOS devices.
+
+The evaluation should answer:
+
+* Can action declarations be generated from the canonical backend action registry or a shared contract?
+* Can iOS App Intents and Android AppFunctions call Dart/Flutter reliably enough, or is direct native-to-backend code simpler?
+* Can authentication-required states open the app cleanly?
+* Can results be returned in a user-friendly format to Shortcuts/Siri/Gemini surfaces?
+* Does the package impose OS version constraints that are acceptable for optional adapters?
+* Does the package require native changes that should be owned under `apps/mobile/ios/` and `apps/mobile/android/`?
 
 ## API Requirements
 
 Minimum backend routes:
 
 ```text
-GET  /health
+GET    /v1/health
 
-GET  /actions
-POST /actions/execute
+GET    /v1/actions
+POST   /v1/actions/:actionId/execute
 
-POST /agent/run
+POST   /v1/agent/runs
 
-POST /meals/proposals
-POST /meals/proposals/:id/commit
-POST /meals/proposals/:id/correct
-POST /meals/:id/correct
-DELETE /meals/:id
+POST   /v1/meals/proposals
+POST   /v1/meals/proposals/:id/commit
+POST   /v1/meals/proposals/:id/correct
+POST   /v1/meals/:id/correct
+DELETE /v1/meals/:id
 
-GET  /summary/daily
-GET  /meals
-GET  /meal-templates
-POST /meal-templates
+GET    /v1/summary/daily
+GET    /v1/meals
+GET    /v1/meal-templates
+POST   /v1/meal-templates
+PATCH  /v1/meal-templates/:id
+DELETE /v1/meal-templates/:id
 
-GET  /agent-connections
-POST /agent-connections
-DELETE /agent-connections/:id
+GET    /v1/agent-connections
+POST   /v1/agent-connections
+DELETE /v1/agent-connections/:id
 ```
 
-`/agent/run` is used by the internal backend agent.
+All authenticated routes must derive the user from the session or access token. Do not trust `userId` in request bodies.
 
-`/actions/execute` is used by future adapters such as AppFunctions/App Intents.
+`/v1/agent/runs` is used by the internal backend agent.
+
+`/v1/actions/:actionId/execute` is used by Flutter UI commands and future adapters.
 
 Both must use the same action executor.
 
----
+## Data Model Requirements
+
+Minimum tables are defined in `docs/db-vector-architecture.md`.
+
+At application level, the model must support:
+
+* users,
+* user credentials,
+* auth sessions,
+* password reset tokens,
+* nutrition targets,
+* food items and custom foods,
+* meal proposals,
+* meal proposal items,
+* committed meals,
+* committed meal item nutrition snapshots,
+* meal templates,
+* meal template item snapshots,
+* user semantic memories,
+* embeddings,
+* corrections,
+* action calls,
+* confirmation requests,
+* audit events,
+* agent connections,
+* outbox/background jobs.
+
+Committed meals and meal items must store nutrition snapshots. If a food provider changes nutrition data later, historical meal totals must remain stable unless the user explicitly recalculates them.
+
+## Memory System
+
+Use hybrid memory:
+
+```text
+PostgreSQL = source of truth
+pgvector = semantic retrieval
+templates = structured recurring user defaults
+nutrition providers = factual nutrition source
+LLM = interpretation and tool-selection layer
+self-hosted bge-m3 = multilingual embedding generation
+```
+
+Vector memory is for fuzzy retrieval of:
+
+* usual meal phrases,
+* meal aliases,
+* repeated meal patterns,
+* vague references,
+* contextual habits.
+
+Vector memory is not for:
+
+* committed calories,
+* source-of-truth meal items,
+* account state,
+* permissions,
+* audit history,
+* deterministic temporal lookup such as "same lunch as yesterday".
+
+## Nutrition Data
+
+Initial sources:
+
+```text
+OpenFoodFacts
+USDA FoodData Central
+custom user foods
+manual entries
+```
+
+For Spain and Europe, OpenFoodFacts and custom foods are important. The app should also support metric units by default.
+
+Nutrition lookup priority:
+
+```text
+1. User-confirmed meal templates and user custom foods.
+2. Barcode or exact branded product match from OpenFoodFacts.
+3. Manual user-provided nutrition values.
+4. Generic food match from USDA FoodData Central or another reliable generic nutrition database.
+5. Backend-calculated estimates from known ingredients, quantities, and unit conversions.
+6. LLM-only estimate only as a low-confidence fallback, requiring user confirmation.
+```
+
+The LLM must not be treated as an authoritative nutrition database. If the backend cannot resolve nutrition values from trusted sources, the proposal must clearly expose uncertainty and require confirmation or correction.
+
+The system must support:
+
+* generic foods,
+* branded foods,
+* user custom foods,
+* raw/cooked state,
+* grams, milliliters, pieces, servings, and common household units,
+* conversion to normalized gram or milliliter quantities where possible,
+* correction-based personalization.
+
+Do not over-optimize food search before validating the logging loop. The core advantage is personal meal memory plus low-friction correction.
+
+## Internal Agent Requirements
+
+The internal agent must:
+
+1. receive authenticated user input,
+2. load available action definitions,
+3. load safe user context through backend services,
+4. call the LLM provider with allowed tool schemas,
+5. validate selected tool/action arguments,
+6. execute deterministic backend actions through the executor,
+7. return a structured response to Flutter.
+
+Expected flow:
+
+```text
+User: "Log my usual breakfast."
+
+Backend agent:
+1. calls query_food_memory({ concept: "usual breakfast" })
+2. calls propose_meal_log({ text: "usual breakfast", mealType: "breakfast" })
+3. returns a meal proposal
+```
+
+The agent must not directly update the database outside the action executor.
+
+## Safety Rules
+
+The LLM must not:
+
+* directly write to the database,
+* invent nutrition values when lookup or user-specific data is available,
+* bypass confirmation policy,
+* delete meals without confirmation,
+* modify nutrition targets without confirmation,
+* expose one user's data to another user,
+* silently commit ambiguous meals,
+* receive raw secrets or database credentials,
+* receive user data that is not needed for the requested action.
+
+The LLM may:
+
+* interpret natural language,
+* select tools/actions,
+* ask clarification questions,
+* summarize results,
+* propose structured meal logs,
+* explain uncertainty.
+
+## Confirmation Policy
+
+The default write flow is proposal-first:
+
+```text
+Natural language input
+  -> meal proposal
+  -> user confirmation or correction
+  -> committed meal
+```
+
+Confirmation levels:
+
+| Level | Name | Behavior | Examples |
+| --- | --- | --- | --- |
+| 0 | Read-only | No confirmation needed. | `get_daily_summary`, `get_meal_history` |
+| 1 | Safe proposal | Agent can create pending proposal. | `propose_meal_log` |
+| 2 | Trusted write | Commit only if user enabled trusted mode and confidence is high. | "Log my usual breakfast." |
+| 3 | Sensitive/destructive | Always confirm. | delete meal, modify targets, export, delete account |
+
+Trusted auto-commit is an MVP feature, but it must be disabled by default. Users must explicitly opt in, and the UI must make it easy to turn off.
 
 ## Permissions
 
-Design for future scoped action access.
-
-Possible scopes:
+Design for scoped action access:
 
 ```text
 nutrition.read.summary
@@ -1498,47 +932,234 @@ nutrition.write.correct
 nutrition.write.delete
 nutrition.targets.modify
 nutrition.export
+account.delete
 ```
 
 Default policy:
 
+* Read summary: allowed with scope.
+* Query memory: allowed with scope.
+* Propose meal: allowed with scope.
+* Commit meal: confirmation required unless trusted mode allows it.
+* Delete meal: confirmation required.
+* Modify targets: confirmation required.
+* Export history: explicit confirmation required.
+* Delete account: explicit confirmation required.
+
+## Privacy and Security Requirements
+
+The app handles health-adjacent personal data. It must support:
+
+* custom backend-owned authenticated sessions,
+* HTTPS in production,
+* server-side authorization on every route,
+* data export,
+* delete account,
+* delete all user embeddings and memory,
+* revoke agent connections,
+* audit agent actions,
+* redact sensitive data in logs,
+* provider API keys stored only on the backend,
+* no medical diagnosis or treatment claims.
+
+If a user deletes account data, related embeddings and semantic memories must be deleted too.
+
+## Scoped Architecture Decisions
+
+### Authentication
+
+Decision: the MVP will use custom backend-owned authentication sessions instead of an external auth provider.
+
+Scope:
+
+* The Bun + TypeScript backend owns registration, login, logout, session issuance, session validation, refresh/rotation, password reset, and account deletion.
+* PostgreSQL stores users, password credentials, session records, password reset tokens, and security audit events.
+* Flutter authenticates only through backend API endpoints and stores session material using platform secure storage.
+* Backend routes derive the application user from the validated session. Request bodies must not provide trusted user identity.
+* The action executor receives identity through `ActionContext.actorUserId`.
+
+Minimum security requirements:
+
+* Passwords must be hashed with a modern password hashing algorithm such as Argon2id or bcrypt with appropriate work factors.
+* Sessions must be random, high-entropy, revocable, expiring, and rotated when refreshed.
+* Password reset tokens must be one-time-use, short-lived, hashed at rest, and audited.
+* Login, registration, and reset endpoints must have rate limits and abuse protection.
+* Session invalidation must support logout from the current device and revocation of all sessions.
+* Authentication events must create audit events for login success, login failure, logout, password reset request, password reset completion, and suspicious activity.
+
+Non-goals for the MVP:
+
+* OAuth/social login.
+* SAML or enterprise SSO.
+* Multi-factor authentication unless added later as a security hardening milestone.
+* Delegating identity to Supabase Auth, Clerk, Firebase Auth, Auth0, Cognito, or another external auth provider.
+
+### Target Launch Platforms and Minimum OS Versions
+
+Decision: the MVP launches as a mobile app for Android and iOS only.
+
+Core app support:
+
+| Platform | Minimum supported version | Reason |
+| --- | --- | --- |
+| Android | Android 10 / API 29 | Broad enough device support while avoiding old Android storage, permission, TLS, and background-behavior edge cases. |
+| iOS | iOS 17.0 | Keeps the iOS MVP aligned with the current `app_intents` adapter/codegen path and avoids maintaining a lower iOS target while experimenting with App Intents. |
+
+Build targets:
+
+* Android should use `minSdk` 29.
+* Android should use `compileSdk` 36 or newer so AppFunctions-specific code can compile.
+* Android should use the latest stable `targetSdk` required by Google Play at submission time. If API 36 is stable and required/appropriate at launch, use `targetSdk` 36.
+* iOS should set the Flutter/Xcode deployment target to iOS 17.0.
+
+Optional OS-agent adapter support:
+
+| Adapter | Minimum OS/API | MVP status |
+| --- | --- | --- |
+| Android AppFunctions | Android 16 / API 36+ | Experimental, feature-flagged spike only. |
+| iOS App Intents | iOS 17+ for the initial Flutter adapter/codegen approach | Experimental, feature-flagged spike included in MVP development. |
+
+Rules:
+
+* AppFunctions availability must not raise the normal Android install minimum above API 29.
+* Android AppFunctions code must be guarded behind API checks and feature flags.
+* iOS App Intents can be part of the iOS 17+ MVP, but the app must remain usable without invoking Siri, Shortcuts, Spotlight, or Apple Intelligence.
+* Apple Intelligence-specific behavior must be treated as platform-dependent and not required for MVP acceptance.
+* Web, desktop, tablet-first layouts, watch apps, widgets, and wearables are not MVP launch targets.
+
+Minimum test matrix:
+
+| Platform | Required test target |
+| --- | --- |
+| Android minimum | Android 10 / API 29 emulator or device |
+| Android common | Android 14/15 emulator or device |
+| Android OS-agent spike | Android 16 / API 36 emulator or device when available |
+| iOS minimum | iOS 17 simulator or device |
+| iOS current | Latest stable iOS simulator or device available during development |
+| iOS OS-agent spike | iOS 17+ Shortcuts/App Intent test |
+
+### Initial Nutrition Source Priority
+
+Decision: the MVP will use a deterministic source-priority order optimized for Spain/EU users while preserving user-specific overrides.
+
+Priority order:
+
 ```text
-Read summary: allowed with scope
-Query memory: allowed with scope
-Propose meal: allowed with scope
-Commit meal: confirmation required unless trusted mode
-Delete meal: confirmation required
-Modify targets: confirmation required
-Export history: explicit permission required
+1. User-confirmed meal templates and user custom foods.
+2. Barcode or exact branded product match from OpenFoodFacts.
+3. Manual user-provided nutrition values.
+4. Generic food match from USDA FoodData Central or another reliable generic nutrition database.
+5. Backend-calculated estimates from known ingredients, quantities, and unit conversions.
+6. LLM-only estimate only as a low-confidence fallback, requiring user confirmation.
 ```
 
----
+Rules:
 
-## Privacy Requirements
+* User-confirmed templates and custom foods override public databases for that user.
+* OpenFoodFacts is preferred for branded packaged foods, especially Spain/EU products.
+* USDA or equivalent generic databases are preferred for generic whole foods such as eggs, chicken, rice, oats, and vegetables.
+* Manual user-provided values can be used when the user explicitly enters calories/macros or creates a custom food.
+* Backend estimates must be traceable to ingredients, quantities, and conversion assumptions.
+* LLM-only nutrition values must be marked low confidence and must not be committed without user confirmation.
 
-The app handles health-adjacent data.
+### Production Database Hosting
 
-Must support:
+Decision: production starts with self-hosted PostgreSQL + pgvector running in a Docker container on the VPS, not managed Postgres.
 
-* delete account,
-* delete all user data,
-* export data,
-* revoke agent connections,
-* delete embeddings/memory,
-* audit agent actions,
-* clear privacy policy,
-* no medical claims.
+Scope:
 
-If user data is deleted, related embeddings must also be deleted.
+* The production database runs in the project-owned VPS environment.
+* PostgreSQL must use persistent storage, not ephemeral container storage.
+* PostgreSQL must not expose port `5432` publicly.
+* The backend is the only service that connects to the database.
+* Docker Compose or equivalent deployment configuration must define health checks and restart policy.
+* Database credentials must be provided through production secrets, not committed files.
 
----
+Operational requirements:
+
+* Automated encrypted backups must be configured before production use.
+* Restore testing must be performed before production use and repeated after backup changes.
+* Disk usage monitoring and alerts are required.
+* PostgreSQL and pgvector upgrade procedures must be documented.
+* The deployment must include a clear full-reset procedure for staging only, never production.
+
+Non-goal:
+
+* Managed Postgres providers such as Supabase, Neon, Railway, Render, AWS RDS, Cloud SQL, or DigitalOcean Managed PostgreSQL are not part of the MVP production plan.
+
+### Trusted Auto-Commit
+
+Decision: trusted auto-commit is included in the MVP as an optional user-controlled setting for safe familiar actions only.
+
+Default:
+
+```text
+trusted_mode_enabled = false
+```
+
+Users must explicitly enable trusted mode in settings. The app must clearly explain that trusted mode allows the system to commit selected familiar meals without a confirmation tap.
+
+Eligible actions:
+
+```text
+commit_meal for a proposal created from a high-confidence recurring meal template
+```
+
+Eligible user requests:
+
+```text
+"Log my usual breakfast."
+"Same protein shake as always."
+"Log my normal chicken meal."
+```
+
+Ineligible actions:
+
+```text
+delete_meal
+correct_meal
+update_nutrition_targets
+delete_account
+export_user_data
+any ambiguous new meal
+any low-confidence proposal
+any proposal using LLM-only nutrition values
+```
+
+Eligibility requirements:
+
+* User has enabled trusted mode.
+* The action is whitelisted for trusted mode.
+* The matched meal template belongs to the current user.
+* The template has been confirmed by the user before.
+* The memory/template match exceeds the configured confidence threshold.
+* Nutrition values come from trusted sources, user templates, custom foods, or prior confirmed snapshots.
+* The request is not destructive, privacy-sensitive, or target-modifying.
+
+UX requirements:
+
+* Auto-committed meals must show an immediate "logged" state.
+* The UI must offer fast undo and correction.
+* Users must be able to disable trusted mode from settings.
+* Users must be able to disable trusted mode for a specific usual meal/template later.
+
+Audit requirements:
+
+* Every trusted auto-commit must create an `action_call`.
+* Every trusted auto-commit must create an `audit_event`.
+* The audit metadata must include matched template, confidence, source phrase, trusted-mode status, and whether undo/correction was later used.
+
+Non-goal:
+
+* Trusted mode must not allow autonomous destructive or account-level actions.
 
 ## Observability Requirements
 
 Track:
 
 ```text
-voice_to_proposal_latency
+voice_to_transcript_latency
+transcript_to_proposal_latency
 proposal_to_confirmation_latency
 confirmed_without_edit_rate
 correction_rate
@@ -1553,33 +1174,24 @@ commit_rate
 retention_metrics
 ```
 
-The product succeeds or fails based on:
-
-```text
-speed
-trust
-accuracy
-low friction
-repeat usage
-memory usefulness
-```
-
----
+Every action call should have a trace ID so logs, audit events, LLM calls, and database mutations can be correlated.
 
 ## Testing Requirements
 
 Backend tests must cover:
 
 * action schema validation,
-* propose meal flow,
-* commit flow,
-* correction flow,
-* delete flow,
-* confidence policy,
 * permission checks,
+* proposal creation,
+* proposal commit transaction,
+* correction flow,
+* delete confirmation behavior,
+* trusted-mode policy,
 * memory retrieval,
+* deterministic temporal references,
 * nutrition calculation,
-* audit logging.
+* audit logging,
+* idempotent retries.
 
 Flutter tests must cover:
 
@@ -1588,137 +1200,69 @@ Flutter tests must cover:
 * confirmation flow,
 * correction flow,
 * loading states,
-* API error states.
+* API error states,
+* permission/trusted-mode states.
 
-Agent tests must include golden scenarios:
+Agent golden tests must include:
 
 ```text
-“I had my usual breakfast.”
-“Same lunch as yesterday.”
-“Chicken and rice.”
-“Delete the snack I just added.”
-“No, the chicken was 200 grams.”
-“How many calories do I have left?”
+"I had my usual breakfast."
+"Same lunch as yesterday."
+"Chicken and rice."
+"Delete the snack I just added."
+"No, the chicken was 200 grams."
+"How many calories do I have left?"
 ```
 
-Each test should verify:
+Each agent test should verify:
 
 * correct action selected,
 * correct proposal structure,
 * confirmation required when appropriate,
-* memory used when appropriate,
-* no direct database mutation by LLM.
+* memory used only when appropriate,
+* no direct database mutation by the LLM.
 
----
+## Development Order
+
+Recommended implementation order:
+
+```text
+1. Create monorepo structure.
+2. Add backend config, health route, and database connection.
+3. Add SQL migrations for core tables.
+4. Create contracts package and API schema generation.
+5. Implement action registry and executor.
+6. Implement propose_meal_log without LLM.
+7. Implement commit_meal transaction.
+8. Implement correct_meal.
+9. Implement get_daily_summary.
+10. Add basic meal templates and memory retrieval.
+11. Add internal agent endpoint.
+12. Build Flutter text input screen.
+13. Build Flutter proposal confirmation screen.
+14. Add voice input.
+15. Prototype iOS App Intent for get_daily_summary behind a feature flag.
+16. Prototype iOS App Intent for propose_meal_log behind a feature flag.
+17. Prototype Android AppFunction equivalents when API 36 tooling/device support is available.
+```
 
 ## Development Rules for AI Coding Agents
 
 When working on this repo:
 
-### Preserve boundaries
+* Do not move backend agent logic into Flutter.
+* Do not duplicate action logic in Android/iOS adapters.
+* Do not put nutrition reasoning inside Flutter intent handlers.
+* Define or update contracts before adding new action handlers.
+* Add backend tests for action handlers before wiring an LLM to them.
+* Keep provider integrations behind interfaces.
+* Keep deterministic logic testable without external provider calls.
+* Avoid microservices until a real scaling boundary appears.
+* Use the installed Flutter development skills before implementing matching Flutter architecture, routing, networking, layout, localization, preview, widget test, or integration test work.
 
-Do not move backend agent logic into Flutter.
+## Open Decisions
 
-Do not duplicate action logic in Android/iOS adapters.
-
-Do not put nutrition reasoning inside Flutter intents handlers.
-
-### Use shared schemas
-
-When creating a new action:
-
-1. Define schema in `packages/shared`.
-2. Implement backend handler.
-3. Expose through backend route.
-4. Add tests.
-5. Update docs.
-6. Later map to AppFunctions/App Intents if needed.
-
-### Build incrementally
-
-Recommended order:
-
-```text
-1. Create monorepo structure.
-2. Create shared domain/action schemas.
-3. Create backend health route.
-4. Create database schema.
-5. Implement propose_meal_log.
-6. Implement commit_meal.
-7. Implement correct_meal.
-8. Implement get_daily_summary.
-9. Implement internal agent endpoint.
-10. Build Flutter voice/text input screen.
-11. Build meal proposal confirmation screen.
-12. Add basic memory/templates.
-13. Add flutter_intents adapter prototype.
-14. Add Android AppFunctions mapping.
-15. Add iOS App Intents mapping.
-```
-
-### Keep providers replaceable
-
-Do not hardcode OpenRouter or DeepSeek everywhere.
-
-Use provider interfaces.
-
-### Keep deterministic logic testable
-
-The action executor must be testable without LLM calls.
-
-### Do not overbuild early
-
-Avoid initially:
-
-* complex multi-agent frameworks,
-* MCP server,
-* microservices,
-* full nutritionist dashboard,
-* advanced photo recognition,
-* wearable integrations,
-* complex medical claims,
-* full enterprise auth.
-
----
-
-## MVP Definition
-
-The MVP must prove:
-
-> Users can log recurring meals faster and more reliably through an agentic flow than through a traditional calorie tracking UI.
-
-MVP must include:
-
-```text
-Flutter mobile app
-Bun + TypeScript backend
-internal backend agent
-external LLM provider through abstraction
-voice or text input
-canonical action registry
-meal proposal generation
-user confirmation/correction
-meal commit
-daily summary
-basic meal memory/templates
-audit logging
-shared action schemas
-flutter_intents adapter prototype
-```
-
-MVP should not require:
-
-```text
-production Android AppFunctions access through Gemini
-production iOS App Intents through Siri
-MCP server
-photo recognition
-barcode scanning
-wearable integrations
-nutritionist dashboard
-```
-
----
+No open decisions currently block implementation planning.
 
 ## Non-Negotiable Principle
 
@@ -1734,23 +1278,4 @@ It must be designed as:
 A calorie/nutrition capability layer that agents can operate safely
 ```
 
-The current internal backend agent is the first agent.
-
-Future mobile OS agents should be able to call the same capabilities through AppFunctions/App Intents with minimal architectural changes.
-
-Every major decision should support this future:
-
-```text
-User request
-  ↓
-Agent chooses declared action/tool
-  ↓
-Backend validates and executes
-  ↓
-Meal proposal/confirmation workflow
-  ↓
-Personal nutrition memory improves
-```
-
-```
-```
+The internal backend agent is the first agent. Future mobile OS agents should call the same capabilities through adapters with minimal architectural change.
