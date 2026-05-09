@@ -2,8 +2,6 @@
 
 This directory is the planning source of truth until implementation creates executable contracts, migrations, and tests.
 
-Coding agents should read this file first, then open only the document sections relevant to the task.
-
 ## Current Structure Assessment
 
 The current two-file structure is acceptable for pre-implementation planning, but it is not enough by itself once implementation starts.
