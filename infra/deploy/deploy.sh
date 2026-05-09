@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ENVIRONMENT="${1:?Usage: deploy.sh <dev|pro> <image>}"
-BACKEND_IMAGE="${2:?Usage: deploy.sh <dev|pro> <image>}"
+REQUESTED_BACKEND_IMAGE="${2:?Usage: deploy.sh <dev|pro> <image>}"
 
 case "$ENVIRONMENT" in
   dev)
@@ -54,7 +54,7 @@ set -a
 source "$SECRETS_FILE"
 set +a
 
-export BACKEND_IMAGE
+export BACKEND_IMAGE="$REQUESTED_BACKEND_IMAGE"
 
 docker compose --env-file "$SECRETS_FILE" -f "$COMPOSE_FILE" pull postgres "$NEXT_SERVICE"
 docker compose --env-file "$SECRETS_FILE" -f "$COMPOSE_FILE" up -d postgres
