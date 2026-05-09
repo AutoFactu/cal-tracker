@@ -59,6 +59,15 @@ export BACKEND_IMAGE="$REQUESTED_BACKEND_IMAGE"
 docker compose --env-file "$SECRETS_FILE" -f "$COMPOSE_FILE" pull postgres "$NEXT_SERVICE"
 docker compose --env-file "$SECRETS_FILE" -f "$COMPOSE_FILE" up -d postgres
 
+for _ in {1..60}; do
+  if docker exec cal-tracker-postgres pg_isready -U cal_tracker -d cal_tracker >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
+
+docker exec cal-tracker-postgres pg_isready -U cal_tracker -d cal_tracker
+
 docker run --rm \
   --network cal-tracker-internal \
   --env-file "$ENV_DIR/${ENVIRONMENT}.env" \
