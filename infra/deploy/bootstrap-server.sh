@@ -14,6 +14,7 @@ cp deploy.sh "$DEPLOY_DIR/deploy.sh"
 cp backup-postgres-schema.sh "$DEPLOY_DIR/backup-postgres-schema.sh"
 chmod 755 "$DEPLOY_DIR/deploy.sh" "$DEPLOY_DIR/backup-postgres-schema.sh"
 cp nginx/proxy-common.conf /etc/nginx/snippets/cal-tracker-proxy-common.conf
+touch "$STATE_DIR/dev.active" "$STATE_DIR/pro.active"
 
 if [[ ! -f /etc/letsencrypt/live/api.bettercalories.app/fullchain.pem ]]; then
   cat > /etc/nginx/sites-available/api.bettercalories.app <<'EOF'
@@ -47,17 +48,32 @@ fi
 cp nginx/api.bettercalories.app.conf /etc/nginx/sites-available/api.bettercalories.app
 ln -sfn /etc/nginx/sites-available/api.bettercalories.app /etc/nginx/sites-enabled/api.bettercalories.app
 
-cat > /etc/nginx/snippets/cal-tracker-dev-proxy.conf <<'EOF'
-include /etc/nginx/snippets/cal-tracker-proxy-common.conf;
-proxy_pass http://127.0.0.1:3101;
-EOF
+write_proxy_snippet() {
+  local environment="$1"
+  local state_file="$2"
+  local blue_port="$3"
+  local green_port="$4"
+  local snippet="$5"
+  local active_slot port
 
-cat > /etc/nginx/snippets/cal-tracker-pro-proxy.conf <<'EOF'
-include /etc/nginx/snippets/cal-tracker-proxy-common.conf;
-proxy_pass http://127.0.0.1:3201;
-EOF
+  active_slot="$(cat "$state_file" 2>/dev/null || true)"
+  case "$active_slot" in
+    green) port="$green_port" ;;
+    blue|"") port="$blue_port" ;;
+    *)
+      echo "Invalid active slot for $environment: $active_slot" >&2
+      exit 2
+      ;;
+  esac
 
-touch "$STATE_DIR/dev.active" "$STATE_DIR/pro.active"
+  cat > "$snippet" <<EOF
+include /etc/nginx/snippets/cal-tracker-proxy-common.conf;
+proxy_pass http://127.0.0.1:${port};
+EOF
+}
+
+write_proxy_snippet dev "$STATE_DIR/dev.active" 3101 3102 /etc/nginx/snippets/cal-tracker-dev-proxy.conf
+write_proxy_snippet pro "$STATE_DIR/pro.active" 3201 3202 /etc/nginx/snippets/cal-tracker-pro-proxy.conf
 
 if [[ ! -f "$ENV_DIR/deploy.env" ]]; then
   cat > "$ENV_DIR/deploy.env" <<'EOF'
