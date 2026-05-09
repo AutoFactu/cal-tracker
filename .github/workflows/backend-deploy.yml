@@ -1,0 +1,139 @@
+name: Backend Deploy
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: backend-deploy-${{ github.ref_type == 'tag' && 'pro' || 'dev' }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/autofactu/cal-tracker-backend
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_type == 'tag' && 'production' || 'development' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Resolve deployment target
+        id: target
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            echo "environment=pro" >> "$GITHUB_OUTPUT"
+            echo "tag=pro-${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "environment=dev" >> "$GITHUB_OUTPUT"
+            echo "tag=dev-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run typecheck
+
+      - run: bun run test
+
+      - run: bun run build
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.target.outputs.tag }}
+            ${{ env.IMAGE_NAME }}:${{ steps.target.outputs.environment }}-latest
+
+      - name: Configure SSH
+        env:
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Sync deployment files
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          tar -C infra/deploy -cz . | ssh "$VPS_USER@$VPS_HOST" '
+            set -euo pipefail
+            rm -rf /tmp/cal-tracker-deploy
+            mkdir -p /tmp/cal-tracker-deploy
+            tar -xz -C /tmp/cal-tracker-deploy
+            cd /tmp/cal-tracker-deploy
+            bash bootstrap-server.sh
+          '
+
+      - name: Write server environment files
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          DEPLOY_ENV_FILE: ${{ secrets.DEPLOY_ENV_FILE }}
+          DEV_ENV_FILE: ${{ secrets.DEV_ENV_FILE }}
+          PRO_ENV_FILE: ${{ secrets.PRO_ENV_FILE }}
+        run: |
+          set -euo pipefail
+          write_remote_file() {
+            local name="$1"
+            local content="$2"
+            printf '%s' "$content" | base64 -w0 | ssh "$VPS_USER@$VPS_HOST" "base64 -d > /srv/cal-tracker/env/${name} && chmod 600 /srv/cal-tracker/env/${name}"
+          }
+          write_remote_file deploy.env "$DEPLOY_ENV_FILE"
+          write_remote_file dev.env "$DEV_ENV_FILE"
+          write_remote_file pro.env "$PRO_ENV_FILE"
+
+      - name: Login GHCR on VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | ssh "$VPS_USER@$VPS_HOST" "docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
+
+      - name: Deploy
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          IMAGE: ${{ env.IMAGE_NAME }}:${{ steps.target.outputs.tag }}
+          DEPLOY_ENVIRONMENT: ${{ steps.target.outputs.environment }}
+        run: |
+          set -euo pipefail
+          ssh "$VPS_USER@$VPS_HOST" "bash /srv/cal-tracker/deploy/deploy.sh '$DEPLOY_ENVIRONMENT' '$IMAGE'"
+
+      - name: Logout GHCR on VPS
+        if: always()
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh "$VPS_USER@$VPS_HOST" "docker logout ghcr.io || true"

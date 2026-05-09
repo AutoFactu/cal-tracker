@@ -1,8 +1,12 @@
 import postgres from "postgres";
 import { loadConfig } from "../src/config/env.js";
+import { databaseSchema, prepareSchema } from "./schema.js";
 
 const config = loadConfig();
 const sql = postgres(config.DATABASE_URL, { max: 1 });
+const schema = databaseSchema();
+
+await prepareSchema(sql, schema);
 
 await sql`
   INSERT INTO embedding_models (provider, model, dimensions)
@@ -29,5 +33,5 @@ await sql`
   ON CONFLICT DO NOTHING
 `;
 
-console.log("Seeded generic food items and embedding model metadata.");
+console.log(`Seeded generic food items and embedding model metadata in ${schema}.`);
 await sql.end();

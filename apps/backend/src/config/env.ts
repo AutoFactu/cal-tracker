@@ -22,6 +22,7 @@ const envSchema = z.object({
   CORS_ALLOWED_ORIGINS: z.string().min(1),
   TRUSTED_AUTO_COMMIT_THRESHOLD: z.coerce.number().min(0).max(1).default(0.92),
   PORT: z.coerce.number().int().positive().default(3000),
+  DATABASE_SCHEMA: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).default("public"),
   NODE_ENV: z.string().default("development")
 });
 
@@ -54,13 +55,23 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
         CORS_ALLOWED_ORIGINS: "http://localhost:3000",
         TRUSTED_AUTO_COMMIT_THRESHOLD: "0.92",
         PORT: "3000",
+        DATABASE_SCHEMA: "public",
         NODE_ENV: "test"
       }
     : {};
 
   const parsed = envSchema.parse({ ...defaults, ...input });
+  const databaseUrl = withSearchPath(parsed.DATABASE_URL, parsed.DATABASE_SCHEMA);
   return {
     ...parsed,
+    DATABASE_URL: databaseUrl,
     corsAllowedOrigins: parsed.CORS_ALLOWED_ORIGINS.split(",").map((origin) => origin.trim())
   };
+}
+
+function withSearchPath(databaseUrl: string, schema: string): string {
+  if (schema === "public") return databaseUrl;
+  const url = new URL(databaseUrl);
+  url.searchParams.set("options", `-c search_path=${schema},public`);
+  return url.toString();
 }
