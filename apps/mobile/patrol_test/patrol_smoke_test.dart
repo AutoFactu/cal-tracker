@@ -4,6 +4,7 @@ import 'package:cal_tracker_mobile/app/app.dart';
 import 'package:cal_tracker_mobile/data/services/api_config.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:patrol/patrol.dart';
 
@@ -20,6 +21,26 @@ void main() {
 
     expect($(const ValueKey('auth_submit_button')), findsOneWidget);
   });
+
+  patrolTest('switches main tabs through the shell navigation', ($) async {
+    await _pumpAndAuthenticate($, openMealCreate: false);
+
+    await $(const ValueKey('main_nav_stats')).tap();
+    await $.pumpAndSettle();
+    expect($('Statistic'), findsOneWidget);
+
+    await $(const ValueKey('main_nav_usual')).tap();
+    await $.pumpAndSettle();
+    expect($('Usual meals'), findsOneWidget);
+
+    await $(const ValueKey('main_nav_menu')).tap();
+    await $.pumpAndSettle();
+    expect($('Account and preferences'), findsOneWidget);
+
+    await $(const ValueKey('main_nav_home')).tap();
+    await $.pumpAndSettle();
+    expect($(const ValueKey('dashboard_progress_card')), findsOneWidget);
+  }, tags: 'navigation');
 
   patrolTest('logs a Spanish bread and butter meal through the agent',
       ($) async {
@@ -86,19 +107,40 @@ void main() {
   });
 }
 
-Future<void> _pumpAndAuthenticate(PatrolIntegrationTester $) async {
+Future<void> _pumpAndAuthenticate(
+  PatrolIntegrationTester $, {
+  bool openMealCreate = true,
+}) async {
   await $.pumpWidgetAndSettle(
     const CalTrackerBootstrap(apiConfig: _patrolApiConfig),
   );
   if ($(const ValueKey('meal_text_field')).exists) return;
 
-  final email = 'patrol-${DateTime.now().microsecondsSinceEpoch}@example.com';
-  await _registerPatrolUser(email);
-  await $(const ValueKey('email_field')).enterText(email);
-  await $(const ValueKey('password_field')).enterText('password123');
-  FocusManager.instance.primaryFocus?.unfocus();
+  if (!$(const ValueKey('dashboard_progress_card')).exists) {
+    final email = 'patrol-${DateTime.now().microsecondsSinceEpoch}@example.com';
+    await _registerPatrolUser(email);
+    await $(const ValueKey('email_field')).enterText(email);
+    await $(const ValueKey('password_field')).enterText('password123');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await $.pumpAndSettle();
+    await $(const ValueKey('auth_submit_button')).scrollTo().tap();
+    await $(const ValueKey('dashboard_progress_card')).waitUntilVisible(
+      timeout: const Duration(seconds: 20),
+    );
+  }
+
+  if (openMealCreate) {
+    await _openMealCreate($);
+  }
+}
+
+Future<void> _openMealCreate(PatrolIntegrationTester $) async {
+  if ($(const ValueKey('meal_text_field')).exists) return;
+  final context = $.tester.element(
+    find.byKey(const ValueKey('dashboard_progress_card')),
+  );
+  GoRouter.of(context).go('/meal/create');
   await $.pumpAndSettle();
-  await $(const ValueKey('auth_submit_button')).scrollTo().tap();
   await $(const ValueKey('meal_text_field')).waitUntilVisible(
     timeout: const Duration(seconds: 20),
   );

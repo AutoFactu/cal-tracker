@@ -208,12 +208,27 @@ class VoiceLogViewModel extends ChangeNotifier {
 
   bool get isLoading => _uiState.isLoading;
 
-  Future<void> toggleRecording() async {
+  bool get canStartRecording => _canStartRecording;
+
+  bool get canStopRecording => state == VoiceLogState.recording;
+
+  Future<void> toggleRecording({bool submitAfterTranscription = false}) async {
     if (_canStartRecording) {
-      await _startRecording();
+      await startRecording();
     } else if (state == VoiceLogState.recording) {
-      await _stopRecording();
+      await stopRecording(submitAfterTranscription: submitAfterTranscription);
     }
+  }
+
+  Future<void> startRecording() => _startRecording();
+
+  Future<void> stopRecording({bool submitAfterTranscription = false}) {
+    if (state != VoiceLogState.recording) return Future.value();
+    return _stopRecording(submitAfterTranscription: submitAfterTranscription);
+  }
+
+  Future<void> toggleGlobalRecording() {
+    return toggleRecording(submitAfterTranscription: true);
   }
 
   bool get _canStartRecording =>
@@ -266,13 +281,16 @@ class VoiceLogViewModel extends ChangeNotifier {
     }
   }
 
-  Future<void> _stopRecording() async {
+  Future<void> _stopRecording({bool submitAfterTranscription = false}) async {
     _durationTimer?.cancel();
     _setState(VoiceLogState.stopping);
     try {
       final audio = await _audioRecorderService.stop();
       if (audio != null) {
-        await _transcribe(audio.path);
+        await _transcribe(
+          audio.path,
+          submitAfterTranscription: submitAfterTranscription,
+        );
       } else {
         _setError('No audio file was created.');
       }
@@ -283,13 +301,20 @@ class VoiceLogViewModel extends ChangeNotifier {
     }
   }
 
-  Future<void> _transcribe(String path) async {
+  Future<void> _transcribe(
+    String path, {
+    bool submitAfterTranscription = false,
+  }) async {
     _setState(VoiceLogState.transcribing);
     try {
       final transcript = await _nutritionRepository.transcribeAudio(File(path));
       _setUiState(
           _uiState.copyWith(transcript: transcript, errorMessage: null));
-      _setState(VoiceLogState.transcriptReady);
+      if (submitAfterTranscription && transcript.trim().isNotEmpty) {
+        await submitText(transcript);
+      } else {
+        _setState(VoiceLogState.transcriptReady);
+      }
     } catch (e) {
       _setError('Transcription failed: ${e.toString()}');
     } finally {

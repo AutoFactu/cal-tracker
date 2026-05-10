@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../../domain/models/nutrition_models.dart';
@@ -6,14 +7,14 @@ import '../../../core/content_frame.dart';
 import '../../../core/design_system.dart';
 import '../view_models/voice_log_view_model.dart';
 
-class VoiceLogScreen extends StatefulWidget {
-  const VoiceLogScreen({super.key});
+class MealCreateScreen extends StatefulWidget {
+  const MealCreateScreen({super.key});
 
   @override
-  State<VoiceLogScreen> createState() => _VoiceLogScreenState();
+  State<MealCreateScreen> createState() => _MealCreateScreenState();
 }
 
-class _VoiceLogScreenState extends State<VoiceLogScreen> {
+class _MealCreateScreenState extends State<MealCreateScreen> {
   final _textController = TextEditingController();
   final _textFieldFocusNode = FocusNode();
   bool _transcriptReadyFocusQueued = false;
@@ -61,130 +62,141 @@ class _VoiceLogScreenState extends State<VoiceLogScreen> {
       _transcriptReadyFocusQueued = false;
     }
 
-    return ContentFrame(
-      title: 'Log meal',
-      subtitle: _stateLabel(viewModel.state),
-      actions: [
-        if (viewModel.transcript.isNotEmpty ||
-            viewModel.proposal != null ||
-            viewModel.autoCommittedMeal != null)
-          FreshIconButton(
-            key: const ValueKey('voice_log_start_over_button'),
-            icon: Icons.refresh_rounded,
-            tooltip: 'Start over',
-            onPressed: viewModel.clearResult,
+    return Scaffold(
+      backgroundColor: FreshColors.screen,
+      body: KeyedSubtree(
+        key: const ValueKey('meal_create_screen'),
+        child: ContentFrame(
+          title: 'Create meal',
+          subtitle: _stateLabel(viewModel.state),
+          leading: FreshIconButton(
+            icon: Icons.arrow_back_rounded,
+            tooltip: 'Back',
+            onPressed: () =>
+                context.canPop() ? context.pop() : context.go('/dashboard'),
           ),
-      ],
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _VoiceCaptureCard(viewModel: viewModel),
-          const SizedBox(height: FreshSpacing.lg),
-          FreshCard(
-            padding: const EdgeInsets.all(14),
-            child: TextField(
-              key: const ValueKey('meal_text_field'),
-              controller: _textController,
-              focusNode: _textFieldFocusNode,
-              minLines: 3,
-              maxLines: 6,
-              decoration: const InputDecoration(
-                labelText: 'Meal',
-                hintText: 'Tell me what you ate',
-                prefixIcon: Icon(Icons.restaurant_rounded),
+          actions: [
+            if (viewModel.transcript.isNotEmpty ||
+                viewModel.proposal != null ||
+                viewModel.autoCommittedMeal != null)
+              FreshIconButton(
+                key: const ValueKey('voice_log_start_over_button'),
+                icon: Icons.refresh_rounded,
+                tooltip: 'Start over',
+                onPressed: viewModel.clearResult,
               ),
-              onChanged: viewModel.updateTranscript,
-              enabled: viewModel.state != VoiceLogState.transcribing &&
-                  viewModel.state != VoiceLogState.agentRunning,
-            ),
+          ],
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              FreshCard(
+                padding: const EdgeInsets.all(14),
+                child: TextField(
+                  key: const ValueKey('meal_text_field'),
+                  controller: _textController,
+                  focusNode: _textFieldFocusNode,
+                  minLines: 3,
+                  maxLines: 6,
+                  decoration: const InputDecoration(
+                    labelText: 'Meal',
+                    hintText: 'Tell me what you ate',
+                    prefixIcon: Icon(Icons.restaurant_rounded),
+                  ),
+                  onChanged: viewModel.updateTranscript,
+                  enabled: viewModel.state != VoiceLogState.transcribing &&
+                      viewModel.state != VoiceLogState.agentRunning,
+                ),
+              ),
+              const SizedBox(height: FreshSpacing.md),
+              _buildControls(context, viewModel),
+              const SizedBox(height: FreshSpacing.lg),
+              if (viewModel.isLoading)
+                const LinearProgressIndicator(minHeight: 3),
+              if (viewModel.state == VoiceLogState.recording) ...[
+                _RecordingIndicator(duration: viewModel.recordingDuration),
+                const SizedBox(height: FreshSpacing.md),
+              ],
+              if (viewModel.state == VoiceLogState.transcribing) ...[
+                const FreshStatusBanner(
+                  icon: Icons.graphic_eq_rounded,
+                  title: 'Transcribing...',
+                  message: 'Listening back and preparing the text.',
+                  color: FreshColors.water,
+                ),
+                const SizedBox(height: FreshSpacing.md),
+              ],
+              if (viewModel.errorMessage != null) ...[
+                _ErrorBanner(
+                  message: viewModel.errorMessage!,
+                  onRetry: viewModel.retry,
+                ),
+                const SizedBox(height: FreshSpacing.md),
+              ],
+              if (viewModel.autoCommittedMeal != null) ...[
+                _LoggedMealBanner(title: viewModel.autoCommittedMeal!.title),
+                const SizedBox(height: FreshSpacing.md),
+              ],
+              if (viewModel.proposal != null) ...[
+                _ProposalCard(
+                  proposal: viewModel.proposal!,
+                  onConfirm: () => _showMealLabelSheet(context, viewModel),
+                  onEdit: () => _showProposalEditor(context, viewModel),
+                ),
+                const SizedBox(height: FreshSpacing.md),
+              ],
+              if (viewModel.state == VoiceLogState.clarificationRequired) ...[
+                FreshStatusBanner(
+                  icon: Icons.help_outline_rounded,
+                  title: 'Needs a little more detail',
+                  message: viewModel.message ??
+                      'I am not sure what you would like to do. Could you rephrase?',
+                  color: FreshColors.orange,
+                ),
+                const SizedBox(height: FreshSpacing.md),
+              ],
+              if (viewModel.candidateGroups != null) ...[
+                _ResolverClarificationCard(
+                  groups: viewModel.candidateGroups!,
+                  isCandidateSelected: viewModel.isCandidateSelected,
+                  onCandidateSelected: viewModel.selectCandidate,
+                  onPortionSelected: (choice) {
+                    final actionText = choice.actionText;
+                    if (actionText == null || actionText.isEmpty) return;
+                    viewModel.submitText(actionText);
+                  },
+                ),
+                const SizedBox(height: FreshSpacing.md),
+              ],
+              if (viewModel.state == VoiceLogState.resultReady &&
+                  viewModel.message != null) ...[
+                _InfoBanner(message: viewModel.message!),
+                const SizedBox(height: FreshSpacing.md),
+              ],
+              if (viewModel.summary != null) ...[
+                _SummaryCard(summary: viewModel.summary!),
+                const SizedBox(height: FreshSpacing.md),
+              ],
+              if (viewModel.remaining != null) ...[
+                _RemainingCard(remaining: viewModel.remaining!),
+                const SizedBox(height: FreshSpacing.md),
+              ],
+              if (viewModel.meals != null) ...[
+                _MealsCard(meals: viewModel.meals!),
+                const SizedBox(height: FreshSpacing.md),
+              ],
+              if (viewModel.items != null) ...[
+                _NutritionItemsCard(items: viewModel.items!),
+                const SizedBox(height: FreshSpacing.md),
+              ],
+              if (viewModel.templates != null) ...[
+                _TemplatesCard(templates: viewModel.templates!),
+                const SizedBox(height: FreshSpacing.md),
+              ],
+              if (viewModel.template != null)
+                _TemplatesCard(templates: [viewModel.template!]),
+            ],
           ),
-          const SizedBox(height: FreshSpacing.md),
-          _buildControls(context, viewModel),
-          const SizedBox(height: FreshSpacing.lg),
-          if (viewModel.isLoading) const LinearProgressIndicator(minHeight: 3),
-          if (viewModel.state == VoiceLogState.recording) ...[
-            _RecordingIndicator(duration: viewModel.recordingDuration),
-            const SizedBox(height: FreshSpacing.md),
-          ],
-          if (viewModel.state == VoiceLogState.transcribing) ...[
-            const FreshStatusBanner(
-              icon: Icons.graphic_eq_rounded,
-              title: 'Transcribing...',
-              message: 'Listening back and preparing the text.',
-              color: FreshColors.water,
-            ),
-            const SizedBox(height: FreshSpacing.md),
-          ],
-          if (viewModel.errorMessage != null) ...[
-            _ErrorBanner(
-              message: viewModel.errorMessage!,
-              onRetry: viewModel.retry,
-            ),
-            const SizedBox(height: FreshSpacing.md),
-          ],
-          if (viewModel.autoCommittedMeal != null) ...[
-            _LoggedMealBanner(title: viewModel.autoCommittedMeal!.title),
-            const SizedBox(height: FreshSpacing.md),
-          ],
-          if (viewModel.proposal != null) ...[
-            _ProposalCard(
-              proposal: viewModel.proposal!,
-              onConfirm: () => _showMealLabelSheet(context, viewModel),
-              onEdit: () => _showProposalEditor(context, viewModel),
-            ),
-            const SizedBox(height: FreshSpacing.md),
-          ],
-          if (viewModel.state == VoiceLogState.clarificationRequired) ...[
-            FreshStatusBanner(
-              icon: Icons.help_outline_rounded,
-              title: 'Needs a little more detail',
-              message: viewModel.message ??
-                  'I am not sure what you would like to do. Could you rephrase?',
-              color: FreshColors.orange,
-            ),
-            const SizedBox(height: FreshSpacing.md),
-          ],
-          if (viewModel.candidateGroups != null) ...[
-            _ResolverClarificationCard(
-              groups: viewModel.candidateGroups!,
-              isCandidateSelected: viewModel.isCandidateSelected,
-              onCandidateSelected: viewModel.selectCandidate,
-              onPortionSelected: (choice) {
-                final actionText = choice.actionText;
-                if (actionText == null || actionText.isEmpty) return;
-                viewModel.submitText(actionText);
-              },
-            ),
-            const SizedBox(height: FreshSpacing.md),
-          ],
-          if (viewModel.state == VoiceLogState.resultReady &&
-              viewModel.message != null) ...[
-            _InfoBanner(message: viewModel.message!),
-            const SizedBox(height: FreshSpacing.md),
-          ],
-          if (viewModel.summary != null) ...[
-            _SummaryCard(summary: viewModel.summary!),
-            const SizedBox(height: FreshSpacing.md),
-          ],
-          if (viewModel.remaining != null) ...[
-            _RemainingCard(remaining: viewModel.remaining!),
-            const SizedBox(height: FreshSpacing.md),
-          ],
-          if (viewModel.meals != null) ...[
-            _MealsCard(meals: viewModel.meals!),
-            const SizedBox(height: FreshSpacing.md),
-          ],
-          if (viewModel.items != null) ...[
-            _NutritionItemsCard(items: viewModel.items!),
-            const SizedBox(height: FreshSpacing.md),
-          ],
-          if (viewModel.templates != null) ...[
-            _TemplatesCard(templates: viewModel.templates!),
-            const SizedBox(height: FreshSpacing.md),
-          ],
-          if (viewModel.template != null)
-            _TemplatesCard(templates: [viewModel.template!]),
-        ],
+        ),
       ),
     );
   }
@@ -413,6 +425,7 @@ class _PortionChoiceChip extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
 class _VoiceCaptureCard extends StatelessWidget {
   const _VoiceCaptureCard({required this.viewModel});
 

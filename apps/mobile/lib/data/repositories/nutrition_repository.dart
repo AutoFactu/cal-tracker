@@ -101,7 +101,7 @@ class NutritionRepository {
   Future<Meal> commitProposal(String proposalId, {MealLabel? mealLabel}) async {
     final json = await _apiClient.commitProposal(
       proposalId,
-      mealLabel: mealLabel,
+      mealLabel: mealLabel?.toJson(),
     );
     final output = json['output'] as Map<String, Object?>;
     return Meal.fromJson(output['meal'] as Map<String, Object?>);

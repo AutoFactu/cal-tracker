@@ -63,22 +63,25 @@ class CalTrackerApiClient {
     return _post('/v1/meals/proposals', {'text': text});
   }
 
-  Future<Map<String, Object?>> commitProposal(String proposalId) {
-    return _post('/v1/meals/proposals/$proposalId/commit', {});
+  Future<Map<String, Object?>> commitProposal(
+    String proposalId, {
+    Map<String, Object?>? mealLabel,
+  }) {
+    return _post('/v1/meals/proposals/$proposalId/commit', {
+      if (mealLabel != null) 'mealLabel': mealLabel,
+    });
   }
 
-  Future<Map<String, Object?>> correctMeal(String mealId, String correctionText) {
-    return _post('/v1/meals/$mealId/correct', {'correctionText': correctionText});
+  Future<Map<String, Object?>> correctMeal(String mealId, List<Map<String, Object?>> items) {
+    return _post('/v1/meals/$mealId/correct', {'items': items});
   }
 
   Future<Map<String, Object?>> correctProposal({
     required String proposalId,
-    required String correctionText,
     required List<Map<String, Object?>> items,
   }) {
     return executeAction('correct_meal', {
       'proposalId': proposalId,
-      'correctionText': correctionText,
       'items': items,
     });
   }

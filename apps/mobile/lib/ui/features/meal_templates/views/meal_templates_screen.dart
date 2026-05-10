@@ -31,7 +31,7 @@ class _MealTemplatesScreenState extends State<MealTemplatesScreen> {
       subtitle: 'Safe familiar templates',
       actions: [
         FreshIconButton(
-          onPressed: viewModel.load,
+          onPressed: () => viewModel.load(forceRefresh: true),
           icon: Icons.refresh_rounded,
           tooltip: 'Refresh',
         ),

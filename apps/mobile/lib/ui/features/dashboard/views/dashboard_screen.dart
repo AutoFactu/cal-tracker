@@ -53,7 +53,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               message: viewModel.error!,
               color: FreshColors.coral,
               action: TextButton.icon(
-                onPressed: viewModel.load,
+                onPressed: () => viewModel.load(forceRefresh: true),
                 icon: const Icon(Icons.refresh_rounded),
                 label: const Text('Try again'),
               ),
