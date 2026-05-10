@@ -39,6 +39,8 @@ class MealItem {
     this.license,
     this.confidence,
     this.needsReview,
+    this.resolvedGrams,
+    this.portionDescription,
   });
 
   final String name;
@@ -57,6 +59,8 @@ class MealItem {
   final String? license;
   final double? confidence;
   final bool? needsReview;
+  final double? resolvedGrams;
+  final String? portionDescription;
 
   factory MealItem.fromJson(Map<String, Object?> json) {
     return MealItem(
@@ -76,6 +80,8 @@ class MealItem {
       license: json['license'] as String?,
       confidence: (json['confidence'] as num?)?.toDouble(),
       needsReview: json['needsReview'] as bool?,
+      resolvedGrams: (json['resolvedGrams'] as num?)?.toDouble(),
+      portionDescription: json['portionDescription'] as String?,
     );
   }
 
@@ -96,6 +102,9 @@ class MealItem {
         if (license != null) 'license': license,
         if (confidence != null) 'confidence': confidence,
         if (needsReview != null) 'needsReview': needsReview,
+        if (resolvedGrams != null) 'resolvedGrams': resolvedGrams,
+        if (portionDescription != null)
+          'portionDescription': portionDescription,
       };
 
   MealItem copyWith({
@@ -115,6 +124,8 @@ class MealItem {
     String? license,
     double? confidence,
     bool? needsReview,
+    double? resolvedGrams,
+    String? portionDescription,
   }) {
     return MealItem(
       name: name ?? this.name,
@@ -133,6 +144,55 @@ class MealItem {
       license: license ?? this.license,
       confidence: confidence ?? this.confidence,
       needsReview: needsReview ?? this.needsReview,
+      resolvedGrams: resolvedGrams ?? this.resolvedGrams,
+      portionDescription: portionDescription ?? this.portionDescription,
+    );
+  }
+}
+
+class FoodPortionChoice {
+  const FoodPortionChoice({
+    required this.label,
+    required this.quantity,
+    required this.unit,
+    this.gramWeight,
+    this.totalGrams,
+    this.kind,
+    this.portionDescriptor,
+    this.canonicalFoodName,
+    this.sourceDescription,
+    this.externalSource,
+    this.externalFoodId,
+    this.actionText,
+  });
+
+  final String label;
+  final double quantity;
+  final String unit;
+  final double? gramWeight;
+  final double? totalGrams;
+  final String? kind;
+  final String? portionDescriptor;
+  final String? canonicalFoodName;
+  final String? sourceDescription;
+  final String? externalSource;
+  final String? externalFoodId;
+  final String? actionText;
+
+  factory FoodPortionChoice.fromJson(Map<String, Object?> json) {
+    return FoodPortionChoice(
+      label: json['label'] as String,
+      quantity: (json['quantity'] as num).toDouble(),
+      unit: json['unit'] as String,
+      gramWeight: (json['gramWeight'] as num?)?.toDouble(),
+      totalGrams: (json['totalGrams'] as num?)?.toDouble(),
+      kind: json['kind'] as String?,
+      portionDescriptor: json['portionDescriptor'] as String?,
+      canonicalFoodName: json['canonicalFoodName'] as String?,
+      sourceDescription: json['sourceDescription'] as String?,
+      externalSource: json['externalSource'] as String?,
+      externalFoodId: json['externalFoodId'] as String?,
+      actionText: json['actionText'] as String?,
     );
   }
 }
@@ -145,6 +205,10 @@ class FoodMention {
     required this.unit,
     required this.confidence,
     required this.marketProduct,
+    this.rawUnitText,
+    this.unitKind,
+    this.portionDescriptorRaw,
+    this.portionDescriptor,
     this.brand,
     this.barcode,
   });
@@ -155,6 +219,10 @@ class FoodMention {
   final String unit;
   final double confidence;
   final bool marketProduct;
+  final String? rawUnitText;
+  final String? unitKind;
+  final String? portionDescriptorRaw;
+  final String? portionDescriptor;
   final String? brand;
   final String? barcode;
 
@@ -166,6 +234,10 @@ class FoodMention {
       unit: json['unit'] as String,
       confidence: (json['confidence'] as num).toDouble(),
       marketProduct: json['marketProduct'] as bool? ?? false,
+      rawUnitText: json['rawUnitText'] as String?,
+      unitKind: json['unitKind'] as String?,
+      portionDescriptorRaw: json['portionDescriptorRaw'] as String?,
+      portionDescriptor: json['portionDescriptor'] as String?,
       brand: json['brand'] as String?,
       barcode: json['barcode'] as String?,
     );
@@ -177,11 +249,13 @@ class FoodCandidateGroup {
     required this.mention,
     required this.candidates,
     this.reason,
+    this.portionOptions,
   });
 
   final FoodMention mention;
   final List<MealItem> candidates;
   final String? reason;
+  final List<FoodPortionChoice>? portionOptions;
 
   factory FoodCandidateGroup.fromJson(Map<String, Object?> json) {
     return FoodCandidateGroup(
@@ -191,6 +265,12 @@ class FoodCandidateGroup {
           .map(MealItem.fromJson)
           .toList(),
       reason: json['reason'] as String?,
+      portionOptions: json['portionOptions'] == null
+          ? null
+          : (json['portionOptions'] as List<Object?>)
+              .cast<Map<String, Object?>>()
+              .map(FoodPortionChoice.fromJson)
+              .toList(),
     );
   }
 }
@@ -221,10 +301,57 @@ class MealProposal {
       confidence: (json['confidence'] as num).toDouble(),
       requiresConfirmation: json['requiresConfirmation'] as bool,
       trustedAutoCommitEligible: json['trustedAutoCommitEligible'] as bool,
-      nutrition: NutritionSnapshot.fromJson(json['nutrition'] as Map<String, Object?>),
-      items: (json['items'] as List<Object?>).cast<Map<String, Object?>>().map(MealItem.fromJson).toList(),
+      nutrition:
+          NutritionSnapshot.fromJson(json['nutrition'] as Map<String, Object?>),
+      items: (json['items'] as List<Object?>)
+          .cast<Map<String, Object?>>()
+          .map(MealItem.fromJson)
+          .toList(),
     );
   }
+}
+
+class MealLabel {
+  const MealLabel({
+    required this.type,
+    required this.label,
+  });
+
+  final String type;
+  final String label;
+
+  static const breakfast = MealLabel(type: 'breakfast', label: 'Breakfast');
+  static const lunch = MealLabel(type: 'lunch', label: 'Lunch');
+  static const dinner = MealLabel(type: 'dinner', label: 'Dinner');
+  static const snack = MealLabel(type: 'snack', label: 'Snack');
+  static const preWorkout =
+      MealLabel(type: 'pre_workout', label: 'Pre-workout');
+  static const postWorkout =
+      MealLabel(type: 'post_workout', label: 'Post-workout');
+
+  factory MealLabel.other(String label) {
+    return MealLabel(type: 'other', label: label.trim());
+  }
+
+  factory MealLabel.fromJson(Map<String, Object?> json) {
+    return MealLabel(
+      type: json['type'] as String,
+      label: json['label'] as String,
+    );
+  }
+
+  Map<String, Object?> toJson() => {
+        'type': type,
+        'label': label,
+      };
+
+  @override
+  bool operator ==(Object other) {
+    return other is MealLabel && other.type == type && other.label == label;
+  }
+
+  @override
+  int get hashCode => Object.hash(type, label);
 }
 
 class Meal {
@@ -234,11 +361,13 @@ class Meal {
     required this.occurredAt,
     required this.nutrition,
     required this.items,
+    this.mealLabel,
   });
 
   final String id;
   final String title;
   final DateTime occurredAt;
+  final MealLabel? mealLabel;
   final NutritionSnapshot nutrition;
   final List<MealItem> items;
 
@@ -247,8 +376,15 @@ class Meal {
       id: json['id'] as String,
       title: json['title'] as String,
       occurredAt: DateTime.parse(json['occurredAt'] as String),
-      nutrition: NutritionSnapshot.fromJson(json['nutrition'] as Map<String, Object?>),
-      items: (json['items'] as List<Object?>).cast<Map<String, Object?>>().map(MealItem.fromJson).toList(),
+      mealLabel: json['mealLabel'] == null
+          ? null
+          : MealLabel.fromJson(json['mealLabel'] as Map<String, Object?>),
+      nutrition:
+          NutritionSnapshot.fromJson(json['nutrition'] as Map<String, Object?>),
+      items: (json['items'] as List<Object?>)
+          .cast<Map<String, Object?>>()
+          .map(MealItem.fromJson)
+          .toList(),
     );
   }
 }
@@ -271,10 +407,16 @@ class DailySummary {
   factory DailySummary.fromJson(Map<String, Object?> json) {
     return DailySummary(
       date: json['date'] as String,
-      consumed: NutritionSnapshot.fromJson(json['consumed'] as Map<String, Object?>),
-      target: NutritionSnapshot.fromJson(json['target'] as Map<String, Object?>),
-      remaining: NutritionSnapshot.fromJson(json['remaining'] as Map<String, Object?>),
-      meals: (json['meals'] as List<Object?>).cast<Map<String, Object?>>().map(Meal.fromJson).toList(),
+      consumed:
+          NutritionSnapshot.fromJson(json['consumed'] as Map<String, Object?>),
+      target:
+          NutritionSnapshot.fromJson(json['target'] as Map<String, Object?>),
+      remaining:
+          NutritionSnapshot.fromJson(json['remaining'] as Map<String, Object?>),
+      meals: (json['meals'] as List<Object?>)
+          .cast<Map<String, Object?>>()
+          .map(Meal.fromJson)
+          .toList(),
     );
   }
 }
@@ -301,8 +443,12 @@ class MealTemplate {
       id: json['id'] as String,
       title: json['title'] as String,
       trustedAutoCommitEnabled: json['trustedAutoCommitEnabled'] as bool,
-      nutrition: NutritionSnapshot.fromJson(json['nutrition'] as Map<String, Object?>),
-      items: (json['items'] as List<Object?>).cast<Map<String, Object?>>().map(MealItem.fromJson).toList(),
+      nutrition:
+          NutritionSnapshot.fromJson(json['nutrition'] as Map<String, Object?>),
+      items: (json['items'] as List<Object?>)
+          .cast<Map<String, Object?>>()
+          .map(MealItem.fromJson)
+          .toList(),
       aliases: (json['aliases'] as List<Object?>? ?? const []).cast<String>(),
     );
   }

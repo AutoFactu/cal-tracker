@@ -4,7 +4,8 @@ import '../../../../data/repositories/nutrition_repository.dart';
 import '../../../../domain/models/nutrition_models.dart';
 
 class DashboardViewModel extends ChangeNotifier {
-  DashboardViewModel({required NutritionRepository nutritionRepository}) : _nutritionRepository = nutritionRepository;
+  DashboardViewModel({required NutritionRepository nutritionRepository})
+      : _nutritionRepository = nutritionRepository;
 
   final NutritionRepository _nutritionRepository;
   DailySummary? _summary;
@@ -19,6 +20,21 @@ class DashboardViewModel extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
     try {
+      _summary = await _nutritionRepository.getDailySummary();
+      _error = null;
+    } catch (error) {
+      _error = error.toString();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> correctMealItems(Meal meal, List<MealItem> items) async {
+    _isLoading = true;
+    notifyListeners();
+    try {
+      await _nutritionRepository.correctMealItems(meal.id, items);
       _summary = await _nutritionRepository.getDailySummary();
       _error = null;
     } catch (error) {

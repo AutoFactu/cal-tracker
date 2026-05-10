@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../../domain/models/nutrition_models.dart';
 import '../../../core/content_frame.dart';
 import '../../../core/design_system.dart';
+import '../../../shared/meal_item_editor_sheet.dart';
 import '../view_models/meal_history_view_model.dart';
 
 class MealHistoryScreen extends StatefulWidget {
@@ -25,6 +26,7 @@ class _MealHistoryScreenState extends State<MealHistoryScreen> {
   @override
   Widget build(BuildContext context) {
     final viewModel = context.watch<MealHistoryViewModel>();
+    final palette = context.freshPalette;
     return ContentFrame(
       title: 'Statistic',
       subtitle: 'Calories and meal history',
@@ -33,10 +35,6 @@ class _MealHistoryScreenState extends State<MealHistoryScreen> {
           icon: Icons.refresh_rounded,
           tooltip: 'Refresh',
           onPressed: viewModel.load,
-        ),
-        const FreshIconButton(
-          icon: Icons.more_horiz_rounded,
-          tooltip: 'More',
         ),
       ],
       child: Column(
@@ -55,16 +53,16 @@ class _MealHistoryScreenState extends State<MealHistoryScreen> {
             ),
             const SizedBox(height: FreshSpacing.md),
           ],
-          _CaloriesChartCard(meals: viewModel.meals),
-          const SizedBox(height: FreshSpacing.lg),
-          const _HealthMetricGrid(),
-          const SizedBox(height: FreshSpacing.lg),
+          if (viewModel.meals.isNotEmpty) ...[
+            _CaloriesChartCard(meals: viewModel.meals),
+            const SizedBox(height: FreshSpacing.lg),
+          ],
           FreshSectionTitle(
             title: 'Recent meals',
             trailing: Text(
               '${viewModel.meals.length} meals',
               style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                color: FreshColors.inkMuted,
+                color: palette.inkMuted,
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
@@ -107,15 +105,15 @@ class _MealHistoryScreenState extends State<MealHistoryScreen> {
                 width: 44,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: FreshColors.rule,
+                  color: context.freshPalette.rule,
                   borderRadius: BorderRadius.circular(999),
                 ),
               ),
               const SizedBox(height: FreshSpacing.lg),
               _SheetAction(
                 icon: Icons.edit_rounded,
-                title: 'Correct',
-                onTap: () => Navigator.of(context).pop('correct'),
+                title: 'Edit ingredients',
+                onTap: () => Navigator.of(context).pop('edit'),
               ),
               const SizedBox(height: FreshSpacing.sm),
               _SheetAction(
@@ -130,44 +128,29 @@ class _MealHistoryScreenState extends State<MealHistoryScreen> {
       ),
     );
     if (!context.mounted || action == null) return;
-    if (action == 'correct') {
-      await _showCorrectionDialog(context, viewModel, meal);
+    if (action == 'edit') {
+      await _showMealItemEditor(context, viewModel, meal);
     } else if (action == 'delete') {
       await _confirmDelete(context, viewModel, meal);
     }
   }
 
-  Future<void> _showCorrectionDialog(
+  Future<void> _showMealItemEditor(
     BuildContext context,
     MealHistoryViewModel viewModel,
     Meal meal,
   ) async {
-    final controller = TextEditingController();
-    final correction = await showDialog<String>(
+    final items = await showModalBottomSheet<List<MealItem>>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Correct meal'),
-        content: TextField(
-          key: const ValueKey('meal_correction_field'),
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Correction'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('Apply'),
-          ),
-        ],
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => MealItemEditorSheet(
+        meal: meal,
+        keyPrefix: 'history',
       ),
     );
-    controller.dispose();
-    if (correction == null || correction.trim().isEmpty) return;
-    await viewModel.correctMeal(meal, correction.trim());
+    if (!context.mounted || items == null) return;
+    await viewModel.correctMealItems(meal, items);
   }
 
   Future<void> _confirmDelete(
@@ -210,6 +193,7 @@ class _CaloriesChartCard extends StatelessWidget {
     final target = 1920;
     final bars = _weeklyBars(meals, target);
     final textTheme = Theme.of(context).textTheme;
+    final palette = context.freshPalette;
     return FreshCard(
       radius: FreshRadii.xl,
       padding: const EdgeInsets.all(20),
@@ -238,14 +222,14 @@ class _CaloriesChartCard extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(
                   'Target: $target Kcal',
-                  style: textTheme.bodyMedium
-                      ?.copyWith(color: FreshColors.inkSoft),
+                  style: textTheme.bodyMedium?.copyWith(color: palette.inkSoft),
                 ),
               ),
             ],
           ),
           const SizedBox(height: FreshSpacing.lg),
           SizedBox(
+            key: const ValueKey('history_calorie_chart'),
             height: 230,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
@@ -271,6 +255,7 @@ class _ChartBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final palette = context.freshPalette;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 3),
       child: Column(
@@ -279,7 +264,7 @@ class _ChartBar extends StatelessWidget {
           Text(
             '${bar.percent}%',
             style: textTheme.bodyMedium?.copyWith(
-              color: FreshColors.inkSoft,
+              color: palette.inkSoft,
               fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
@@ -288,11 +273,11 @@ class _ChartBar extends StatelessWidget {
             child: Align(
               alignment: Alignment.bottomCenter,
               child: FractionallySizedBox(
-                heightFactor: (bar.percent / 120).clamp(0.18, 1).toDouble(),
+                heightFactor: (bar.percent / 120).clamp(0, 1).toDouble(),
                 child: Container(
                   width: 18,
                   decoration: BoxDecoration(
-                    color: bar.active ? FreshColors.lime : FreshColors.limeSoft,
+                    color: bar.active ? palette.lime : palette.limeSoft,
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
@@ -303,74 +288,13 @@ class _ChartBar extends StatelessWidget {
           Text(
             bar.label,
             style: textTheme.labelLarge?.copyWith(
-              color: bar.active ? FreshColors.ink : FreshColors.inkSoft,
+              color: bar.active ? palette.ink : palette.inkSoft,
             ),
           ),
         ],
       ),
     );
   }
-}
-
-class _HealthMetricGrid extends StatelessWidget {
-  const _HealthMetricGrid();
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        const spacing = FreshSpacing.md;
-        final columns = constraints.maxWidth < 340 ? 1 : 2;
-        final totalSpacing = spacing * (columns - 1);
-        final tileWidth = (constraints.maxWidth - totalSpacing) / columns;
-
-        return Wrap(
-          spacing: spacing,
-          runSpacing: spacing,
-          children: [
-            for (final card in _healthMetricCards)
-              SizedBox(
-                width: tileWidth,
-                height: 224,
-                child: card,
-              ),
-          ],
-        );
-      },
-    );
-  }
-
-  static const _healthMetricCards = [
-    FreshMetricCard(
-      title: 'Exercise',
-      value: '2.0',
-      unit: 'hours',
-      icon: Icons.fitness_center_rounded,
-      color: FreshColors.mint,
-      sparkline: FreshMiniBars(values: [4, 2, 5, 7, 3, 6, 8, 2, 1]),
-    ),
-    FreshMetricCard(
-      title: 'BPM',
-      value: '86',
-      unit: 'bpm',
-      icon: Icons.monitor_heart_rounded,
-      color: FreshColors.coral,
-    ),
-    FreshMetricCard(
-      title: 'Weight',
-      value: '72',
-      unit: 'kg',
-      icon: Icons.scale_rounded,
-      color: FreshColors.orange,
-    ),
-    FreshMetricCard(
-      title: 'Water',
-      value: '12',
-      unit: 'glass',
-      icon: Icons.water_drop_rounded,
-      color: FreshColors.water,
-    ),
-  ];
 }
 
 class _HistoryMealCard extends StatelessWidget {
@@ -385,6 +309,7 @@ class _HistoryMealCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final palette = context.freshPalette;
     return FreshCard(
       onTap: onTap,
       padding: const EdgeInsets.all(16),
@@ -403,8 +328,8 @@ class _HistoryMealCard extends StatelessWidget {
                 Text(meal.title, style: textTheme.titleMedium),
                 Text(
                   _formatDate(meal.occurredAt),
-                  style: textTheme.bodyMedium
-                      ?.copyWith(color: FreshColors.inkMuted),
+                  style:
+                      textTheme.bodyMedium?.copyWith(color: palette.inkMuted),
                 ),
               ],
             ),
@@ -480,9 +405,7 @@ List<_BarData> _weeklyBars(List<Meal> meals, int target) {
     for (var index = 0; index < labels.length; index++)
       _BarData(
         label: labels[index],
-        percent: totals[index] == 0
-            ? [44, 34, 110, 47, 32, 79, 24][index]
-            : ((totals[index] / target) * 100).round(),
+        percent: ((totals[index] / target) * 100).round(),
         active: index == now.weekday - 1,
       ),
   ];

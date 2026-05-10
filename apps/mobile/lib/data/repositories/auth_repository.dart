@@ -3,7 +3,9 @@ import '../../generated/api/cal_tracker_api.dart';
 import '../services/secure_token_storage.dart';
 
 class AuthRepository {
-  AuthRepository({required CalTrackerApiClient apiClient, required TokenStorage tokenStorage})
+  AuthRepository(
+      {required CalTrackerApiClient apiClient,
+      required TokenStorage tokenStorage})
       : _apiClient = apiClient,
         _tokenStorage = tokenStorage;
 
@@ -15,16 +17,20 @@ class AuthRepository {
     required String password,
     required String displayName,
   }) async {
-    final json = await _apiClient.register(email: email, password: password, displayName: displayName);
+    final json = await _apiClient.register(
+        email: email, password: password, displayName: displayName);
     final session = AuthSession.fromJson(json);
-    await _tokenStorage.write(StoredTokens(accessToken: session.accessToken, refreshToken: session.refreshToken));
+    await _tokenStorage.write(StoredTokens(
+        accessToken: session.accessToken, refreshToken: session.refreshToken));
     return session;
   }
 
-  Future<AuthSession> login({required String email, required String password}) async {
+  Future<AuthSession> login(
+      {required String email, required String password}) async {
     final json = await _apiClient.login(email: email, password: password);
     final session = AuthSession.fromJson(json);
-    await _tokenStorage.write(StoredTokens(accessToken: session.accessToken, refreshToken: session.refreshToken));
+    await _tokenStorage.write(StoredTokens(
+        accessToken: session.accessToken, refreshToken: session.refreshToken));
     return session;
   }
 

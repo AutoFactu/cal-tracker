@@ -66,7 +66,8 @@ class AudioRecorderService {
     }
     final dir = await getTemporaryDirectory();
     final format = await _resolveFormat();
-    final path = '${dir.path}/voice_log_${DateTime.now().millisecondsSinceEpoch}.${_extensionFor(format)}';
+    final path =
+        '${dir.path}/voice_log_${DateTime.now().millisecondsSinceEpoch}.${_extensionFor(format)}';
     await _recorder.start(
       RecordConfig(
         encoder: _encoderFor(format),
@@ -87,7 +88,8 @@ class AudioRecorderService {
 
     final file = File(path);
     if (!await file.exists()) {
-      throw const RecorderException('missing_file', 'No audio file was created.');
+      throw const RecorderException(
+          'missing_file', 'No audio file was created.');
     }
 
     final sizeBytes = await file.length();
@@ -138,7 +140,8 @@ class AudioRecorderService {
     if (await _recorder.isEncoderSupported(AudioEncoder.aacLc)) {
       return VoiceAudioFormat.m4a;
     }
-    throw const RecorderException('unsupported_encoder', 'No supported audio encoder is available on this device.');
+    throw const RecorderException('unsupported_encoder',
+        'No supported audio encoder is available on this device.');
   }
 
   static VoiceAudioFormat _defaultFormat() {

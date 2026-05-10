@@ -16,14 +16,16 @@ class VoiceLogScreen extends StatefulWidget {
 class _VoiceLogScreenState extends State<VoiceLogScreen> {
   final _textController = TextEditingController();
   final _textFieldFocusNode = FocusNode();
+  bool _transcriptReadyFocusQueued = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       final viewModel = context.read<VoiceLogViewModel>();
       if (viewModel.state == VoiceLogState.transcriptReady) {
-        FocusScope.of(context).requestFocus(_textFieldFocusNode);
+        _requestTextFieldFocus();
       }
     });
   }
@@ -46,9 +48,17 @@ class _VoiceLogScreenState extends State<VoiceLogScreen> {
     }
 
     if (viewModel.state == VoiceLogState.transcriptReady) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        FocusScope.of(context).requestFocus(_textFieldFocusNode);
-      });
+      if (!_transcriptReadyFocusQueued) {
+        _transcriptReadyFocusQueued = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || viewModel.state != VoiceLogState.transcriptReady) {
+            return;
+          }
+          _requestTextFieldFocus();
+        });
+      }
+    } else {
+      _transcriptReadyFocusQueued = false;
     }
 
     return ContentFrame(
@@ -59,6 +69,7 @@ class _VoiceLogScreenState extends State<VoiceLogScreen> {
             viewModel.proposal != null ||
             viewModel.autoCommittedMeal != null)
           FreshIconButton(
+            key: const ValueKey('voice_log_start_over_button'),
             icon: Icons.refresh_rounded,
             tooltip: 'Start over',
             onPressed: viewModel.clearResult,
@@ -118,7 +129,7 @@ class _VoiceLogScreenState extends State<VoiceLogScreen> {
           if (viewModel.proposal != null) ...[
             _ProposalCard(
               proposal: viewModel.proposal!,
-              onConfirm: viewModel.commitProposal,
+              onConfirm: () => _showMealLabelSheet(context, viewModel),
               onEdit: () => _showProposalEditor(context, viewModel),
             ),
             const SizedBox(height: FreshSpacing.md),
@@ -134,7 +145,16 @@ class _VoiceLogScreenState extends State<VoiceLogScreen> {
             const SizedBox(height: FreshSpacing.md),
           ],
           if (viewModel.candidateGroups != null) ...[
-            _ResolverClarificationCard(groups: viewModel.candidateGroups!),
+            _ResolverClarificationCard(
+              groups: viewModel.candidateGroups!,
+              isCandidateSelected: viewModel.isCandidateSelected,
+              onCandidateSelected: viewModel.selectCandidate,
+              onPortionSelected: (choice) {
+                final actionText = choice.actionText;
+                if (actionText == null || actionText.isEmpty) return;
+                viewModel.submitText(actionText);
+              },
+            ),
             const SizedBox(height: FreshSpacing.md),
           ],
           if (viewModel.state == VoiceLogState.resultReady &&
@@ -169,6 +189,11 @@ class _VoiceLogScreenState extends State<VoiceLogScreen> {
     );
   }
 
+  void _requestTextFieldFocus() {
+    if (!_textFieldFocusNode.canRequestFocus) return;
+    _textFieldFocusNode.requestFocus();
+  }
+
   Future<void> _showProposalEditor(
     BuildContext context,
     VoiceLogViewModel viewModel,
@@ -182,6 +207,20 @@ class _VoiceLogScreenState extends State<VoiceLogScreen> {
     );
     if (items == null || !context.mounted) return;
     await viewModel.updateProposalItems(items);
+  }
+
+  Future<void> _showMealLabelSheet(
+    BuildContext context,
+    VoiceLogViewModel viewModel,
+  ) async {
+    final selection = await showModalBottomSheet<_MealLabelSelection>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => const _MealLabelSheet(),
+    );
+    if (!context.mounted || selection == null) return;
+    await viewModel.commitProposal(mealLabel: selection.label);
   }
 
   Widget _buildControls(BuildContext context, VoiceLogViewModel viewModel) {
@@ -203,9 +242,19 @@ class _VoiceLogScreenState extends State<VoiceLogScreen> {
 }
 
 class _ResolverClarificationCard extends StatelessWidget {
-  const _ResolverClarificationCard({required this.groups});
+  const _ResolverClarificationCard({
+    required this.groups,
+    required this.isCandidateSelected,
+    required this.onCandidateSelected,
+    required this.onPortionSelected,
+  });
 
   final List<FoodCandidateGroup> groups;
+  final bool Function(FoodCandidateGroup group, MealItem candidate)
+      isCandidateSelected;
+  final Future<void> Function(FoodCandidateGroup group, MealItem candidate)
+      onCandidateSelected;
+  final ValueChanged<FoodPortionChoice> onPortionSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -223,25 +272,143 @@ class _ResolverClarificationCard extends StatelessWidget {
               style: textTheme.titleSmall,
             ),
             const SizedBox(height: 4),
+            if (group.portionOptions?.isNotEmpty ?? false) ...[
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (var index = 0;
+                      index < group.portionOptions!.length;
+                      index++)
+                    _PortionChoiceChip(
+                      key: ValueKey(
+                        'portion_option_${group.mention.canonicalEnglishName}_$index',
+                      ),
+                      choice: group.portionOptions![index],
+                      onSelected: onPortionSelected,
+                    ),
+                ],
+              ),
+              const SizedBox(height: FreshSpacing.sm),
+            ],
             if (group.candidates.isEmpty)
               Text(
                 'No confident match yet',
-                style: textTheme.bodyMedium?.copyWith(color: FreshColors.inkMuted),
+                style:
+                    textTheme.bodyMedium?.copyWith(color: FreshColors.inkMuted),
               )
             else
-              for (final candidate in group.candidates.take(3))
-                _MealLine(
-                  title: candidate.name,
-                  subtitle: [
-                    candidate.externalSource ?? candidate.source,
-                    if (candidate.confidence != null) '${(candidate.confidence! * 100).round()}%',
-                  ].join(' · '),
-                  calories: candidate.calories,
+              for (var index = 0;
+                  index < group.candidates.take(3).length;
+                  index++)
+                _CandidateMealLine(
+                  key: ValueKey(
+                    'food_candidate_${group.mention.canonicalEnglishName}_$index',
+                  ),
+                  candidate: group.candidates[index],
+                  selected: isCandidateSelected(group, group.candidates[index]),
+                  onSelected: () =>
+                      onCandidateSelected(group, group.candidates[index]),
                 ),
             const SizedBox(height: FreshSpacing.md),
           ],
         ],
       ),
+    );
+  }
+}
+
+class _CandidateMealLine extends StatelessWidget {
+  const _CandidateMealLine({
+    super.key,
+    required this.candidate,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final MealItem candidate;
+  final bool selected;
+  final VoidCallback onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final subtitle = candidate.externalSource ?? candidate.source;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Material(
+        color: selected
+            ? FreshColors.lime.withValues(alpha: 0.16)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(FreshRadii.md),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(FreshRadii.md),
+          onTap: onSelected,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            child: Row(
+              children: [
+                FreshIconChip(
+                  icon: selected
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  color: selected ? FreshColors.limeDeep : FreshColors.inkMuted,
+                  backgroundColor:
+                      selected ? FreshColors.limeSoft : FreshColors.surface,
+                  size: 36,
+                ),
+                const SizedBox(width: FreshSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(candidate.name, style: textTheme.bodyLarge),
+                      if (subtitle.isNotEmpty)
+                        Text(
+                          subtitle,
+                          style: textTheme.bodyMedium
+                              ?.copyWith(color: FreshColors.inkMuted),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
+                ),
+                Text(
+                  '${candidate.calories} Kcal',
+                  style: textTheme.labelLarge?.copyWith(
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PortionChoiceChip extends StatelessWidget {
+  const _PortionChoiceChip({
+    super.key,
+    required this.choice,
+    required this.onSelected,
+  });
+
+  final FoodPortionChoice choice;
+  final ValueChanged<FoodPortionChoice> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final grams = choice.totalGrams ?? choice.gramWeight;
+    final label = grams == null
+        ? choice.label
+        : '${choice.label} (${_formatQuantity(grams)} g)';
+    final canSelect = choice.actionText?.isNotEmpty ?? false;
+    return ActionChip(
+      label: Text(label),
+      avatar: Icon(canSelect ? Icons.check_rounded : Icons.edit_rounded),
+      onPressed: canSelect ? () => onSelected(choice) : null,
     );
   }
 }
@@ -258,6 +425,7 @@ class _VoiceCaptureCard extends StatelessWidget {
         viewModel.state == VoiceLogState.transcribing ||
         viewModel.state == VoiceLogState.agentRunning;
     final textTheme = Theme.of(context).textTheme;
+    final limeCardTextColor = FreshPalette.dark.limeWash;
     return FreshCard(
       color: isRecording
           ? FreshColors.coral.withValues(alpha: 0.12)
@@ -284,8 +452,10 @@ class _VoiceCaptureCard extends StatelessWidget {
                     const SizedBox(width: FreshSpacing.sm),
                     Text(
                       isRecording ? 'Recording' : 'Voice intake',
-                      style: textTheme.bodyMedium
-                          ?.copyWith(color: FreshColors.ink),
+                      style: textTheme.bodyMedium?.copyWith(
+                        color:
+                            isRecording ? FreshColors.ink : limeCardTextColor,
+                      ),
                     ),
                   ],
                 ),
@@ -295,15 +465,18 @@ class _VoiceCaptureCard extends StatelessWidget {
                       ? 'Tap stop when you are done.'
                       : 'Say your meal naturally.',
                   style: textTheme.titleLarge?.copyWith(
+                    color: isRecording ? null : limeCardTextColor,
                     fontWeight: FontWeight.w700,
                     height: 1.12,
                   ),
                 ),
                 const SizedBox(height: FreshSpacing.sm),
                 Text(
-                  'Whisper will fill the meal text before you submit.',
-                  style: textTheme.bodyMedium
-                      ?.copyWith(color: FreshColors.inkSoft),
+                  'The meal will be filled with your voice.',
+                  style: textTheme.bodyMedium?.copyWith(
+                    color:
+                        isRecording ? FreshColors.inkSoft : limeCardTextColor,
+                  ),
                 ),
               ],
             ),
@@ -567,6 +740,140 @@ class _RemainingCard extends StatelessWidget {
   }
 }
 
+class _MealLabelSelection {
+  const _MealLabelSelection(this.label);
+
+  final MealLabel? label;
+}
+
+class _MealLabelSheet extends StatefulWidget {
+  const _MealLabelSheet();
+
+  @override
+  State<_MealLabelSheet> createState() => _MealLabelSheetState();
+}
+
+class _MealLabelSheetState extends State<_MealLabelSheet> {
+  final _otherController = TextEditingController();
+  bool _showOther = false;
+
+  static const _fixedLabels = [
+    MealLabel.breakfast,
+    MealLabel.lunch,
+    MealLabel.dinner,
+    MealLabel.snack,
+    MealLabel.preWorkout,
+    MealLabel.postWorkout,
+  ];
+
+  @override
+  void dispose() {
+    _otherController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 16, 20, 20 + bottomInset),
+      child: Column(
+        key: const ValueKey('meal_label_sheet'),
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 44,
+              height: 5,
+              decoration: BoxDecoration(
+                color: FreshColors.rule,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          ),
+          const SizedBox(height: FreshSpacing.lg),
+          Text(
+            'Which type of meal is this?',
+            style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: FreshSpacing.sm),
+          Text(
+            'This helps your Home screen make today easier to scan.',
+            style: textTheme.bodyMedium?.copyWith(color: FreshColors.inkMuted),
+          ),
+          const SizedBox(height: FreshSpacing.lg),
+          Wrap(
+            spacing: FreshSpacing.sm,
+            runSpacing: FreshSpacing.sm,
+            children: [
+              for (final label in _fixedLabels)
+                ChoiceChip(
+                  key: ValueKey('meal_label_${label.type}_option'),
+                  label: Text(label.label),
+                  selected: false,
+                  onSelected: (_) => _select(label),
+                ),
+              ChoiceChip(
+                key: const ValueKey('meal_label_other_option'),
+                label: const Text('Other'),
+                selected: _showOther,
+                onSelected: (_) => setState(() => _showOther = true),
+              ),
+            ],
+          ),
+          if (_showOther) ...[
+            const SizedBox(height: FreshSpacing.lg),
+            TextField(
+              key: const ValueKey('meal_label_other_field'),
+              controller: _otherController,
+              autofocus: true,
+              maxLength: 40,
+              decoration: const InputDecoration(
+                labelText: 'Custom meal type',
+                hintText: 'Brunch',
+                prefixIcon: Icon(Icons.edit_rounded),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: FreshSpacing.sm),
+            FilledButton.icon(
+              key: const ValueKey('meal_label_other_save_button'),
+              onPressed: _otherController.text.trim().isEmpty
+                  ? null
+                  : () => _select(MealLabel.other(_otherController.text)),
+              icon: const Icon(Icons.check_rounded),
+              label: const Text('Save label'),
+            ),
+          ],
+          const SizedBox(height: FreshSpacing.md),
+          Row(
+            children: [
+              TextButton(
+                key: const ValueKey('meal_label_cancel_button'),
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              const Spacer(),
+              TextButton(
+                key: const ValueKey('meal_label_skip_button'),
+                onPressed: () =>
+                    Navigator.of(context).pop(const _MealLabelSelection(null)),
+                child: const Text('Skip'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _select(MealLabel label) {
+    Navigator.of(context).pop(_MealLabelSelection(label));
+  }
+}
+
 class _ProposalCard extends StatelessWidget {
   const _ProposalCard({
     required this.proposal,
@@ -616,26 +923,11 @@ class _ProposalCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: FreshSpacing.lg),
-          Row(
-            children: [
-              Expanded(
-                child: _MetricBlock(
-                  label: 'Calories',
-                  value: '${proposal.nutrition.calories}',
-                  unit: 'Kcal',
-                  color: FreshColors.lime,
-                ),
-              ),
-              const SizedBox(width: FreshSpacing.md),
-              Expanded(
-                child: _MetricBlock(
-                  label: 'Confidence',
-                  value: '${(proposal.confidence * 100).round()}',
-                  unit: '%',
-                  color: FreshColors.mint,
-                ),
-              ),
-            ],
+          _MetricBlock(
+            label: 'Calories',
+            value: '${proposal.nutrition.calories}',
+            unit: 'Kcal',
+            color: FreshColors.lime,
           ),
           const SizedBox(height: FreshSpacing.md),
           for (final item in proposal.items)

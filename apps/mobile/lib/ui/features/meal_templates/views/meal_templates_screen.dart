@@ -25,6 +25,7 @@ class _MealTemplatesScreenState extends State<MealTemplatesScreen> {
   @override
   Widget build(BuildContext context) {
     final viewModel = context.watch<MealTemplatesViewModel>();
+    final limeCardTextColor = FreshPalette.dark.limeWash;
     return ContentFrame(
       title: 'Usual meals',
       subtitle: 'Safe familiar templates',
@@ -58,7 +59,10 @@ class _MealTemplatesScreenState extends State<MealTemplatesScreen> {
                 Expanded(
                   child: Text(
                     'Templates keep recurring meals fast while preserving confirmation controls.',
-                    style: Theme.of(context).textTheme.titleMedium,
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(color: limeCardTextColor),
                   ),
                 ),
               ],
@@ -104,53 +108,17 @@ class _MealTemplatesScreenState extends State<MealTemplatesScreen> {
     BuildContext context,
     MealTemplatesViewModel viewModel,
   ) async {
-    final titleController = TextEditingController();
-    final aliasesController = TextEditingController();
-    final submitted = await showDialog<bool>(
+    final draft = await showDialog<_TemplateDraft>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('New usual meal'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              key: const ValueKey('template_title_field'),
-              controller: titleController,
-              autofocus: true,
-              decoration: const InputDecoration(labelText: 'Title'),
-            ),
-            const SizedBox(height: FreshSpacing.md),
-            TextField(
-              key: const ValueKey('template_aliases_field'),
-              controller: aliasesController,
-              decoration:
-                  const InputDecoration(labelText: 'Aliases, comma-separated'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Create'),
-          ),
-        ],
-      ),
+      builder: (context) => const _CreateTemplateDialog(),
     );
-    final title = titleController.text.trim();
-    final aliases = aliasesController.text
-        .split(',')
-        .map((value) => value.trim())
-        .where((value) => value.isNotEmpty)
-        .toList();
-    titleController.dispose();
-    aliasesController.dispose();
-    if (submitted == true && title.isNotEmpty) {
-      await viewModel.createBasicTemplate(title: title, aliases: aliases);
+    if (draft == null || draft.title.isEmpty || !context.mounted) {
+      return;
     }
+    await viewModel.createBasicTemplate(
+      title: draft.title,
+      aliases: draft.aliases,
+    );
   }
 
   Future<void> _confirmDelete(
@@ -179,6 +147,81 @@ class _MealTemplatesScreenState extends State<MealTemplatesScreen> {
       await viewModel.deleteTemplate(template);
     }
   }
+}
+
+class _CreateTemplateDialog extends StatefulWidget {
+  const _CreateTemplateDialog();
+
+  @override
+  State<_CreateTemplateDialog> createState() => _CreateTemplateDialogState();
+}
+
+class _CreateTemplateDialogState extends State<_CreateTemplateDialog> {
+  final _titleController = TextEditingController();
+  final _aliasesController = TextEditingController();
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _aliasesController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('New usual meal'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            key: const ValueKey('template_title_field'),
+            controller: _titleController,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Title'),
+          ),
+          const SizedBox(height: FreshSpacing.md),
+          TextField(
+            key: const ValueKey('template_aliases_field'),
+            controller: _aliasesController,
+            decoration:
+                const InputDecoration(labelText: 'Aliases, comma-separated'),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('Create'),
+        ),
+      ],
+    );
+  }
+
+  void _submit() {
+    final title = _titleController.text.trim();
+    if (title.isEmpty) return;
+    final aliases = _aliasesController.text
+        .split(',')
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList();
+    Navigator.of(context).pop(_TemplateDraft(title: title, aliases: aliases));
+  }
+}
+
+class _TemplateDraft {
+  const _TemplateDraft({
+    required this.title,
+    required this.aliases,
+  });
+
+  final String title;
+  final List<String> aliases;
 }
 
 class _TemplateCard extends StatelessWidget {

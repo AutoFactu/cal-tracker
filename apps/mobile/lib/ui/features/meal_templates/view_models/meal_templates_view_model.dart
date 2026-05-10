@@ -4,7 +4,8 @@ import '../../../../data/repositories/nutrition_repository.dart';
 import '../../../../domain/models/nutrition_models.dart';
 
 class MealTemplatesViewModel extends ChangeNotifier {
-  MealTemplatesViewModel({required NutritionRepository nutritionRepository}) : _nutritionRepository = nutritionRepository;
+  MealTemplatesViewModel({required NutritionRepository nutritionRepository})
+      : _nutritionRepository = nutritionRepository;
 
   final NutritionRepository _nutritionRepository;
   List<MealTemplate> _templates = const [];
@@ -30,12 +31,16 @@ class MealTemplatesViewModel extends ChangeNotifier {
   }
 
   Future<void> setTrustedMode(MealTemplate template, bool enabled) async {
-    final updated = await _nutritionRepository.setTemplateTrustedMode(template, enabled);
-    _templates = _templates.map((item) => item.id == updated.id ? updated : item).toList();
+    final updated =
+        await _nutritionRepository.setTemplateTrustedMode(template, enabled);
+    _templates = _templates
+        .map((item) => item.id == updated.id ? updated : item)
+        .toList();
     notifyListeners();
   }
 
-  Future<void> createBasicTemplate({required String title, required List<String> aliases}) async {
+  Future<void> createBasicTemplate(
+      {required String title, required List<String> aliases}) async {
     _isLoading = true;
     notifyListeners();
     try {
@@ -81,7 +86,8 @@ class MealTemplatesViewModel extends ChangeNotifier {
     try {
       final deleted = await _nutritionRepository.deleteTemplate(template.id);
       if (deleted) {
-        _templates = _templates.where((item) => item.id != template.id).toList();
+        _templates =
+            _templates.where((item) => item.id != template.id).toList();
       }
       _error = null;
     } catch (error) {

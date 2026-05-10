@@ -27,6 +27,178 @@ class FreshColors {
   static const yellow = Color(0xfffff0b6);
 }
 
+class FreshPalette extends ThemeExtension<FreshPalette> {
+  const FreshPalette({
+    required this.appBg,
+    required this.screen,
+    required this.surface,
+    required this.surfaceSoft,
+    required this.surfaceMuted,
+    required this.ink,
+    required this.inkSoft,
+    required this.inkMuted,
+    required this.rule,
+    required this.ruleSoft,
+    required this.lime,
+    required this.limeDeep,
+    required this.limeSoft,
+    required this.limeWash,
+    required this.leaf,
+    required this.water,
+    required this.orange,
+    required this.mint,
+    required this.coral,
+    required this.yellow,
+  });
+
+  static const light = FreshPalette(
+    appBg: FreshColors.appBg,
+    screen: FreshColors.screen,
+    surface: FreshColors.surface,
+    surfaceSoft: FreshColors.surfaceSoft,
+    surfaceMuted: FreshColors.surfaceMuted,
+    ink: FreshColors.ink,
+    inkSoft: FreshColors.inkSoft,
+    inkMuted: FreshColors.inkMuted,
+    rule: FreshColors.rule,
+    ruleSoft: FreshColors.ruleSoft,
+    lime: FreshColors.lime,
+    limeDeep: FreshColors.limeDeep,
+    limeSoft: FreshColors.limeSoft,
+    limeWash: FreshColors.limeWash,
+    leaf: FreshColors.leaf,
+    water: FreshColors.water,
+    orange: FreshColors.orange,
+    mint: FreshColors.mint,
+    coral: FreshColors.coral,
+    yellow: FreshColors.yellow,
+  );
+
+  static const dark = FreshPalette(
+    appBg: Color(0xff10140d),
+    screen: Color(0xff141811),
+    surface: Color(0xff1d2318),
+    surfaceSoft: Color(0xff252d1f),
+    surfaceMuted: Color(0xff303828),
+    ink: Color(0xfff3f7ee),
+    inkSoft: Color(0xffd6dfcd),
+    inkMuted: Color(0xffa2ac98),
+    rule: Color(0xff3d4734),
+    ruleSoft: Color(0xff2d3527),
+    lime: Color(0xffa7d84d),
+    limeDeep: Color(0xffb7e06b),
+    limeSoft: Color(0xff445d26),
+    limeWash: Color(0xff28381b),
+    leaf: Color(0xff86c75b),
+    water: Color(0xff6fcde2),
+    orange: Color(0xffe4a15d),
+    mint: Color(0xff73d4a4),
+    coral: Color(0xffff7f8c),
+    yellow: Color(0xff5c4d25),
+  );
+
+  final Color appBg;
+  final Color screen;
+  final Color surface;
+  final Color surfaceSoft;
+  final Color surfaceMuted;
+  final Color ink;
+  final Color inkSoft;
+  final Color inkMuted;
+  final Color rule;
+  final Color ruleSoft;
+  final Color lime;
+  final Color limeDeep;
+  final Color limeSoft;
+  final Color limeWash;
+  final Color leaf;
+  final Color water;
+  final Color orange;
+  final Color mint;
+  final Color coral;
+  final Color yellow;
+
+  @override
+  FreshPalette copyWith({
+    Color? appBg,
+    Color? screen,
+    Color? surface,
+    Color? surfaceSoft,
+    Color? surfaceMuted,
+    Color? ink,
+    Color? inkSoft,
+    Color? inkMuted,
+    Color? rule,
+    Color? ruleSoft,
+    Color? lime,
+    Color? limeDeep,
+    Color? limeSoft,
+    Color? limeWash,
+    Color? leaf,
+    Color? water,
+    Color? orange,
+    Color? mint,
+    Color? coral,
+    Color? yellow,
+  }) {
+    return FreshPalette(
+      appBg: appBg ?? this.appBg,
+      screen: screen ?? this.screen,
+      surface: surface ?? this.surface,
+      surfaceSoft: surfaceSoft ?? this.surfaceSoft,
+      surfaceMuted: surfaceMuted ?? this.surfaceMuted,
+      ink: ink ?? this.ink,
+      inkSoft: inkSoft ?? this.inkSoft,
+      inkMuted: inkMuted ?? this.inkMuted,
+      rule: rule ?? this.rule,
+      ruleSoft: ruleSoft ?? this.ruleSoft,
+      lime: lime ?? this.lime,
+      limeDeep: limeDeep ?? this.limeDeep,
+      limeSoft: limeSoft ?? this.limeSoft,
+      limeWash: limeWash ?? this.limeWash,
+      leaf: leaf ?? this.leaf,
+      water: water ?? this.water,
+      orange: orange ?? this.orange,
+      mint: mint ?? this.mint,
+      coral: coral ?? this.coral,
+      yellow: yellow ?? this.yellow,
+    );
+  }
+
+  @override
+  FreshPalette lerp(ThemeExtension<FreshPalette>? other, double t) {
+    if (other is! FreshPalette) return this;
+    return FreshPalette(
+      appBg: Color.lerp(appBg, other.appBg, t)!,
+      screen: Color.lerp(screen, other.screen, t)!,
+      surface: Color.lerp(surface, other.surface, t)!,
+      surfaceSoft: Color.lerp(surfaceSoft, other.surfaceSoft, t)!,
+      surfaceMuted: Color.lerp(surfaceMuted, other.surfaceMuted, t)!,
+      ink: Color.lerp(ink, other.ink, t)!,
+      inkSoft: Color.lerp(inkSoft, other.inkSoft, t)!,
+      inkMuted: Color.lerp(inkMuted, other.inkMuted, t)!,
+      rule: Color.lerp(rule, other.rule, t)!,
+      ruleSoft: Color.lerp(ruleSoft, other.ruleSoft, t)!,
+      lime: Color.lerp(lime, other.lime, t)!,
+      limeDeep: Color.lerp(limeDeep, other.limeDeep, t)!,
+      limeSoft: Color.lerp(limeSoft, other.limeSoft, t)!,
+      limeWash: Color.lerp(limeWash, other.limeWash, t)!,
+      leaf: Color.lerp(leaf, other.leaf, t)!,
+      water: Color.lerp(water, other.water, t)!,
+      orange: Color.lerp(orange, other.orange, t)!,
+      mint: Color.lerp(mint, other.mint, t)!,
+      coral: Color.lerp(coral, other.coral, t)!,
+      yellow: Color.lerp(yellow, other.yellow, t)!,
+    );
+  }
+}
+
+extension FreshPaletteLookup on BuildContext {
+  FreshPalette get freshPalette {
+    return Theme.of(this).extension<FreshPalette>() ?? FreshPalette.light;
+  }
+}
+
 class FreshSpacing {
   const FreshSpacing._();
 
@@ -120,6 +292,7 @@ class FreshHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.freshPalette;
     final textTheme = Theme.of(context).textTheme;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -136,7 +309,7 @@ class FreshHeader extends StatelessWidget {
                 Text(
                   subtitle!,
                   style: textTheme.bodyMedium?.copyWith(
-                    color: FreshColors.inkMuted,
+                    color: palette.inkMuted,
                     height: 1.1,
                   ),
                 ),
@@ -144,7 +317,7 @@ class FreshHeader extends StatelessWidget {
                 title,
                 style: textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w700,
-                  color: FreshColors.ink,
+                  color: palette.ink,
                 ),
               ),
             ],
@@ -164,7 +337,7 @@ class FreshCard extends StatelessWidget {
     super.key,
     required this.child,
     this.padding = const EdgeInsets.all(20),
-    this.color = FreshColors.surface,
+    this.color,
     this.radius = FreshRadii.lg,
     this.onTap,
     this.shadow = true,
@@ -172,17 +345,18 @@ class FreshCard extends StatelessWidget {
 
   final Widget child;
   final EdgeInsetsGeometry padding;
-  final Color color;
+  final Color? color;
   final double radius;
   final VoidCallback? onTap;
   final bool shadow;
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.freshPalette;
     final borderRadius = BorderRadius.circular(radius);
     final decorated = DecoratedBox(
       decoration: BoxDecoration(
-        color: color,
+        color: color ?? palette.surface,
         borderRadius: borderRadius,
         boxShadow: shadow ? _softShadow : null,
       ),
@@ -206,20 +380,21 @@ class FreshIconButton extends StatelessWidget {
     required this.icon,
     this.onPressed,
     this.tooltip,
-    this.backgroundColor = FreshColors.surface,
-    this.foregroundColor = FreshColors.ink,
+    this.backgroundColor,
+    this.foregroundColor,
     this.size = 48,
   });
 
   final IconData icon;
   final VoidCallback? onPressed;
   final String? tooltip;
-  final Color backgroundColor;
-  final Color foregroundColor;
+  final Color? backgroundColor;
+  final Color? foregroundColor;
   final double size;
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.freshPalette;
     return SizedBox.square(
       dimension: size,
       child: IconButton(
@@ -227,10 +402,10 @@ class FreshIconButton extends StatelessWidget {
         onPressed: onPressed,
         icon: Icon(icon, size: size >= 48 ? 22 : 18),
         style: IconButton.styleFrom(
-          backgroundColor: backgroundColor,
-          foregroundColor: foregroundColor,
-          disabledBackgroundColor: FreshColors.surfaceMuted,
-          disabledForegroundColor: FreshColors.inkMuted,
+          backgroundColor: backgroundColor ?? palette.surface,
+          foregroundColor: foregroundColor ?? palette.ink,
+          disabledBackgroundColor: palette.surfaceMuted,
+          disabledForegroundColor: palette.inkMuted,
           shape: const CircleBorder(),
           elevation: 0,
         ),
@@ -255,6 +430,7 @@ class FreshIconChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.freshPalette;
     return Container(
       width: size,
       height: size,
@@ -262,7 +438,11 @@ class FreshIconChip extends StatelessWidget {
         color: backgroundColor ?? color.withValues(alpha: 0.14),
         shape: BoxShape.circle,
       ),
-      child: Icon(icon, color: color, size: size * 0.5),
+      child: Icon(
+        icon,
+        color: color == FreshColors.ink ? palette.ink : color,
+        size: size * 0.5,
+      ),
     );
   }
 }
@@ -287,6 +467,7 @@ class FreshMetricCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.freshPalette;
     final textTheme = Theme.of(context).textTheme;
     return FreshCard(
       padding: const EdgeInsets.all(16),
@@ -302,7 +483,7 @@ class FreshMetricCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: textTheme.bodyMedium?.copyWith(color: FreshColors.ink),
+                  style: textTheme.bodyMedium?.copyWith(color: palette.ink),
                 ),
               ),
             ],
@@ -391,17 +572,18 @@ class FreshProgressRing extends StatelessWidget {
     required this.center,
     this.size = 90,
     this.color = FreshColors.lime,
-    this.trackColor = FreshColors.surface,
+    this.trackColor,
   });
 
   final double progress;
   final Widget center;
   final double size;
   final Color color;
-  final Color trackColor;
+  final Color? trackColor;
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.freshPalette;
     return SizedBox.square(
       dimension: size,
       child: Stack(
@@ -412,7 +594,7 @@ class FreshProgressRing extends StatelessWidget {
             painter: _RingPainter(
               progress: progress.clamp(0, 1).toDouble(),
               color: color,
-              trackColor: trackColor,
+              trackColor: trackColor ?? palette.surface,
             ),
           ),
           center,
@@ -525,6 +707,7 @@ class FreshFoodStack extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.freshPalette;
     return SizedBox(
       width: size + (assets.length - 1) * (size * 0.62),
       height: size,
@@ -538,7 +721,7 @@ class FreshFoodStack extends StatelessWidget {
                 height: size,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: FreshColors.surface, width: 2),
+                  border: Border.all(color: palette.surface, width: 2),
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: Image.asset(assets[i], fit: BoxFit.cover),
@@ -564,10 +747,11 @@ class FreshEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.freshPalette;
     final textTheme = Theme.of(context).textTheme;
     return FreshCard(
       shadow: false,
-      color: FreshColors.surfaceSoft,
+      color: palette.surfaceSoft,
       child: Column(
         children: [
           FreshIconChip(icon: icon, color: FreshColors.limeDeep),
@@ -577,7 +761,7 @@ class FreshEmptyState extends StatelessWidget {
           const SizedBox(height: FreshSpacing.sm),
           Text(
             message,
-            style: textTheme.bodyMedium?.copyWith(color: FreshColors.inkMuted),
+            style: textTheme.bodyMedium?.copyWith(color: palette.inkMuted),
             textAlign: TextAlign.center,
           ),
         ],

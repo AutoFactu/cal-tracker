@@ -15,11 +15,10 @@ class AgentRunResult {
     this.items,
     this.templates,
     this.template,
-    this.matches,
+    this.resolvedItems,
     this.deleted,
     this.actionId,
     this.input,
-    this.options,
     this.candidateGroups,
   });
 
@@ -33,11 +32,10 @@ class AgentRunResult {
   final List<MealItem>? items;
   final List<MealTemplate>? templates;
   final MealTemplate? template;
-  final List<dynamic>? matches;
+  final List<MealItem>? resolvedItems;
   final bool? deleted;
   final String? actionId;
   final dynamic input;
-  final List<dynamic>? options;
   final List<FoodCandidateGroup>? candidateGroups;
 }
 
@@ -87,23 +85,33 @@ class NutritionRepository {
       template: json['template'] == null
           ? null
           : MealTemplate.fromJson(json['template'] as Map<String, Object?>),
-      matches: json['matches'] as List<dynamic>?,
+      resolvedItems: json['resolvedItems'] == null
+          ? null
+          : (json['resolvedItems'] as List<Object?>)
+              .cast<Map<String, Object?>>()
+              .map(MealItem.fromJson)
+              .toList(),
       deleted: json['deleted'] as bool?,
       actionId: json['actionId'] as String?,
       input: json['input'],
-      options: json['options'] as List<dynamic>?,
       candidateGroups: _parseCandidateGroups(json['options']),
     );
   }
 
-  Future<Meal> commitProposal(String proposalId) async {
-    final json = await _apiClient.commitProposal(proposalId);
+  Future<Meal> commitProposal(String proposalId, {MealLabel? mealLabel}) async {
+    final json = await _apiClient.commitProposal(
+      proposalId,
+      mealLabel: mealLabel,
+    );
     final output = json['output'] as Map<String, Object?>;
     return Meal.fromJson(output['meal'] as Map<String, Object?>);
   }
 
-  Future<Meal> correctMeal(String mealId, String correctionText) async {
-    final json = await _apiClient.correctMeal(mealId, correctionText);
+  Future<Meal> correctMealItems(String mealId, List<MealItem> items) async {
+    final json = await _apiClient.correctMeal(
+      mealId,
+      items.map((item) => item.toJson()).toList(),
+    );
     final output = json['output'] as Map<String, Object?>;
     return Meal.fromJson(output['meal'] as Map<String, Object?>);
   }
@@ -112,8 +120,24 @@ class NutritionRepository {
       String proposalId, List<MealItem> items) async {
     final json = await _apiClient.correctProposal(
       proposalId: proposalId,
-      correctionText: 'Manual proposal edit',
       items: items.map((item) => item.toJson()).toList(),
+    );
+    final output = json['output'] as Map<String, Object?>;
+    return MealProposal.fromJson(output['proposal'] as Map<String, Object?>);
+  }
+
+  Future<MealProposal> createProposalFromItems({
+    required String phrase,
+    required List<MealItem> items,
+    String? title,
+  }) async {
+    final json = await _apiClient.executeAction(
+      'create_meal_proposal_from_items',
+      {
+        'phrase': phrase,
+        if (title != null) 'title': title,
+        'items': items.map((item) => item.toJson()).toList(),
+      },
     );
     final output = json['output'] as Map<String, Object?>;
     return MealProposal.fromJson(output['proposal'] as Map<String, Object?>);
@@ -190,7 +214,8 @@ List<FoodCandidateGroup>? _parseCandidateGroups(Object? value) {
   if (value is! List<Object?>) return null;
   final groups = <FoodCandidateGroup>[];
   for (final item in value) {
-    if (item is Map<String, Object?> && item['mention'] is Map<String, Object?>) {
+    if (item is Map<String, Object?> &&
+        item['mention'] is Map<String, Object?>) {
       groups.add(FoodCandidateGroup.fromJson(item));
     }
   }

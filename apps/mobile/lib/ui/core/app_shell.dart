@@ -10,13 +10,14 @@ class AppShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.freshPalette;
     return LayoutBuilder(
       builder: (context, constraints) {
         final selectedIndex = _selectedIndex(context);
         final isWide = constraints.maxWidth >= 720;
         if (isWide) {
           return Scaffold(
-            backgroundColor: FreshColors.screen,
+            backgroundColor: palette.screen,
             body: Row(
               children: [
                 _FreshSideNav(
@@ -29,7 +30,7 @@ class AppShell extends StatelessWidget {
           );
         }
         return Scaffold(
-          backgroundColor: FreshColors.screen,
+          backgroundColor: palette.screen,
           body: child,
           bottomNavigationBar: _FreshBottomNav(
             selectedIndex: selectedIndex,
@@ -74,10 +75,11 @@ class _FreshBottomNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.freshPalette;
     return SafeArea(
       top: false,
       child: Container(
-        color: FreshColors.screen,
+        color: palette.screen,
         padding: const EdgeInsets.fromLTRB(18, 8, 18, 8),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -124,11 +126,12 @@ class _FreshSideNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.freshPalette;
     return SafeArea(
       child: Container(
         width: 112,
         padding: const EdgeInsets.all(16),
-        color: FreshColors.screen,
+        color: palette.screen,
         child: FreshCard(
           padding: const EdgeInsets.symmetric(vertical: 16),
           child: Column(
@@ -168,20 +171,21 @@ class _NavButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.freshPalette;
     final labelStyle = Theme.of(context).textTheme.labelMedium?.copyWith(
-          color: selected ? FreshColors.ink : FreshColors.inkSoft,
+          color: selected ? palette.ink : palette.inkSoft,
           fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
         );
     final icon = Container(
       width: 38,
       height: 38,
       decoration: BoxDecoration(
-        color: selected ? FreshColors.limeWash : Colors.transparent,
+        color: selected ? palette.limeWash : Colors.transparent,
         shape: BoxShape.circle,
       ),
       child: Icon(
         item.icon,
-        color: selected ? FreshColors.limeDeep : FreshColors.ink,
+        color: selected ? palette.limeDeep : palette.ink,
         size: 22,
       ),
     );
@@ -216,6 +220,7 @@ class _CenterNavButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.freshPalette;
     return InkWell(
       customBorder: const CircleBorder(),
       onTap: onTap,
@@ -223,7 +228,7 @@ class _CenterNavButton extends StatelessWidget {
         width: 62,
         height: 62,
         decoration: BoxDecoration(
-          color: selected ? FreshColors.lime : FreshColors.limeSoft,
+          color: selected ? palette.lime : palette.limeSoft,
           shape: BoxShape.circle,
           boxShadow: const [
             BoxShadow(
@@ -233,7 +238,7 @@ class _CenterNavButton extends StatelessWidget {
             ),
           ],
         ),
-        child: const Icon(Icons.mic, color: FreshColors.ink, size: 28),
+        child: Icon(Icons.mic, color: palette.ink, size: 28),
       ),
     );
   }
@@ -246,15 +251,15 @@ class _BrandMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.freshPalette;
     return Container(
       width: compact ? 46 : 52,
       height: compact ? 46 : 52,
-      decoration: const BoxDecoration(
-        color: FreshColors.limeWash,
+      decoration: BoxDecoration(
+        color: palette.limeWash,
         shape: BoxShape.circle,
       ),
-      child:
-          const Icon(Icons.local_fire_department, color: FreshColors.limeDeep),
+      child: Icon(Icons.local_fire_department, color: palette.limeDeep),
     );
   }
 }

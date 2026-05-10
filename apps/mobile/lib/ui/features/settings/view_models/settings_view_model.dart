@@ -4,7 +4,8 @@ import '../../../../data/repositories/auth_repository.dart';
 import '../../../../domain/models/auth_models.dart';
 
 class SettingsViewModel extends ChangeNotifier {
-  SettingsViewModel({required AuthRepository authRepository}) : _authRepository = authRepository;
+  SettingsViewModel({required AuthRepository authRepository})
+      : _authRepository = authRepository;
 
   final AuthRepository _authRepository;
   bool _isLoading = false;

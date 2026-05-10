@@ -36,13 +36,14 @@ class VoiceLogUiState {
     this.remaining,
     this.meals,
     this.items,
+    this.resolvedItems,
     this.templates,
     this.template,
-    this.matches,
     this.deleted,
     this.confirmationActionId,
     this.confirmationInput,
     this.candidateGroups,
+    this.selectedCandidateItems = const {},
   });
 
   final VoiceLogState phase;
@@ -56,13 +57,14 @@ class VoiceLogUiState {
   final NutritionSnapshot? remaining;
   final List<Meal>? meals;
   final List<MealItem>? items;
+  final List<MealItem>? resolvedItems;
   final List<MealTemplate>? templates;
   final MealTemplate? template;
-  final List<dynamic>? matches;
   final bool? deleted;
   final String? confirmationActionId;
   final Object? confirmationInput;
   final List<FoodCandidateGroup>? candidateGroups;
+  final Map<String, MealItem> selectedCandidateItems;
 
   bool get isLoading =>
       phase == VoiceLogState.transcribing ||
@@ -81,13 +83,14 @@ class VoiceLogUiState {
     Object? remaining = _unchanged,
     Object? meals = _unchanged,
     Object? items = _unchanged,
+    Object? resolvedItems = _unchanged,
     Object? templates = _unchanged,
     Object? template = _unchanged,
-    Object? matches = _unchanged,
     Object? deleted = _unchanged,
     Object? confirmationActionId = _unchanged,
     Object? confirmationInput = _unchanged,
     Object? candidateGroups = _unchanged,
+    Map<String, MealItem>? selectedCandidateItems,
   }) {
     return VoiceLogUiState(
       phase: phase ?? this.phase,
@@ -113,15 +116,15 @@ class VoiceLogUiState {
       meals: identical(meals, _unchanged) ? this.meals : meals as List<Meal>?,
       items:
           identical(items, _unchanged) ? this.items : items as List<MealItem>?,
+      resolvedItems: identical(resolvedItems, _unchanged)
+          ? this.resolvedItems
+          : resolvedItems as List<MealItem>?,
       templates: identical(templates, _unchanged)
           ? this.templates
           : templates as List<MealTemplate>?,
       template: identical(template, _unchanged)
           ? this.template
           : template as MealTemplate?,
-      matches: identical(matches, _unchanged)
-          ? this.matches
-          : matches as List<dynamic>?,
       deleted: identical(deleted, _unchanged) ? this.deleted : deleted as bool?,
       confirmationActionId: identical(confirmationActionId, _unchanged)
           ? this.confirmationActionId
@@ -132,6 +135,8 @@ class VoiceLogUiState {
       candidateGroups: identical(candidateGroups, _unchanged)
           ? this.candidateGroups
           : candidateGroups as List<FoodCandidateGroup>?,
+      selectedCandidateItems:
+          selectedCandidateItems ?? this.selectedCandidateItems,
     );
   }
 }
@@ -175,11 +180,31 @@ class VoiceLogViewModel extends ChangeNotifier {
 
   List<MealItem>? get items => _uiState.items;
 
+  List<MealItem>? get resolvedItems => _uiState.resolvedItems;
+
   List<MealTemplate>? get templates => _uiState.templates;
 
   MealTemplate? get template => _uiState.template;
 
   List<FoodCandidateGroup>? get candidateGroups => _uiState.candidateGroups;
+
+  MealItem? selectedCandidateFor(FoodCandidateGroup group) {
+    return _uiState.selectedCandidateItems[_candidateGroupKey(group)];
+  }
+
+  bool isCandidateSelected(FoodCandidateGroup group, MealItem candidate) {
+    final selected = selectedCandidateFor(group);
+    if (selected == null) return false;
+    if (identical(selected, candidate)) return true;
+    if (selected.externalId != null && candidate.externalId != null) {
+      return selected.externalId == candidate.externalId &&
+          selected.externalSource == candidate.externalSource;
+    }
+    return selected.name == candidate.name &&
+        selected.source == candidate.source &&
+        selected.quantity == candidate.quantity &&
+        selected.unit == candidate.unit;
+  }
 
   bool get isLoading => _uiState.isLoading;
 
@@ -212,13 +237,14 @@ class VoiceLogViewModel extends ChangeNotifier {
       remaining: null,
       meals: null,
       items: null,
+      resolvedItems: null,
       templates: null,
       template: null,
-      matches: null,
       deleted: null,
       confirmationActionId: null,
       confirmationInput: null,
       candidateGroups: null,
+      selectedCandidateItems: const {},
     ));
     try {
       await _audioRecorderService.start();
@@ -293,13 +319,14 @@ class VoiceLogViewModel extends ChangeNotifier {
       remaining: null,
       meals: null,
       items: null,
+      resolvedItems: null,
       templates: null,
       template: null,
-      matches: null,
       deleted: null,
       confirmationActionId: null,
       confirmationInput: null,
       candidateGroups: null,
+      selectedCandidateItems: const {},
     ));
     try {
       final result = await _nutritionRepository.logText(text);
@@ -338,27 +365,31 @@ class VoiceLogViewModel extends ChangeNotifier {
         remaining: result.remaining,
         meals: result.meals,
         items: result.items,
+        resolvedItems: result.resolvedItems,
         templates: result.templates,
         template: result.template,
-        matches: result.matches,
         deleted: result.deleted,
         message: result.message,
         errorMessage: null,
         confirmationActionId: result.actionId,
         confirmationInput: result.input,
         candidateGroups: result.candidateGroups,
+        selectedCandidateItems: const {},
       ));
     } catch (error) {
       _setError('Agent failed: ${error.toString()}');
     }
   }
 
-  Future<void> commitProposal() async {
+  Future<void> commitProposal({MealLabel? mealLabel}) async {
     final proposal = _uiState.proposal;
     if (proposal == null) return;
     _setState(VoiceLogState.agentRunning);
     try {
-      final meal = await _nutritionRepository.commitProposal(proposal.id);
+      final meal = await _nutritionRepository.commitProposal(
+        proposal.id,
+        mealLabel: mealLabel,
+      );
       _setUiState(_uiState.copyWith(
         phase: VoiceLogState.autoCommitted,
         autoCommittedMeal: meal,
@@ -389,6 +420,46 @@ class VoiceLogViewModel extends ChangeNotifier {
     }
   }
 
+  Future<void> selectCandidate(
+    FoodCandidateGroup group,
+    MealItem candidate,
+  ) async {
+    final groups = _uiState.candidateGroups ?? const <FoodCandidateGroup>[];
+    final selections = Map<String, MealItem>.of(_uiState.selectedCandidateItems)
+      ..[_candidateGroupKey(group)] = candidate;
+    _setUiState(_uiState.copyWith(selectedCandidateItems: selections));
+
+    final pendingGroups = groups.where(_needsCandidateSelection).toList();
+    if (pendingGroups.isEmpty ||
+        !pendingGroups.every(
+            (group) => selections.containsKey(_candidateGroupKey(group)))) {
+      return;
+    }
+
+    final selectedItems = [
+      ...?_uiState.resolvedItems,
+      for (final group in pendingGroups) selections[_candidateGroupKey(group)]!,
+    ];
+    _setState(VoiceLogState.agentRunning);
+    try {
+      final proposal = await _nutritionRepository.createProposalFromItems(
+        phrase: _uiState.transcript,
+        items: selectedItems,
+      );
+      _setUiState(_uiState.copyWith(
+        phase: VoiceLogState.proposalReady,
+        proposal: proposal,
+        message: 'Meal proposal created.',
+        errorMessage: null,
+        candidateGroups: null,
+        resolvedItems: null,
+        selectedCandidateItems: const {},
+      ));
+    } catch (error) {
+      _setError('Candidate selection failed: ${error.toString()}');
+    }
+  }
+
   void clearResult() {
     _setUiState(const VoiceLogUiState());
   }
@@ -410,6 +481,24 @@ class VoiceLogViewModel extends ChangeNotifier {
   void _setUiState(VoiceLogUiState value) {
     _uiState = value;
     notifyListeners();
+  }
+
+  bool _needsCandidateSelection(FoodCandidateGroup group) {
+    if (group.candidates.isEmpty) return false;
+    return !(_uiState.resolvedItems ?? const <MealItem>[]).any((item) =>
+        item.canonicalName == group.mention.canonicalEnglishName &&
+        item.quantity == group.mention.quantity &&
+        item.unit == group.mention.unit);
+  }
+
+  String _candidateGroupKey(FoodCandidateGroup group) {
+    final mention = group.mention;
+    return [
+      mention.originalText,
+      mention.canonicalEnglishName,
+      mention.quantity.toStringAsFixed(3),
+      mention.unit,
+    ].join('|');
   }
 
   @override

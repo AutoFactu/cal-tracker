@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../../data/services/app_preferences_repository.dart';
 import '../../../core/design_system.dart';
 import '../view_models/auth_view_model.dart';
 
@@ -16,6 +17,30 @@ class _AuthScreenState extends State<AuthScreen> {
   final _passwordController = TextEditingController(text: 'password123');
   final _nameController = TextEditingController(text: 'Test User');
   bool _registerMode = false;
+  int _heroIndex = 0;
+  bool _loadedHeroIndex = false;
+
+  static const _heroAssets = [
+    'assets/images/hero_food.webp',
+    'assets/images/hero_food.webp',
+    'assets/images/hero_food.webp',
+    'assets/images/hero_food.webp',
+    'assets/images/hero_food.webp',
+  ];
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_loadedHeroIndex) return;
+    _loadedHeroIndex = true;
+    context
+        .read<AppPreferencesRepository>()
+        .nextAuthHeroIndex(count: _heroAssets.length)
+        .then((index) {
+      if (!mounted) return;
+      setState(() => _heroIndex = index);
+    });
+  }
 
   @override
   void dispose() {
@@ -44,7 +69,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   const SizedBox(height: FreshSpacing.xxl),
                   const _HeroHeadline(),
                   const SizedBox(height: FreshSpacing.xl),
-                  const _FoodHero(),
+                  _FoodHero(assetPath: _heroAssets[_heroIndex]),
                   const SizedBox(height: FreshSpacing.lg),
                   FreshCard(
                     padding: const EdgeInsets.all(18),
@@ -163,39 +188,12 @@ class _AuthTopBar extends StatelessWidget {
         ),
         const SizedBox(width: FreshSpacing.sm),
         Text(
-          'Cal Tracker',
+          'Better Calories',
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
         ),
-        const Spacer(),
-        const Row(
-          children: [
-            _ProgressDot(active: true),
-            _ProgressDot(active: false),
-            _ProgressDot(active: false),
-          ],
-        ),
       ],
-    );
-  }
-}
-
-class _ProgressDot extends StatelessWidget {
-  const _ProgressDot({required this.active});
-
-  final bool active;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: active ? 54 : 20,
-      height: 7,
-      margin: const EdgeInsets.only(left: 8),
-      decoration: BoxDecoration(
-        color: active ? FreshColors.lime : FreshColors.rule,
-        borderRadius: BorderRadius.circular(999),
-      ),
     );
   }
 }
@@ -214,41 +212,17 @@ class _HeroHeadline extends StatelessWidget {
       text: TextSpan(
         style: style,
         children: const [
-          TextSpan(text: 'Your Daily Guide\nto '),
-          WidgetSpan(
-            alignment: PlaceholderAlignment.middle,
-            child: _InlineFlame(),
-          ),
-          TextSpan(text: ' Smarter\nEating.'),
+          TextSpan(text: 'Track your\ncalories better.'),
         ],
       ),
     );
   }
 }
 
-class _InlineFlame extends StatelessWidget {
-  const _InlineFlame();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 46,
-      height: 46,
-      decoration: const BoxDecoration(
-        color: FreshColors.lime,
-        shape: BoxShape.circle,
-      ),
-      child: const Icon(
-        Icons.local_fire_department_rounded,
-        color: FreshColors.surface,
-        size: 28,
-      ),
-    );
-  }
-}
-
 class _FoodHero extends StatelessWidget {
-  const _FoodHero();
+  const _FoodHero({required this.assetPath});
+
+  final String assetPath;
 
   @override
   Widget build(BuildContext context) {
@@ -261,10 +235,16 @@ class _FoodHero extends StatelessWidget {
             top: 40,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(FreshRadii.xl),
-              child: Image.asset(
-                'assets/images/hero_food.webp',
-                fit: BoxFit.cover,
-                alignment: Alignment.bottomCenter,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 450),
+                child: Image.asset(
+                  assetPath,
+                  key: ValueKey(assetPath),
+                  fit: BoxFit.cover,
+                  alignment: Alignment.center,
+                  width: double.infinity,
+                  height: double.infinity,
+                ),
               ),
             ),
           ),

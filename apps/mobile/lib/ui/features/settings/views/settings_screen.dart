@@ -14,6 +14,7 @@ class SettingsScreen extends StatelessWidget {
     final auth = context.watch<AuthViewModel>();
     final settings = context.watch<SettingsViewModel>();
     final user = auth.user;
+    final limeCardTextColor = FreshPalette.dark.limeWash;
     return ContentFrame(
       title: 'Menu',
       subtitle: 'Account and preferences',
@@ -48,7 +49,10 @@ class SettingsScreen extends StatelessWidget {
                     children: [
                       Text(
                         user?.displayName ?? 'Cal Tracker',
-                        style: Theme.of(context).textTheme.titleLarge,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(color: limeCardTextColor),
                       ),
                       if (user != null)
                         Text(
@@ -56,7 +60,7 @@ class SettingsScreen extends StatelessWidget {
                           style: Theme.of(context)
                               .textTheme
                               .bodyMedium
-                              ?.copyWith(color: FreshColors.inkSoft),
+                              ?.copyWith(color: limeCardTextColor),
                         ),
                     ],
                   ),

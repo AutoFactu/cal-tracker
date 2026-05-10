@@ -4,7 +4,8 @@ import '../../../../data/repositories/auth_repository.dart';
 import '../../../../domain/models/auth_models.dart';
 
 class AuthViewModel extends ChangeNotifier {
-  AuthViewModel({required AuthRepository authRepository}) : _authRepository = authRepository;
+  AuthViewModel({required AuthRepository authRepository})
+      : _authRepository = authRepository;
 
   final AuthRepository _authRepository;
 
@@ -32,7 +33,8 @@ class AuthViewModel extends ChangeNotifier {
   Future<void> login(String email, String password) async {
     _setLoading(true);
     try {
-      _user = (await _authRepository.login(email: email, password: password)).user;
+      _user =
+          (await _authRepository.login(email: email, password: password)).user;
       _error = null;
     } catch (error) {
       _error = error.toString();
@@ -41,10 +43,13 @@ class AuthViewModel extends ChangeNotifier {
     }
   }
 
-  Future<void> register(String email, String password, String displayName) async {
+  Future<void> register(
+      String email, String password, String displayName) async {
     _setLoading(true);
     try {
-      _user = (await _authRepository.register(email: email, password: password, displayName: displayName)).user;
+      _user = (await _authRepository.register(
+              email: email, password: password, displayName: displayName))
+          .user;
       _error = null;
     } catch (error) {
       _error = error.toString();

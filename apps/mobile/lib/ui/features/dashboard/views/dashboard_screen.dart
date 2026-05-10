@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../../app/dark_mode_toggle.dart';
 import '../../../../domain/models/nutrition_models.dart';
 import '../../../core/content_frame.dart';
 import '../../../core/design_system.dart';
+import '../../../shared/meal_item_editor_sheet.dart';
 import '../../auth/view_models/auth_view_model.dart';
+import '../dashboard_time_labels.dart';
 import '../view_models/dashboard_view_model.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -33,36 +36,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         : 'Cal Tracker';
     return ContentFrame(
       title: displayName,
-      subtitle: 'Good morning!',
+      subtitle: dashboardGreeting(DateTime.now()),
       leading: const _Avatar(),
-      actions: [
-        FreshIconButton(
-          icon: Icons.calendar_month_rounded,
-          tooltip: 'Calendar',
-          onPressed: viewModel.load,
-        ),
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            FreshIconButton(
-              icon: Icons.notifications_none_rounded,
-              tooltip: 'Notifications',
-              onPressed: viewModel.load,
-            ),
-            const Positioned(
-              right: 12,
-              top: 11,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: FreshColors.lime,
-                  shape: BoxShape.circle,
-                ),
-                child: SizedBox.square(dimension: 8),
-              ),
-            ),
-          ],
-        ),
-      ],
+      actions: const [DarkModeToggle()],
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -84,16 +60,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             const SizedBox(height: FreshSpacing.md),
           ],
-          _WeeklyProgressCard(summary: summary),
+          _DailyProgressCard(summary: summary),
           const SizedBox(height: FreshSpacing.lg),
           _MetricGrid(summary: summary),
           const SizedBox(height: FreshSpacing.lg),
-          const _CalendarStrip(),
-          const SizedBox(height: FreshSpacing.lg),
-          _MealSection(summary: summary),
+          _MealSection(
+            summary: summary,
+            onEditMeal: (meal) => _showMealItemEditor(context, viewModel, meal),
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> _showMealItemEditor(
+    BuildContext context,
+    DashboardViewModel viewModel,
+    Meal meal,
+  ) async {
+    final items = await showModalBottomSheet<List<MealItem>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => MealItemEditorSheet(
+        meal: meal,
+        keyPrefix: 'dashboard',
+      ),
+    );
+    if (!context.mounted || items == null) return;
+    await viewModel.correctMealItems(meal, items);
   }
 }
 
@@ -102,13 +97,14 @@ class _Avatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.freshPalette;
     return Container(
       width: 54,
       height: 54,
       decoration: BoxDecoration(
-        color: FreshColors.limeWash,
+        color: palette.limeWash,
         shape: BoxShape.circle,
-        border: Border.all(color: FreshColors.surface, width: 3),
+        border: Border.all(color: palette.surface, width: 3),
       ),
       clipBehavior: Clip.antiAlias,
       child: Image.asset('assets/images/leaf_accent.webp', fit: BoxFit.cover),
@@ -116,20 +112,22 @@ class _Avatar extends StatelessWidget {
   }
 }
 
-class _WeeklyProgressCard extends StatelessWidget {
-  const _WeeklyProgressCard({required this.summary});
+class _DailyProgressCard extends StatelessWidget {
+  const _DailyProgressCard({required this.summary});
 
   final DailySummary? summary;
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final palette = context.freshPalette;
     final consumed = summary?.consumed.calories ?? 0;
     final target = summary?.target.calories ?? 1920;
     final progress =
         target <= 0 ? 0.0 : (consumed / target).clamp(0, 1).toDouble();
     return FreshCard(
-      color: FreshColors.limeSoft,
+      key: const ValueKey('dashboard_progress_card'),
+      color: palette.limeSoft,
       radius: FreshRadii.xl,
       padding: const EdgeInsets.all(20),
       child: Row(
@@ -140,23 +138,22 @@ class _WeeklyProgressCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const FreshIconChip(
+                    FreshIconChip(
                       icon: Icons.bolt_rounded,
-                      color: FreshColors.limeDeep,
-                      backgroundColor: FreshColors.surface,
+                      color: palette.limeDeep,
+                      backgroundColor: palette.surface,
                       size: 34,
                     ),
                     const SizedBox(width: FreshSpacing.sm),
                     Text(
-                      'Daily intake',
-                      style: textTheme.bodyMedium
-                          ?.copyWith(color: FreshColors.ink),
+                      dashboardDayMonthLabel(DateTime.now()),
+                      style: textTheme.bodyMedium?.copyWith(color: palette.ink),
                     ),
                   ],
                 ),
                 const SizedBox(height: FreshSpacing.md),
                 Text(
-                  'Your Weekly\nProgress',
+                  'Your Daily\nProgress',
                   style: textTheme.headlineMedium?.copyWith(
                     height: 1.05,
                     fontWeight: FontWeight.w700,
@@ -168,7 +165,7 @@ class _WeeklyProgressCard extends StatelessWidget {
           FreshProgressRing(
             progress: progress,
             size: 96,
-            trackColor: FreshColors.surface,
+            trackColor: palette.surface,
             center: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -180,8 +177,8 @@ class _WeeklyProgressCard extends StatelessWidget {
                 ),
                 Text(
                   'today',
-                  style: textTheme.labelMedium
-                      ?.copyWith(color: FreshColors.inkSoft),
+                  style:
+                      textTheme.labelMedium?.copyWith(color: palette.inkSoft),
                 ),
               ],
             ),
@@ -233,94 +230,14 @@ class _MetricGrid extends StatelessWidget {
   }
 }
 
-class _CalendarStrip extends StatelessWidget {
-  const _CalendarStrip();
-
-  @override
-  Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final start = now.subtract(Duration(days: now.weekday - 1));
-    final days = List.generate(7, (index) => start.add(Duration(days: index)));
-    const labels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-    return FreshCard(
-      child: Column(
-        children: [
-          FreshSectionTitle(
-            title: _monthLabel(now),
-            trailing: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FreshIconButton(icon: Icons.arrow_back_rounded, size: 38),
-                SizedBox(width: FreshSpacing.sm),
-                FreshIconButton(icon: Icons.arrow_forward_rounded, size: 38),
-              ],
-            ),
-          ),
-          const SizedBox(height: FreshSpacing.md),
-          Row(
-            children: [
-              for (var index = 0; index < days.length; index++)
-                Expanded(
-                  child: _DayCell(
-                    label: labels[index],
-                    day: days[index].day,
-                    selected: _isSameDay(days[index], now),
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DayCell extends StatelessWidget {
-  const _DayCell({
-    required this.label,
-    required this.day,
-    required this.selected,
+class _MealSection extends StatelessWidget {
+  const _MealSection({
+    required this.summary,
+    required this.onEditMeal,
   });
 
-  final String label;
-  final int day;
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      margin: const EdgeInsets.symmetric(horizontal: 2),
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      decoration: BoxDecoration(
-        color: selected ? FreshColors.limeSoft : Colors.transparent,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Column(
-        children: [
-          Text(label,
-              style:
-                  textTheme.labelMedium?.copyWith(color: FreshColors.inkSoft)),
-          const SizedBox(height: FreshSpacing.sm),
-          Text(
-            '$day',
-            style: textTheme.bodyLarge?.copyWith(
-              color: FreshColors.ink,
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MealSection extends StatelessWidget {
-  const _MealSection({required this.summary});
-
   final DailySummary? summary;
+  final ValueChanged<Meal> onEditMeal;
 
   @override
   Widget build(BuildContext context) {
@@ -337,7 +254,10 @@ class _MealSection extends StatelessWidget {
           for (final meal in meals)
             Padding(
               padding: const EdgeInsets.only(bottom: FreshSpacing.md),
-              child: _MealRow(meal: meal),
+              child: _MealRow(
+                meal: meal,
+                onEdit: () => onEditMeal(meal),
+              ),
             ),
       ],
     );
@@ -345,63 +265,76 @@ class _MealSection extends StatelessWidget {
 }
 
 class _MealRow extends StatelessWidget {
-  const _MealRow({required this.meal});
+  const _MealRow({
+    required this.meal,
+    required this.onEdit,
+  });
 
   final Meal meal;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final palette = context.freshPalette;
     return FreshCard(
       padding: const EdgeInsets.all(16),
       child: Row(
         children: [
-          const FreshIconChip(
-            icon: Icons.local_fire_department_rounded,
-            color: FreshColors.orange,
-            backgroundColor: FreshColors.yellow,
-          ),
-          const SizedBox(width: FreshSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (meal.mealLabel != null) ...[
+                  _MealLabelChip(label: meal.mealLabel!),
+                  const SizedBox(height: FreshSpacing.xs),
+                ],
                 Text(meal.title, style: textTheme.titleMedium),
                 Text(
-                  '${meal.nutrition.calories} - ${meal.nutrition.calories + 56} kcal',
-                  style: textTheme.bodyMedium
-                      ?.copyWith(color: FreshColors.inkMuted),
+                  '${meal.nutrition.calories} kcal',
+                  style:
+                      textTheme.bodyMedium?.copyWith(color: palette.inkMuted),
                 ),
               ],
             ),
           ),
-          const FreshFoodStack(),
           const SizedBox(width: FreshSpacing.sm),
-          const FreshIconButton(icon: Icons.add_rounded, size: 42),
+          FreshIconButton(
+            key: ValueKey('dashboard_edit_meal_${meal.id}'),
+            icon: Icons.edit_rounded,
+            tooltip: 'Edit ingredients',
+            size: 42,
+            onPressed: onEdit,
+          ),
         ],
       ),
     );
   }
 }
 
-bool _isSameDay(DateTime a, DateTime b) {
-  return a.year == b.year && a.month == b.month && a.day == b.day;
-}
+class _MealLabelChip extends StatelessWidget {
+  const _MealLabelChip({required this.label});
 
-String _monthLabel(DateTime date) {
-  const months = [
-    'January',
-    'February',
-    'March',
-    'April',
-    'May',
-    'June',
-    'July',
-    'August',
-    'September',
-    'October',
-    'November',
-    'December',
-  ];
-  return '${months[date.month - 1]} ${date.year}';
+  final MealLabel label;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final palette = context.freshPalette;
+    return Container(
+      key: ValueKey('dashboard_meal_label_${label.type}_${label.label}'),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: palette.limeWash,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label.label,
+        style: textTheme.labelMedium?.copyWith(
+          color: palette.limeDeep,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
 }

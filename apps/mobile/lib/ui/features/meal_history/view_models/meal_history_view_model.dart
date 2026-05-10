@@ -4,7 +4,8 @@ import '../../../../data/repositories/nutrition_repository.dart';
 import '../../../../domain/models/nutrition_models.dart';
 
 class MealHistoryViewModel extends ChangeNotifier {
-  MealHistoryViewModel({required NutritionRepository nutritionRepository}) : _nutritionRepository = nutritionRepository;
+  MealHistoryViewModel({required NutritionRepository nutritionRepository})
+      : _nutritionRepository = nutritionRepository;
 
   final NutritionRepository _nutritionRepository;
   List<Meal> _meals = const [];
@@ -29,12 +30,15 @@ class MealHistoryViewModel extends ChangeNotifier {
     }
   }
 
-  Future<void> correctMeal(Meal meal, String correctionText) async {
+  Future<void> correctMealItems(Meal meal, List<MealItem> items) async {
     _isLoading = true;
     notifyListeners();
     try {
-      final corrected = await _nutritionRepository.correctMeal(meal.id, correctionText);
-      _meals = _meals.map((item) => item.id == corrected.id ? corrected : item).toList();
+      final corrected =
+          await _nutritionRepository.correctMealItems(meal.id, items);
+      _meals = _meals
+          .map((item) => item.id == corrected.id ? corrected : item)
+          .toList();
       _error = null;
     } catch (error) {
       _error = error.toString();
@@ -48,7 +52,8 @@ class MealHistoryViewModel extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
     try {
-      final deleted = await _nutritionRepository.deleteMeal(meal.id, confirmed: true);
+      final deleted =
+          await _nutritionRepository.deleteMeal(meal.id, confirmed: true);
       if (deleted) {
         _meals = _meals.where((item) => item.id != meal.id).toList();
       }

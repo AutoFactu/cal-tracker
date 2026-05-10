@@ -1,7 +1,8 @@
 import '../../generated/api/cal_tracker_api.dart';
 
 class PlatformActionBridge {
-  const PlatformActionBridge({required CalTrackerApiClient apiClient}) : _apiClient = apiClient;
+  const PlatformActionBridge({required CalTrackerApiClient apiClient})
+      : _apiClient = apiClient;
 
   final CalTrackerApiClient _apiClient;
 
