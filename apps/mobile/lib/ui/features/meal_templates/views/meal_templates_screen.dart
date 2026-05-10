@@ -94,8 +94,6 @@ class _MealTemplatesScreenState extends State<MealTemplatesScreen> {
                 padding: const EdgeInsets.only(bottom: FreshSpacing.md),
                 child: _TemplateCard(
                   template: template,
-                  onTrustedChanged: (value) =>
-                      viewModel.setTrustedMode(template, value),
                   onDelete: () => _confirmDelete(context, viewModel, template),
                 ),
               ),
@@ -227,12 +225,10 @@ class _TemplateDraft {
 class _TemplateCard extends StatelessWidget {
   const _TemplateCard({
     required this.template,
-    required this.onTrustedChanged,
     required this.onDelete,
   });
 
   final MealTemplate template;
-  final ValueChanged<bool> onTrustedChanged;
   final VoidCallback onDelete;
 
   @override
@@ -296,16 +292,7 @@ class _TemplateCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: FreshSpacing.sm),
-          SwitchListTile(
-            key: ValueKey('trusted_template_${template.id}'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Trusted auto-commit'),
-            subtitle: const Text('Allow this usual meal to log automatically.'),
-            value: template.trustedAutoCommitEnabled,
-            activeThumbColor: FreshColors.lime,
-            onChanged: onTrustedChanged,
-          ),
+          const SizedBox(height: FreshSpacing.md),
           Align(
             alignment: Alignment.centerRight,
             child: TextButton.icon(

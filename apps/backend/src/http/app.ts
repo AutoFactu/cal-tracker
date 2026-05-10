@@ -1,6 +1,7 @@
 import {
   agentRunRequestSchema,
   executeActionRequestSchema,
+  goalsUpdateSchema,
   loginRequestSchema,
   logoutRequestSchema,
   passwordResetConfirmSchema,
@@ -91,7 +92,19 @@ export function createApp(input: {
   app.put("/v1/settings", async (c) => {
     const user = c.get("authUser");
     const body = settingsUpdateSchema.parse(await c.req.json());
-    return c.json({ user: publicUser(await repository.updateTrustedMode(user.id, body.trustedModeEnabled)) });
+    return c.json({ user: publicUser(await repository.updateTrustedMode(user.id, body.trustedModeEnabled ?? false)) });
+  });
+  app.put("/v1/goals", async (c) => {
+    const user = c.get("authUser");
+    const body = goalsUpdateSchema.parse(await c.req.json());
+    const date = body.date ?? new Date().toISOString().slice(0, 10);
+    const goals = await repository.updateDailyGoals(user.id, {
+      date,
+      calories: body.calories,
+      hydrationGoalGlasses: body.hydrationGoalGlasses
+    });
+    const summary = await repository.getDailySummary(user.id, date);
+    return c.json({ goals, summary });
   });
 
   app.get("/v1/actions", (c) => c.json({ actions: actionExecutor.listActions() }));
@@ -219,7 +232,7 @@ function buildActionContext(c: Context, user: StoredUser, source: ActionSource):
     scopes: user.scopes,
     timezone: c.req.header("x-user-timezone") ?? "UTC",
     locale: c.req.header("accept-language")?.split(",")[0] ?? "en-US",
-    trustedModeEnabled: user.trustedModeEnabled,
+    trustedModeEnabled: false,
     traceId: getTraceId(c)
   };
 }

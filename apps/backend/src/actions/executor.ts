@@ -311,47 +311,20 @@ export class ActionExecutor {
           parsed.text,
         )));
     const nutrition = sumNutrition(items);
-    const trustedAutoCommitEligible = Boolean(
-      template &&
-      memory &&
-      context.trustedModeEnabled &&
-      template.trustedAutoCommitEnabled &&
-      memory.confidence >= this.config.TRUSTED_AUTO_COMMIT_THRESHOLD &&
-      items.every((item) => item.source !== "llm_estimate"),
-    );
+    const trustedAutoCommitEligible = false;
     const proposal = await this.repository.createProposal(context.actorUserId, {
       phrase: parsed.text,
       title: template?.title ?? inferTitle(parsed.text, items),
       status: "pending",
       confidence: fromTemplate ? memory!.confidence : 0.68,
-      requiresConfirmation: !trustedAutoCommitEligible,
+      requiresConfirmation: true,
       trustedAutoCommitEligible,
       source: fromTemplate ? "user_template" : "backend_estimate",
       nutrition,
       items,
     });
 
-    let autoCommittedMeal: Meal | null = null;
-    if (trustedAutoCommitEligible) {
-      autoCommittedMeal = await this.repository.createMealFromProposal(
-        context.actorUserId,
-        proposal,
-        parsed.occurredAt ?? new Date().toISOString(),
-      );
-      await this.repository.recordAuditEvent({
-        userId: context.actorUserId,
-        eventType: "trusted_auto_commit.meal_committed",
-        metadata: {
-          proposalId: proposal.id,
-          mealId: autoCommittedMeal.id,
-          phrase: parsed.text,
-          confidence: memory!.confidence,
-        },
-        traceId: context.traceId,
-      });
-    }
-
-    return { proposal, autoCommittedMeal };
+    return { proposal, autoCommittedMeal: null };
   }
 
   private async createMealProposalFromItems(

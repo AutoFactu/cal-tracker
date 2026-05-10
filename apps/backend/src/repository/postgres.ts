@@ -1,5 +1,5 @@
 import postgres, { type Sql } from "postgres";
-import { defaultUserScopes, type Meal, type MealItem, type MealLabel, type MealProposal, type MealTemplate, type NutritionSnapshot, type PermissionScope } from "@cal-tracker/contracts";
+import { defaultUserScopes, type DailyGoals, type Meal, type MealItem, type MealLabel, type MealProposal, type MealTemplate, type NutritionSnapshot, type PermissionScope } from "@cal-tracker/contracts";
 import { newId } from "../utils/ids.js";
 import { normalizeText } from "../utils/normalize.js";
 import { subtractNutrition, sumNutrition } from "../utils/nutrition.js";
@@ -29,8 +29,8 @@ export class PostgresRepository implements AppRepository {
     `;
     await this.sql`INSERT INTO user_credentials (user_id, password_hash) VALUES (${row.id}, ${input.passwordHash})`;
     await this.sql`
-      INSERT INTO nutrition_targets (user_id, calories, protein_grams, carbs_grams, fat_grams)
-      VALUES (${row.id}, 2200, 160, 240, 70)
+      INSERT INTO nutrition_targets (user_id, calories, protein_grams, carbs_grams, fat_grams, hydration_goal_glasses)
+      VALUES (${row.id}, 2200, 160, 240, 70, 12)
     `;
     const user = this.mapUser(row, input.passwordHash, input.scopes);
     return user;
@@ -57,7 +57,7 @@ export class PostgresRepository implements AppRepository {
   }
 
   async updateTrustedMode(userId: string, enabled: boolean): Promise<StoredUser> {
-    await this.sql`UPDATE users SET trusted_mode_enabled = ${enabled} WHERE id = ${userId}`;
+    await this.sql`UPDATE users SET trusted_mode_enabled = false WHERE id = ${userId}`;
     const user = await this.findUserById(userId);
     if (!user) throw new Error("user_not_found");
     return user;
@@ -243,6 +243,83 @@ export class PostgresRepository implements AppRepository {
     return row ? mapNutrition(row) : { calories: 2200, proteinGrams: 160, carbsGrams: 240, fatGrams: 70 };
   }
 
+  async getDailyGoals(userId: string, date: string): Promise<DailyGoals> {
+    const [existing] = await this.sql`
+      SELECT *
+      FROM daily_goal_snapshots
+      WHERE user_id = ${userId} AND target_date = ${date}
+    `;
+    if (existing) return mapDailyGoals(existing);
+
+    const current = await this.getCurrentGoals(userId);
+    const [inserted] = await this.sql`
+      INSERT INTO daily_goal_snapshots (
+        user_id, target_date, calories, protein_grams, carbs_grams, fat_grams, hydration_goal_glasses
+      )
+      VALUES (
+        ${userId}, ${date}, ${current.target.calories}, ${current.target.proteinGrams}, ${current.target.carbsGrams}, ${current.target.fatGrams}, ${current.hydrationGoalGlasses}
+      )
+      ON CONFLICT (user_id, target_date) DO NOTHING
+      RETURNING *
+    `;
+    if (inserted) return mapDailyGoals(inserted);
+    const [row] = await this.sql`
+      SELECT *
+      FROM daily_goal_snapshots
+      WHERE user_id = ${userId} AND target_date = ${date}
+    `;
+    return mapDailyGoals(row);
+  }
+
+  async updateDailyGoals(userId: string, input: { date: string; calories?: number; hydrationGoalGlasses?: number }): Promise<DailyGoals> {
+    return this.sql.begin(async (tx) => {
+      const current = await this.getCurrentGoals(userId, tx);
+      for (const snapshotDate of previousDatesInWeek(input.date)) {
+        await tx`
+          INSERT INTO daily_goal_snapshots (
+            user_id, target_date, calories, protein_grams, carbs_grams, fat_grams, hydration_goal_glasses
+          )
+          VALUES (
+            ${userId}, ${snapshotDate}, ${current.target.calories}, ${current.target.proteinGrams}, ${current.target.carbsGrams}, ${current.target.fatGrams}, ${current.hydrationGoalGlasses}
+          )
+          ON CONFLICT (user_id, target_date) DO NOTHING
+        `;
+      }
+
+      const nextTarget = {
+        ...current.target,
+        calories: input.calories ?? current.target.calories
+      };
+      const nextHydration = input.hydrationGoalGlasses ?? current.hydrationGoalGlasses;
+      await tx`
+        INSERT INTO nutrition_targets (user_id, calories, protein_grams, carbs_grams, fat_grams, hydration_goal_glasses, updated_at)
+        VALUES (${userId}, ${nextTarget.calories}, ${nextTarget.proteinGrams}, ${nextTarget.carbsGrams}, ${nextTarget.fatGrams}, ${nextHydration}, now())
+        ON CONFLICT (user_id) DO UPDATE
+        SET calories = EXCLUDED.calories,
+            protein_grams = EXCLUDED.protein_grams,
+            carbs_grams = EXCLUDED.carbs_grams,
+            fat_grams = EXCLUDED.fat_grams,
+            hydration_goal_glasses = EXCLUDED.hydration_goal_glasses,
+            updated_at = now()
+      `;
+      const [row] = await tx`
+        INSERT INTO daily_goal_snapshots (
+          user_id, target_date, calories, protein_grams, carbs_grams, fat_grams, hydration_goal_glasses, updated_at
+        )
+        VALUES (${userId}, ${input.date}, ${nextTarget.calories}, ${nextTarget.proteinGrams}, ${nextTarget.carbsGrams}, ${nextTarget.fatGrams}, ${nextHydration}, now())
+        ON CONFLICT (user_id, target_date) DO UPDATE
+        SET calories = EXCLUDED.calories,
+            protein_grams = EXCLUDED.protein_grams,
+            carbs_grams = EXCLUDED.carbs_grams,
+            fat_grams = EXCLUDED.fat_grams,
+            hydration_goal_glasses = EXCLUDED.hydration_goal_glasses,
+            updated_at = now()
+        RETURNING *
+      `;
+      return mapDailyGoals(row);
+    });
+  }
+
   async listMeals(userId: string, limit = 25): Promise<Meal[]> {
     const rows = await this.sql`
       SELECT * FROM meals
@@ -332,8 +409,15 @@ export class PostgresRepository implements AppRepository {
       carbsGrams: total.carbsGrams + meal.nutrition.carbsGrams,
       fatGrams: total.fatGrams + meal.nutrition.fatGrams
     }), { calories: 0, proteinGrams: 0, carbsGrams: 0, fatGrams: 0 });
-    const target = await this.getNutritionTarget(userId);
-    return { date, consumed, target, remaining: subtractNutrition(target, consumed), meals };
+    const goals = await this.getDailyGoals(userId, date);
+    return {
+      date,
+      consumed,
+      target: goals.target,
+      remaining: subtractNutrition(goals.target, consumed),
+      hydrationGoalGlasses: goals.hydrationGoalGlasses,
+      meals
+    };
   }
 
   async listTemplates(userId: string): Promise<MealTemplate[]> {
@@ -482,6 +566,20 @@ export class PostgresRepository implements AppRepository {
     return row ? this.mapTemplate(row) : null;
   }
 
+  private async getCurrentGoals(userId: string, sqlClient: Sql | any = this.sql): Promise<Omit<DailyGoals, "date">> {
+    const [row] = await sqlClient`SELECT * FROM nutrition_targets WHERE user_id = ${userId}`;
+    if (!row) {
+      return {
+        target: { calories: 2200, proteinGrams: 160, carbsGrams: 240, fatGrams: 70 },
+        hydrationGoalGlasses: 12
+      };
+    }
+    return {
+      target: mapNutrition(row),
+      hydrationGoalGlasses: Number(row.hydration_goal_glasses ?? 12)
+    };
+  }
+
   private async mapFoodsWithPortions(rows: Record<string, unknown>[]): Promise<FoodItemRecord[]> {
     if (rows.length === 0) return [];
     const foods = rows.map(mapFood);
@@ -614,6 +712,14 @@ function mapNutrition(row: Record<string, unknown>): NutritionSnapshot {
   };
 }
 
+function mapDailyGoals(row: Record<string, unknown>): DailyGoals {
+  return {
+    date: toDateOnly(row.target_date),
+    target: mapNutrition(row),
+    hydrationGoalGlasses: Number(row.hydration_goal_glasses ?? 12)
+  };
+}
+
 function mapMealLabel(row: Record<string, unknown>): MealLabel | null {
   const type = row.meal_type as MealLabel["type"] | null | undefined;
   const label = row.meal_type_label as string | null | undefined;
@@ -694,4 +800,16 @@ function optionalString(value: unknown): string | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function previousDatesInWeek(date: string): string[] {
+  const current = new Date(`${date}T00:00:00.000Z`);
+  const weekday = current.getUTCDay() === 0 ? 7 : current.getUTCDay();
+  const dates: string[] = [];
+  for (let offset = weekday - 1; offset > 0; offset--) {
+    const value = new Date(current);
+    value.setUTCDate(current.getUTCDate() - offset);
+    dates.push(value.toISOString().slice(0, 10));
+  }
+  return dates;
 }

@@ -1,6 +1,7 @@
 import type {
   AuthUser,
   DailySummary,
+  DailyGoals,
   Meal,
   MealItem,
   MealLabel,
@@ -122,6 +123,8 @@ export interface AppRepository {
   upsertFoodItem(input: Omit<FoodItemRecord, "id">): Promise<FoodItemRecord>;
 
   getNutritionTarget(userId: string): Promise<NutritionSnapshot>;
+  getDailyGoals(userId: string, date: string): Promise<DailyGoals>;
+  updateDailyGoals(userId: string, input: { date: string; calories?: number; hydrationGoalGlasses?: number }): Promise<DailyGoals>;
   listMeals(userId: string, limit?: number): Promise<Meal[]>;
   getMeal(userId: string, mealId: string): Promise<Meal | undefined>;
   createProposal(userId: string, proposal: Omit<MealProposal, "id" | "createdAt">): Promise<MealProposal>;

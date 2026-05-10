@@ -7,6 +7,7 @@ import 'package:http_parser/http_parser.dart';
 
 import '../../data/services/api_config.dart';
 import '../../data/services/secure_token_storage.dart';
+import '../../domain/models/nutrition_models.dart';
 
 class ApiException implements Exception {
   const ApiException(this.statusCode, this.message);
@@ -34,25 +35,45 @@ class CalTrackerApiClient {
     required String password,
     required String displayName,
   }) {
-    return _post('/v1/auth/register', {
-      'email': email,
-      'password': password,
-      'displayName': displayName,
-    }, authenticated: false);
+    return _post(
+        '/v1/auth/register',
+        {
+          'email': email,
+          'password': password,
+          'displayName': displayName,
+        },
+        authenticated: false);
   }
 
-  Future<Map<String, Object?>> login({required String email, required String password}) {
-    return _post('/v1/auth/login', {'email': email, 'password': password}, authenticated: false);
+  Future<Map<String, Object?>> login(
+      {required String email, required String password}) {
+    return _post('/v1/auth/login', {'email': email, 'password': password},
+        authenticated: false);
   }
 
   Future<Map<String, Object?>> refresh(String refreshToken) {
-    return _post('/v1/auth/refresh', {'refreshToken': refreshToken}, authenticated: false);
+    return _post('/v1/auth/refresh', {'refreshToken': refreshToken},
+        authenticated: false);
   }
 
   Future<Map<String, Object?>> getMe() => _get('/v1/auth/me');
 
-  Future<Map<String, Object?>> updateSettings({required bool trustedModeEnabled}) {
+  Future<Map<String, Object?>> updateSettings(
+      {required bool trustedModeEnabled}) {
     return _put('/v1/settings', {'trustedModeEnabled': trustedModeEnabled});
+  }
+
+  Future<Map<String, Object?>> updateDailyGoals({
+    String? date,
+    int? calories,
+    int? hydrationGoalGlasses,
+  }) {
+    return _put('/v1/goals', {
+      if (date != null) 'date': date,
+      if (calories != null) 'calories': calories,
+      if (hydrationGoalGlasses != null)
+        'hydrationGoalGlasses': hydrationGoalGlasses,
+    });
   }
 
   Future<Map<String, Object?>> runAgent(String text) {
@@ -63,27 +84,30 @@ class CalTrackerApiClient {
     return _post('/v1/meals/proposals', {'text': text});
   }
 
-  Future<Map<String, Object?>> commitProposal(String proposalId) {
-    return _post('/v1/meals/proposals/$proposalId/commit', {});
+  Future<Map<String, Object?>> commitProposal(String proposalId,
+      {MealLabel? mealLabel}) {
+    return _post('/v1/meals/proposals/$proposalId/commit', {
+      if (mealLabel != null) 'mealLabel': mealLabel.toJson(),
+    });
   }
 
-  Future<Map<String, Object?>> correctMeal(String mealId, String correctionText) {
-    return _post('/v1/meals/$mealId/correct', {'correctionText': correctionText});
+  Future<Map<String, Object?>> correctMeal(
+      String mealId, List<Map<String, Object?>> items) {
+    return _post('/v1/meals/$mealId/correct', {'items': items});
   }
 
   Future<Map<String, Object?>> correctProposal({
     required String proposalId,
-    required String correctionText,
     required List<Map<String, Object?>> items,
   }) {
     return executeAction('correct_meal', {
       'proposalId': proposalId,
-      'correctionText': correctionText,
       'items': items,
     });
   }
 
-  Future<Map<String, Object?>> deleteMeal(String mealId, {bool confirmed = false}) {
+  Future<Map<String, Object?>> deleteMeal(String mealId,
+      {bool confirmed = false}) {
     final suffix = confirmed ? '?confirmationToken=DELETE' : '';
     return _delete('/v1/meals/$mealId$suffix');
   }
@@ -100,7 +124,8 @@ class CalTrackerApiClient {
     return _post('/v1/meal-templates', body);
   }
 
-  Future<Map<String, Object?>> updateTemplate(String templateId, Map<String, Object?> body) {
+  Future<Map<String, Object?>> updateTemplate(
+      String templateId, Map<String, Object?> body) {
     return _put('/v1/meal-templates/$templateId', body);
   }
 
@@ -108,12 +133,16 @@ class CalTrackerApiClient {
     return _delete('/v1/meal-templates/$templateId');
   }
 
-  Future<Map<String, Object?>> executeAction(String actionId, Map<String, Object?> input) {
-    return _post('/v1/actions/$actionId/execute', {'input': input, 'source': 'flutter'});
+  Future<Map<String, Object?>> executeAction(
+      String actionId, Map<String, Object?> input) {
+    return _post(
+        '/v1/actions/$actionId/execute', {'input': input, 'source': 'flutter'});
   }
 
-  Future<Map<String, Object?>> transcribeAudio(File audioFile, {String? source}) async {
-    final request = http.MultipartRequest('POST', _uri('/v1/stt/transcriptions'));
+  Future<Map<String, Object?>> transcribeAudio(File audioFile,
+      {String? source}) async {
+    final request =
+        http.MultipartRequest('POST', _uri('/v1/stt/transcriptions'));
     request.headers.addAll(await _headers(includeContentType: false));
     request.files.add(await http.MultipartFile.fromPath(
       'audio',
@@ -153,11 +182,13 @@ class CalTrackerApiClient {
   }
 
   Future<Map<String, Object?>> _get(String path) async {
-    final response = await _sendWithRefresh(() async => _httpClient.get(_uri(path), headers: await _headers()));
+    final response = await _sendWithRefresh(
+        () async => _httpClient.get(_uri(path), headers: await _headers()));
     return _decode(response);
   }
 
-  Future<Map<String, Object?>> _post(String path, Map<String, Object?> body, {bool authenticated = true}) async {
+  Future<Map<String, Object?>> _post(String path, Map<String, Object?> body,
+      {bool authenticated = true}) async {
     final response = await _sendWithRefresh(
       () async => _httpClient.post(
         _uri(path),
@@ -169,15 +200,18 @@ class CalTrackerApiClient {
     return _decode(response);
   }
 
-  Future<Map<String, Object?>> _put(String path, Map<String, Object?> body) async {
+  Future<Map<String, Object?>> _put(
+      String path, Map<String, Object?> body) async {
     final response = await _sendWithRefresh(
-      () async => _httpClient.put(_uri(path), headers: await _headers(), body: jsonEncode(body)),
+      () async => _httpClient.put(_uri(path),
+          headers: await _headers(), body: jsonEncode(body)),
     );
     return _decode(response);
   }
 
   Future<Map<String, Object?>> _delete(String path) async {
-    final response = await _sendWithRefresh(() async => _httpClient.delete(_uri(path), headers: await _headers()));
+    final response = await _sendWithRefresh(
+        () async => _httpClient.delete(_uri(path), headers: await _headers()));
     return _decode(response);
   }
 
@@ -198,17 +232,20 @@ class CalTrackerApiClient {
     return send();
   }
 
-  Future<Map<String, String>> _headers({bool authenticated = true, bool includeContentType = true}) async {
+  Future<Map<String, String>> _headers(
+      {bool authenticated = true, bool includeContentType = true}) async {
     final headers = <String, String>{
       HttpHeaders.acceptHeader: 'application/json',
     };
     if (includeContentType) {
-      headers[HttpHeaders.contentTypeHeader] = 'application/json; charset=UTF-8';
+      headers[HttpHeaders.contentTypeHeader] =
+          'application/json; charset=UTF-8';
     }
     if (authenticated) {
       final tokens = await tokenStorage.read();
       if (tokens != null) {
-        headers[HttpHeaders.authorizationHeader] = 'Bearer ${tokens.accessToken}';
+        headers[HttpHeaders.authorizationHeader] =
+            'Bearer ${tokens.accessToken}';
       }
     }
     return headers;
@@ -233,10 +270,13 @@ class CalTrackerApiClient {
   }
 
   Map<String, Object?> _decode(http.Response response) {
-    final body = response.body.isEmpty ? <String, Object?>{} : jsonDecode(response.body) as Map<String, Object?>;
+    final body = response.body.isEmpty
+        ? <String, Object?>{}
+        : jsonDecode(response.body) as Map<String, Object?>;
     if (response.statusCode >= 200 && response.statusCode < 300) return body;
     final error = body['error'] as Map<String, Object?>?;
-    throw ApiException(response.statusCode, error?['message'] as String? ?? 'API request failed');
+    throw ApiException(response.statusCode,
+        error?['message'] as String? ?? 'API request failed');
   }
 
   Uri _uri(String path) => Uri.parse('${config.baseUrl}$path');

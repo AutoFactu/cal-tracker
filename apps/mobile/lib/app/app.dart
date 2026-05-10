@@ -75,7 +75,10 @@ class CalTrackerBootstrap extends StatelessWidget {
             create: (_) => MealTemplatesViewModel(
                 nutritionRepository: nutritionRepository)),
         ChangeNotifierProvider(
-            create: (_) => SettingsViewModel(authRepository: authRepository)),
+            create: (_) => SettingsViewModel(
+                  authRepository: authRepository,
+                  nutritionRepository: nutritionRepository,
+                )),
       ],
       child: const _CalTrackerApp(),
     );

@@ -21,6 +21,28 @@ class NutritionSnapshot {
   }
 }
 
+class DailyGoals {
+  const DailyGoals({
+    required this.date,
+    required this.target,
+    required this.hydrationGoalGlasses,
+  });
+
+  final String date;
+  final NutritionSnapshot target;
+  final int hydrationGoalGlasses;
+
+  factory DailyGoals.fromJson(Map<String, Object?> json) {
+    return DailyGoals(
+      date: json['date'] as String,
+      target:
+          NutritionSnapshot.fromJson(json['target'] as Map<String, Object?>),
+      hydrationGoalGlasses:
+          (json['hydrationGoalGlasses'] as num? ?? 12).toInt(),
+    );
+  }
+}
+
 class MealItem {
   const MealItem({
     required this.name,
@@ -395,6 +417,7 @@ class DailySummary {
     required this.consumed,
     required this.target,
     required this.remaining,
+    required this.hydrationGoalGlasses,
     required this.meals,
   });
 
@@ -402,6 +425,7 @@ class DailySummary {
   final NutritionSnapshot consumed;
   final NutritionSnapshot target;
   final NutritionSnapshot remaining;
+  final int hydrationGoalGlasses;
   final List<Meal> meals;
 
   factory DailySummary.fromJson(Map<String, Object?> json) {
@@ -413,6 +437,8 @@ class DailySummary {
           NutritionSnapshot.fromJson(json['target'] as Map<String, Object?>),
       remaining:
           NutritionSnapshot.fromJson(json['remaining'] as Map<String, Object?>),
+      hydrationGoalGlasses:
+          (json['hydrationGoalGlasses'] as num? ?? 12).toInt(),
       meals: (json['meals'] as List<Object?>)
           .cast<Map<String, Object?>>()
           .map(Meal.fromJson)

@@ -1,18 +1,68 @@
 import 'package:flutter/foundation.dart';
 
 import '../../../../data/repositories/auth_repository.dart';
+import '../../../../data/repositories/nutrition_repository.dart';
 import '../../../../domain/models/auth_models.dart';
+import '../../../../domain/models/nutrition_models.dart';
 
 class SettingsViewModel extends ChangeNotifier {
-  SettingsViewModel({required AuthRepository authRepository})
-      : _authRepository = authRepository;
+  SettingsViewModel({
+    required AuthRepository authRepository,
+    required NutritionRepository nutritionRepository,
+  })  : _authRepository = authRepository,
+        _nutritionRepository = nutritionRepository;
 
   final AuthRepository _authRepository;
+  final NutritionRepository _nutritionRepository;
+  DailyGoals? _goals;
   bool _isLoading = false;
   String? _error;
 
+  DailyGoals? get goals => _goals;
   bool get isLoading => _isLoading;
   String? get error => _error;
+
+  Future<void> load() async {
+    _isLoading = true;
+    notifyListeners();
+    try {
+      final summary = await _nutritionRepository.getDailySummary();
+      _goals = DailyGoals(
+        date: summary.date,
+        target: summary.target,
+        hydrationGoalGlasses: summary.hydrationGoalGlasses,
+      );
+      _error = null;
+    } catch (error) {
+      _error = error.toString();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<DailyGoals?> updateGoals({
+    int? calories,
+    int? hydrationGoalGlasses,
+  }) async {
+    _isLoading = true;
+    notifyListeners();
+    try {
+      final goals = await _nutritionRepository.updateDailyGoals(
+        calories: calories,
+        hydrationGoalGlasses: hydrationGoalGlasses,
+      );
+      _goals = goals;
+      _error = null;
+      return goals;
+    } catch (error) {
+      _error = error.toString();
+      return null;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
 
   Future<AuthUser?> setTrustedMode(bool enabled) async {
     _isLoading = true;

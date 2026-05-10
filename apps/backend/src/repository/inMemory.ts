@@ -1,4 +1,4 @@
-import { defaultUserScopes, type Meal, type MealItem, type MealLabel, type MealProposal, type MealTemplate, type NutritionSnapshot } from "@cal-tracker/contracts";
+import { defaultUserScopes, type DailyGoals, type Meal, type MealItem, type MealLabel, type MealProposal, type MealTemplate, type NutritionSnapshot } from "@cal-tracker/contracts";
 import { newId } from "../utils/ids.js";
 import { normalizeText } from "../utils/normalize.js";
 import { subtractNutrition, sumNutrition } from "../utils/nutrition.js";
@@ -18,6 +18,8 @@ export class InMemoryRepository implements AppRepository {
   private passwordResetTokens = new Map<string, { userId: string; expiresAt: string; usedAt?: string }>();
   private foods = new Map<string, FoodItemRecord>();
   private targets = new Map<string, NutritionSnapshot>();
+  private hydrationGoals = new Map<string, number>();
+  private dailyGoalSnapshots = new Map<string, DailyGoals>();
   private proposals = new Map<string, MealProposal & { userId: string }>();
   private meals = new Map<string, Meal & { userId: string }>();
   private templates = new Map<string, MealTemplate & { userId: string }>();
@@ -44,6 +46,7 @@ export class InMemoryRepository implements AppRepository {
     };
     this.users.set(user.id, user);
     this.targets.set(user.id, { calories: 2200, proteinGrams: 160, carbsGrams: 240, fatGrams: 70 });
+    this.hydrationGoals.set(user.id, 12);
     return user;
   }
 
@@ -57,7 +60,7 @@ export class InMemoryRepository implements AppRepository {
 
   async updateTrustedMode(userId: string, enabled: boolean): Promise<StoredUser> {
     const user = this.requireUser(userId);
-    user.trustedModeEnabled = enabled;
+    user.trustedModeEnabled = false;
     return user;
   }
 
@@ -145,6 +148,39 @@ export class InMemoryRepository implements AppRepository {
     return this.targets.get(userId) ?? { calories: 2200, proteinGrams: 160, carbsGrams: 240, fatGrams: 70 };
   }
 
+  async getDailyGoals(userId: string, date: string): Promise<DailyGoals> {
+    return this.ensureDailyGoalSnapshot(userId, date, {
+      target: await this.getNutritionTarget(userId),
+      hydrationGoalGlasses: this.hydrationGoals.get(userId) ?? 12,
+    });
+  }
+
+  async updateDailyGoals(userId: string, input: { date: string; calories?: number; hydrationGoalGlasses?: number }): Promise<DailyGoals> {
+    const currentTarget = await this.getNutritionTarget(userId);
+    const currentHydration = this.hydrationGoals.get(userId) ?? 12;
+    for (const date of previousDatesInWeek(input.date)) {
+      this.ensureDailyGoalSnapshot(userId, date, {
+        target: currentTarget,
+        hydrationGoalGlasses: currentHydration,
+      });
+    }
+
+    const nextTarget = {
+      ...currentTarget,
+      calories: input.calories ?? currentTarget.calories,
+    };
+    const nextHydration = input.hydrationGoalGlasses ?? currentHydration;
+    this.targets.set(userId, nextTarget);
+    this.hydrationGoals.set(userId, nextHydration);
+    const goals = {
+      date: input.date,
+      target: nextTarget,
+      hydrationGoalGlasses: nextHydration,
+    };
+    this.dailyGoalSnapshots.set(dailyGoalKey(userId, input.date), goals);
+    return goals;
+  }
+
   async listMeals(userId: string, limit = 25): Promise<Meal[]> {
     return [...this.meals.values()]
       .filter((meal) => meal.userId === userId && !meal.deletedAt)
@@ -222,8 +258,15 @@ export class InMemoryRepository implements AppRepository {
       carbsGrams: Math.round((total.carbsGrams + meal.nutrition.carbsGrams) * 10) / 10,
       fatGrams: Math.round((total.fatGrams + meal.nutrition.fatGrams) * 10) / 10
     }), { calories: 0, proteinGrams: 0, carbsGrams: 0, fatGrams: 0 });
-    const target = await this.getNutritionTarget(userId);
-    return { date, consumed, target, remaining: subtractNutrition(target, consumed), meals };
+    const goals = await this.getDailyGoals(userId, date);
+    return {
+      date,
+      consumed,
+      target: goals.target,
+      remaining: subtractNutrition(goals.target, consumed),
+      hydrationGoalGlasses: goals.hydrationGoalGlasses,
+      meals
+    };
   }
 
   async listTemplates(userId: string): Promise<MealTemplate[]> {
@@ -305,9 +348,34 @@ export class InMemoryRepository implements AppRepository {
     return user;
   }
 
+  private ensureDailyGoalSnapshot(userId: string, date: string, goals: Omit<DailyGoals, "date">): DailyGoals {
+    const key = dailyGoalKey(userId, date);
+    const existing = this.dailyGoalSnapshots.get(key);
+    if (existing) return existing;
+    const snapshot = { date, ...goals };
+    this.dailyGoalSnapshots.set(key, snapshot);
+    return snapshot;
+  }
+
 }
 
 function stripUserId<T extends { userId: string }>(value: T): Omit<T, "userId"> {
   const { userId: _userId, ...rest } = value;
   return rest;
+}
+
+function dailyGoalKey(userId: string, date: string) {
+  return `${userId}:${date}`;
+}
+
+function previousDatesInWeek(date: string): string[] {
+  const current = new Date(`${date}T00:00:00.000Z`);
+  const day = current.getUTCDay() === 0 ? 7 : current.getUTCDay();
+  const dates: string[] = [];
+  for (let offset = day - 1; offset > 0; offset--) {
+    const value = new Date(current);
+    value.setUTCDate(current.getUTCDate() - offset);
+    dates.push(value.toISOString().slice(0, 10));
+  }
+  return dates;
 }

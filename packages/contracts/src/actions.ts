@@ -226,7 +226,7 @@ export const actionDefinitions = [
     outputSchema: proposeMealLogOutputSchema,
     permissionScope: PermissionScope.NutritionWritePropose,
     sideEffect: "proposal",
-    confirmationPolicy: "trusted_auto_commit_allowed",
+    confirmationPolicy: "required",
     executionMode: "agent_assisted",
   },
   {

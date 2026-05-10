@@ -28,7 +28,7 @@ class _MealHistoryScreenState extends State<MealHistoryScreen> {
     final viewModel = context.watch<MealHistoryViewModel>();
     final palette = context.freshPalette;
     return ContentFrame(
-      title: 'Statistic',
+      title: 'Stats',
       subtitle: 'Calories and meal history',
       actions: [
         FreshIconButton(
@@ -53,12 +53,14 @@ class _MealHistoryScreenState extends State<MealHistoryScreen> {
             ),
             const SizedBox(height: FreshSpacing.md),
           ],
-          if (viewModel.meals.isNotEmpty) ...[
-            _CaloriesChartCard(meals: viewModel.meals),
-            const SizedBox(height: FreshSpacing.lg),
-          ],
+          _CaloriesChartCard(
+            summaries: viewModel.weekSummaries,
+            selectedDate: viewModel.selectedDate,
+            onSelectDate: viewModel.selectDate,
+          ),
+          const SizedBox(height: FreshSpacing.lg),
           FreshSectionTitle(
-            title: 'Recent meals',
+            title: 'Logged meals',
             trailing: Text(
               '${viewModel.meals.length} meals',
               style: Theme.of(context).textTheme.labelLarge?.copyWith(
@@ -71,8 +73,8 @@ class _MealHistoryScreenState extends State<MealHistoryScreen> {
           if (viewModel.meals.isEmpty)
             const FreshEmptyState(
               icon: Icons.history_rounded,
-              title: 'No history yet',
-              message: 'Confirmed meals will build your calorie timeline.',
+              title: 'No meals logged',
+              message: 'Meals for the selected day will appear here.',
             )
           else
             for (final meal in viewModel.meals)
@@ -182,16 +184,34 @@ class _MealHistoryScreenState extends State<MealHistoryScreen> {
 }
 
 class _CaloriesChartCard extends StatelessWidget {
-  const _CaloriesChartCard({required this.meals});
+  const _CaloriesChartCard({
+    required this.summaries,
+    required this.selectedDate,
+    required this.onSelectDate,
+  });
 
-  final List<Meal> meals;
+  final List<DailySummary> summaries;
+  final String selectedDate;
+  final ValueChanged<String> onSelectDate;
 
   @override
   Widget build(BuildContext context) {
-    final total =
-        meals.fold<int>(0, (sum, meal) => sum + meal.nutrition.calories);
-    final target = 1920;
-    final bars = _weeklyBars(meals, target);
+    final selectedSummary = summaries.firstWhere(
+      (summary) => summary.date == selectedDate,
+      orElse: () => summaries.isEmpty
+          ? DailySummary(
+              date: selectedDate,
+              consumed: _emptyNutrition,
+              target: _defaultTarget,
+              remaining: _defaultTarget,
+              hydrationGoalGlasses: 12,
+              meals: const [],
+            )
+          : summaries.last,
+    );
+    final total = selectedSummary.consumed.calories;
+    final target = selectedSummary.target.calories;
+    final bars = _weeklyBars(summaries, selectedDate);
     final textTheme = Theme.of(context).textTheme;
     final palette = context.freshPalette;
     return FreshCard(
@@ -236,7 +256,10 @@ class _CaloriesChartCard extends StatelessWidget {
               children: [
                 for (final bar in bars)
                   Expanded(
-                    child: _ChartBar(bar: bar),
+                    child: _ChartBar(
+                      bar: bar,
+                      onTap: () => onSelectDate(bar.date),
+                    ),
                   ),
               ],
             ),
@@ -248,50 +271,72 @@ class _CaloriesChartCard extends StatelessWidget {
 }
 
 class _ChartBar extends StatelessWidget {
-  const _ChartBar({required this.bar});
+  const _ChartBar({
+    required this.bar,
+    required this.onTap,
+  });
 
   final _BarData bar;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final palette = context.freshPalette;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 3),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          Text(
-            '${bar.percent}%',
-            style: textTheme.bodyMedium?.copyWith(
-              color: palette.inkSoft,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          ),
-          const SizedBox(height: FreshSpacing.sm),
-          Expanded(
-            child: Align(
-              alignment: Alignment.bottomCenter,
-              child: FractionallySizedBox(
-                heightFactor: (bar.percent / 120).clamp(0, 1).toDouble(),
-                child: Container(
-                  width: 18,
-                  decoration: BoxDecoration(
-                    color: bar.active ? palette.lime : palette.limeSoft,
-                    borderRadius: BorderRadius.circular(999),
+    return Semantics(
+      button: true,
+      selected: bar.active,
+      label: 'Select ${bar.label}',
+      child: GestureDetector(
+        key: ValueKey('stats_day_${bar.date}'),
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 3),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Text(
+                '${bar.percent}%',
+                style: textTheme.bodyMedium?.copyWith(
+                  color: bar.active ? palette.ink : palette.inkSoft,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              const SizedBox(height: FreshSpacing.sm),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: FractionallySizedBox(
+                    heightFactor: (bar.percent / 120).clamp(0, 1).toDouble(),
+                    child: Container(
+                      width: 18,
+                      decoration: BoxDecoration(
+                        color: bar.active ? palette.lime : palette.limeSoft,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
+              const SizedBox(height: FreshSpacing.sm),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                decoration: BoxDecoration(
+                  color: bar.active ? palette.limeWash : Colors.transparent,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  bar.label,
+                  style: textTheme.labelLarge?.copyWith(
+                    color: bar.active ? palette.ink : palette.inkSoft,
+                    fontWeight: bar.active ? FontWeight.w700 : null,
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: FreshSpacing.sm),
-          Text(
-            bar.label,
-            style: textTheme.labelLarge?.copyWith(
-              color: bar.active ? palette.ink : palette.inkSoft,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -380,36 +425,58 @@ class _SheetAction extends StatelessWidget {
 
 class _BarData {
   const _BarData({
+    required this.date,
     required this.label,
     required this.percent,
     required this.active,
   });
 
+  final String date;
   final String label;
   final int percent;
   final bool active;
 }
 
-List<_BarData> _weeklyBars(List<Meal> meals, int target) {
+List<_BarData> _weeklyBars(List<DailySummary> summaries, String selectedDate) {
   const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  final now = DateTime.now();
-  final totals = List<int>.filled(7, 0);
-  for (final meal in meals) {
-    final local = meal.occurredAt.toLocal();
-    final index = local.weekday - 1;
-    if (index >= 0 && index < 7) {
-      totals[index] += meal.nutrition.calories;
-    }
-  }
   return [
-    for (var index = 0; index < labels.length; index++)
-      _BarData(
-        label: labels[index],
-        percent: ((totals[index] / target) * 100).round(),
-        active: index == now.weekday - 1,
-      ),
+    for (var index = 0; index < labels.length; index++) ...[
+      if (index < summaries.length)
+        _BarData(
+          date: summaries[index].date,
+          label: labels[index],
+          percent: summaries[index].target.calories <= 0
+              ? 0
+              : ((summaries[index].consumed.calories /
+                          summaries[index].target.calories) *
+                      100)
+                  .round(),
+          active: summaries[index].date == selectedDate,
+        )
+      else
+        _BarData(
+          date: '',
+          label: labels[index],
+          percent: 0,
+          active: false,
+        ),
+    ]
   ];
 }
+
+const _emptyNutrition = NutritionSnapshot(
+  calories: 0,
+  proteinGrams: 0,
+  carbsGrams: 0,
+  fatGrams: 0,
+);
+
+const _defaultTarget = NutritionSnapshot(
+  calories: 2200,
+  proteinGrams: 160,
+  carbsGrams: 240,
+  fatGrams: 70,
+);
 
 String _formatDate(DateTime value) {
   final local = value.toLocal();

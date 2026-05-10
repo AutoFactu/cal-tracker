@@ -94,6 +94,86 @@ describe("action loop", () => {
     ).toBe(true);
   });
 
+  it("updates daily goals and keeps previous day target snapshots", async () => {
+    const { request } = buildTestApp();
+    const auth = await registerAndAuth(request);
+    const today = dateOffset(0);
+    const yesterday = dateOffset(-1);
+
+    const initialGoals = await request("http://localhost/v1/goals", {
+      method: "PUT",
+      headers: auth.authHeader,
+      body: JSON.stringify({
+        date: yesterday,
+        calories: 1800,
+        hydrationGoalGlasses: 10,
+      }),
+    });
+    expect(initialGoals.status).toBe(200);
+
+    const yesterdayBefore = await request(
+      `http://localhost/v1/summary/daily?date=${yesterday}`,
+      { headers: auth.authHeader },
+    ).then(
+      (response) =>
+        response.json() as Promise<{
+          output: {
+            summary: {
+              target: { calories: number };
+              hydrationGoalGlasses: number;
+            };
+          };
+        }>,
+    );
+    expect(yesterdayBefore.output.summary.target.calories).toBe(1800);
+    expect(yesterdayBefore.output.summary.hydrationGoalGlasses).toBe(10);
+
+    const todayGoals = await request("http://localhost/v1/goals", {
+      method: "PUT",
+      headers: auth.authHeader,
+      body: JSON.stringify({
+        date: today,
+        calories: 2400,
+        hydrationGoalGlasses: 14,
+      }),
+    });
+    expect(todayGoals.status).toBe(200);
+
+    const yesterdayAfter = await request(
+      `http://localhost/v1/summary/daily?date=${yesterday}`,
+      { headers: auth.authHeader },
+    ).then(
+      (response) =>
+        response.json() as Promise<{
+          output: {
+            summary: {
+              target: { calories: number };
+              hydrationGoalGlasses: number;
+            };
+          };
+        }>,
+    );
+    const todayAfter = await request(
+      `http://localhost/v1/summary/daily?date=${today}`,
+      { headers: auth.authHeader },
+    ).then(
+      (response) =>
+        response.json() as Promise<{
+          output: {
+            summary: {
+              target: { calories: number };
+              hydrationGoalGlasses: number;
+            };
+          };
+        }>,
+    );
+
+    expect(yesterdayAfter.output.summary.target.calories).toBe(1800);
+    expect(yesterdayAfter.output.summary.hydrationGoalGlasses).toBe(10);
+    expect(todayAfter.output.summary.target.calories).toBe(2400);
+    expect(todayAfter.output.summary.hydrationGoalGlasses).toBe(14);
+  });
+
   it("commits optional meal labels and exposes them in summaries", async () => {
     const { request } = buildTestApp();
     const auth = await registerAndAuth(request);
@@ -449,7 +529,7 @@ describe("action loop", () => {
     });
   });
 
-  it("auto-commits a trusted usual breakfast only after both trusted switches are enabled", async () => {
+  it("always returns a proposal for usual meals even when legacy trusted switches are enabled", async () => {
     const { request, repository } = buildTestApp();
     const auth = await registerAndAuth(request);
 
@@ -501,17 +581,26 @@ describe("action loop", () => {
     });
     expect(run.status).toBe(200);
     const body = (await run.json()) as {
+      proposal?: { id: string; requiresConfirmation: boolean };
       meal?: { id: string };
       message: string;
     };
-    expect(body.meal?.id).toBeTruthy();
-    expect(body.message).toMatch(/trusted template/);
+    expect(body.meal).toBeUndefined();
+    expect(body.proposal?.id).toBeTruthy();
+    expect(body.proposal?.requiresConfirmation).toBe(true);
+    expect(body.message).toMatch(/proposal created/i);
 
     const audits = await repository.listAuditEvents(auth.user.id);
     expect(
       audits.some(
         (event) => event.eventType === "trusted_auto_commit.meal_committed",
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 });
+
+function dateOffset(days: number) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}

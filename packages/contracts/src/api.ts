@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  dailyGoalsSchema,
   dailySummarySchema,
   foodCandidateSchema,
   mealItemSchema,
@@ -76,7 +77,21 @@ export const transcriptionResponseSchema = z.object({
 });
 
 export const settingsUpdateSchema = z.object({
-  trustedModeEnabled: z.boolean()
+  trustedModeEnabled: z.boolean().optional()
+});
+
+export const goalsUpdateSchema = z.object({
+  date: z.string().optional(),
+  calories: z.number().int().min(800).max(10000).optional(),
+  hydrationGoalGlasses: z.number().int().min(1).max(40).optional()
+}).refine(
+  (value) => value.calories !== undefined || value.hydrationGoalGlasses !== undefined,
+  "calories or hydrationGoalGlasses is required"
+);
+
+export const goalsResponseSchema = z.object({
+  goals: dailyGoalsSchema,
+  summary: dailySummarySchema.optional()
 });
 
 export const dashboardResponseSchema = z.object({

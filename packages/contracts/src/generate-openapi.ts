@@ -8,6 +8,8 @@ import {
   errorResponseSchema,
   executeActionRequestSchema,
   executeActionResponseSchema,
+  goalsResponseSchema,
+  goalsUpdateSchema,
   loginRequestSchema,
   passwordResetConfirmSchema,
   passwordResetRequestSchema,
@@ -53,6 +55,8 @@ const spec = {
       PasswordResetConfirm: schema("PasswordResetConfirm", passwordResetConfirmSchema),
       TokenPair: schema("TokenPair", tokenPairSchema),
       SettingsUpdate: schema("SettingsUpdate", settingsUpdateSchema),
+      GoalsUpdate: schema("GoalsUpdate", goalsUpdateSchema),
+      GoalsResponse: schema("GoalsResponse", goalsResponseSchema),
       ExecuteActionRequest: schema("ExecuteActionRequest", executeActionRequestSchema),
       ExecuteActionResponse: schema("ExecuteActionResponse", executeActionResponseSchema),
       AgentRunRequest: schema("AgentRunRequest", agentRunRequestSchema),
@@ -127,6 +131,19 @@ const spec = {
         },
         responses: {
           "200": { description: "Updated settings" }
+        }
+      }
+    },
+    "/v1/goals": {
+      put: {
+        operationId: "updateGoals",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/GoalsUpdate" } } }
+        },
+        responses: {
+          "200": { description: "Updated daily goals", content: { "application/json": { schema: { $ref: "#/components/schemas/GoalsResponse" } } } }
         }
       }
     },

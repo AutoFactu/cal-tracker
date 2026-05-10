@@ -1,5 +1,5 @@
 import { relations, sql } from "drizzle-orm";
-import { boolean, customType, date, integer, jsonb, numeric, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, customType, date, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 const vector = customType<{ data: number[]; driverData: string }>({
   dataType() {
@@ -38,8 +38,23 @@ export const nutritionTargets = pgTable("nutrition_targets", {
   proteinGrams: numeric("protein_grams", { precision: 10, scale: 2 }).notNull(),
   carbsGrams: numeric("carbs_grams", { precision: 10, scale: 2 }).notNull(),
   fatGrams: numeric("fat_grams", { precision: 10, scale: 2 }).notNull(),
+  hydrationGoalGlasses: integer("hydration_goal_glasses").notNull().default(12),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
+
+export const dailyGoalSnapshots = pgTable("daily_goal_snapshots", {
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  targetDate: date("target_date").notNull(),
+  calories: integer("calories").notNull(),
+  proteinGrams: numeric("protein_grams", { precision: 10, scale: 2 }).notNull(),
+  carbsGrams: numeric("carbs_grams", { precision: 10, scale: 2 }).notNull(),
+  fatGrams: numeric("fat_grams", { precision: 10, scale: 2 }).notNull(),
+  hydrationGoalGlasses: integer("hydration_goal_glasses").notNull().default(12),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+}, (table) => [
+  primaryKey({ columns: [table.userId, table.targetDate] })
+]);
 
 export const foodItems = pgTable("food_items", {
   id: uuid("id").primaryKey().defaultRandom(),

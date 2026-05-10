@@ -10,6 +10,12 @@ export const nutritionSnapshotSchema = z.object({
   fatGrams: z.number().nonnegative()
 });
 
+export const dailyGoalsSchema = z.object({
+  date: z.string(),
+  target: nutritionSnapshotSchema,
+  hydrationGoalGlasses: z.number().int().min(1).max(40)
+});
+
 export const foodResolutionProvenanceSchema = z.object({
   originalText: z.string().optional(),
   canonicalName: z.string().optional(),
@@ -125,6 +131,7 @@ export const dailySummarySchema = z.object({
   consumed: nutritionSnapshotSchema,
   target: nutritionSnapshotSchema,
   remaining: nutritionSnapshotSchema,
+  hydrationGoalGlasses: z.number().int().min(1).max(40),
   meals: z.array(mealSchema)
 });
 
@@ -138,6 +145,7 @@ export const mealTemplateSchema = z.object({
 });
 
 export type NutritionSnapshot = z.infer<typeof nutritionSnapshotSchema>;
+export type DailyGoals = z.infer<typeof dailyGoalsSchema>;
 export type FoodResolutionProvenance = z.infer<typeof foodResolutionProvenanceSchema>;
 export type FoodPortionChoice = z.infer<typeof foodPortionChoiceSchema>;
 export type MealItem = z.infer<typeof mealItemSchema>;

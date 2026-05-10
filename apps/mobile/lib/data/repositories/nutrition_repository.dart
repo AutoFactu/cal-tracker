@@ -149,11 +149,24 @@ class NutritionRepository {
     return output['deleted'] as bool? ?? false;
   }
 
-  Future<DailySummary> getDailySummary() async {
+  Future<DailySummary> getDailySummary({String? date}) async {
     final json = await _apiClient.getDailySummary(
-        date: DateTime.now().toIso8601String().substring(0, 10));
+        date: date ?? DateTime.now().toIso8601String().substring(0, 10));
     final output = json['output'] as Map<String, Object?>;
     return DailySummary.fromJson(output['summary'] as Map<String, Object?>);
+  }
+
+  Future<DailyGoals> updateDailyGoals({
+    String? date,
+    int? calories,
+    int? hydrationGoalGlasses,
+  }) async {
+    final json = await _apiClient.updateDailyGoals(
+      date: date ?? DateTime.now().toIso8601String().substring(0, 10),
+      calories: calories,
+      hydrationGoalGlasses: hydrationGoalGlasses,
+    );
+    return DailyGoals.fromJson(json['goals'] as Map<String, Object?>);
   }
 
   Future<List<Meal>> getMealHistory() async {

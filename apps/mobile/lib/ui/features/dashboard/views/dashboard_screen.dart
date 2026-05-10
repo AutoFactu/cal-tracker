@@ -122,7 +122,8 @@ class _DailyProgressCard extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final palette = context.freshPalette;
     final consumed = summary?.consumed.calories ?? 0;
-    final target = summary?.target.calories ?? 1920;
+    final target = summary?.target.calories ?? 2200;
+    final hydrationGoal = summary?.hydrationGoalGlasses ?? 12;
     final progress =
         target <= 0 ? 0.0 : (consumed / target).clamp(0, 1).toDouble();
     return FreshCard(
@@ -158,6 +159,12 @@ class _DailyProgressCard extends StatelessWidget {
                     height: 1.05,
                     fontWeight: FontWeight.w700,
                   ),
+                ),
+                const SizedBox(height: FreshSpacing.sm),
+                Text(
+                  'Target $target Kcal, $hydrationGoal glasses',
+                  key: const ValueKey('dashboard_goal_line'),
+                  style: textTheme.bodyMedium?.copyWith(color: palette.inkSoft),
                 ),
               ],
             ),
