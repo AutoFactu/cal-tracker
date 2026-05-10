@@ -320,17 +320,29 @@ class _ChartBar extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: FreshSpacing.sm),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-                decoration: BoxDecoration(
-                  color: bar.active ? palette.limeWash : Colors.transparent,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  bar.label,
-                  style: textTheme.labelLarge?.copyWith(
-                    color: bar.active ? palette.ink : palette.inkSoft,
-                    fontWeight: bar.active ? FontWeight.w700 : null,
+              SizedBox(
+                height: 28,
+                child: Center(
+                  child: Container(
+                    constraints: const BoxConstraints(minWidth: 30),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: bar.active ? palette.limeWash : Colors.transparent,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        bar.label,
+                        maxLines: 1,
+                        softWrap: false,
+                        style: textTheme.labelLarge?.copyWith(
+                          color: bar.active ? palette.ink : palette.inkSoft,
+                          fontWeight: bar.active ? FontWeight.w700 : null,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
