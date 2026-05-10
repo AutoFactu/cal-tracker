@@ -86,6 +86,17 @@ export const foodPortions = pgTable("food_portions", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 });
 
+export const referenceDataImports = pgTable("reference_data_imports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  source: text("source").notNull(),
+  targetSchema: text("target_schema").notNull(),
+  manifestSha256: text("manifest_sha256").notNull(),
+  manifestJson: jsonb("manifest_json").notNull(),
+  foodCount: integer("food_count").notNull(),
+  portionCount: integer("portion_count").notNull(),
+  importedAt: timestamp("imported_at", { withTimezone: true }).notNull().defaultNow()
+});
+
 export const mealProposals = pgTable("meal_proposals", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
