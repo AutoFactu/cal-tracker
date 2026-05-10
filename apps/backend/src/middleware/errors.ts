@@ -25,5 +25,12 @@ export function formatErrorResponse(c: Context, error: unknown) {
     return c.json({ error: { code: "http_error", message: error.message, traceId } }, error.status);
   }
   const message = error instanceof Error ? error.message : "Unexpected error";
+  console.error("request.unhandled_error", {
+    traceId,
+    method: c.req.method,
+    path: new URL(c.req.url).pathname,
+    message,
+    stack: error instanceof Error ? error.stack : undefined,
+  });
   return c.json({ error: { code: "internal_error", message, traceId } }, 500);
 }

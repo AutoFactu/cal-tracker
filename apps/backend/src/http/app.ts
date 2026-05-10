@@ -20,7 +20,7 @@ import { authMiddleware } from "../middleware/auth.js";
 import { formatErrorResponse } from "../middleware/errors.js";
 import { getTraceId, requestIdMiddleware } from "../middleware/requestContext.js";
 import type { AppRepository, StoredUser } from "../repository/types.js";
-import type { SpeechToTextProvider } from "../stt/speechToTextProvider.js";
+import type { SpeechToTextProvider, TranscriptionResult } from "../stt/speechToTextProvider.js";
 import { readAudioBuffer, validateAudioUpload } from "../stt/audioValidation.js";
 import { AgentService } from "../agent/agentService.js";
 import type { ChatAgentProvider } from "../agent/chatAgentProvider.js";
@@ -112,25 +112,35 @@ export function createApp(input: {
 
   app.post("/v1/stt/transcriptions", async (c) => {
     const user = c.get("authUser");
+    const traceId = getTraceId(c);
     let body: Record<string, unknown>;
     try {
       body = await c.req.parseBody({ all: true });
-    } catch {
+    } catch (error) {
+      console.warn("stt.transcription.invalid_multipart", {
+        traceId,
+        userId: user.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return c.json({
         error: {
           code: "validation_error",
           message: "Invalid multipart/form-data request.",
-          traceId: getTraceId(c),
+          traceId,
         },
       }, 400);
     }
     const audioField = body.audio;
     if (!audioField || (Array.isArray(audioField) && audioField.length === 0)) {
+      console.warn("stt.transcription.missing_audio", {
+        traceId,
+        userId: user.id,
+      });
       return c.json({
         error: {
           code: "validation_error",
           message: "Missing audio file.",
-          traceId: getTraceId(c),
+          traceId,
         },
       }, 400);
     }
@@ -138,23 +148,58 @@ export function createApp(input: {
 
     const validation = validateAudioUpload(file);
     if (!validation.ok) {
-      return c.json({ error: { code: "validation_error", message: validation.error, traceId: getTraceId(c) } }, validation.status);
+      console.warn("stt.transcription.invalid_audio", {
+        traceId,
+        userId: user.id,
+        status: validation.status,
+        error: validation.error,
+      });
+      return c.json({ error: { code: "validation_error", message: validation.error, traceId } }, validation.status);
     }
 
     const buffer = await readAudioBuffer(file);
-    const result = await sttProvider.transcribe({
-      audio: buffer,
+    console.info("stt.transcription.started", {
+      traceId,
+      userId: user.id,
       filename: validation.filename,
       mimeType: validation.mimeType,
+      bytes: buffer.byteLength,
+    });
+
+    let result: TranscriptionResult;
+    try {
+      result = await sttProvider.transcribe({
+        audio: buffer,
+        filename: validation.filename,
+        mimeType: validation.mimeType,
+        userId: user.id,
+        traceId,
+      });
+    } catch (error) {
+      console.error("stt.transcription.failed", {
+        traceId,
+        userId: user.id,
+        filename: validation.filename,
+        mimeType: validation.mimeType,
+        bytes: buffer.byteLength,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+
+    console.info("stt.transcription.completed", {
+      traceId,
       userId: user.id,
-      traceId: getTraceId(c),
+      provider: result.provider,
+      model: result.model,
+      transcriptLength: result.text.length,
     });
 
     return c.json({
       transcript: result.text,
       provider: result.provider,
       model: result.model,
-      traceId: getTraceId(c),
+      traceId,
     });
   });
 

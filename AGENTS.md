@@ -4,6 +4,33 @@ This file contains environment-specific instructions for coding agents working o
 
 ---
 
+## Deployed Environment URLs
+
+Current backend API environments:
+
+- Dev: `https://dev-api.bettercalories.app`
+- Production: `https://api.bettercalories.app`
+
+Backend deployment rules:
+
+- Dev deploys from pushes to `develop`.
+- Production deploys from tags matching `v*`.
+
+When compiling the mobile app against the deployed dev environment, use:
+
+```bash
+cd /home/javier/dev/cal-tracker/apps/mobile
+flutter build apk --debug --dart-define=API_BASE_URL=https://dev-api.bettercalories.app
+```
+
+Use the local emulator URL only for local backend testing:
+
+```bash
+flutter build apk --debug --dart-define=API_BASE_URL=http://10.0.2.2:3000
+```
+
+---
+
 ## Flutter E2E Testing and Visual Validation
 
 For Flutter mobile features, use **Patrol** as the main E2E testing framework. Whenever a new feature, screen, permission flow, navigation flow, or critical user interaction is implemented, add or update Patrol tests to verify the behavior on Android/iOS where relevant. Patrol should be used for real end-to-end flows, especially those involving native dialogs, permissions, authentication, recording/audio flows, backend interactions, and multi-screen journeys. Use stable finders such as keys, semantic labels, and visible text; avoid fragile selectors.

@@ -26,6 +26,11 @@ void main() {
     expect(find.text('Branch 1'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
+    await tester.pump(const Duration(milliseconds: 80));
+
+    expect(find.byType(ImageFiltered), findsWidgets);
+    expect(tester.takeException(), isNull);
+
     await tester.pump(const Duration(milliseconds: 260));
     await tester.pump();
 

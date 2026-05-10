@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -123,6 +124,7 @@ class _SlidingBranchContainerState extends State<SlidingBranchContainer>
         builder: (context, child) {
           final progress = Curves.easeOutQuart.transform(_controller.value);
           final isAnimating = _previousIndex != null && _controller.value < 1;
+          final blurSigma = isAnimating ? _blurSigmaFor(progress) : 0.0;
 
           return Stack(
             fit: StackFit.expand,
@@ -134,6 +136,7 @@ class _SlidingBranchContainerState extends State<SlidingBranchContainer>
                       (isAnimating && index == _previousIndex),
                   ignoring: isAnimating || index != _currentIndex,
                   translation: _translationFor(index, progress),
+                  blurSigma: blurSigma,
                   child: widget.children[index],
                 ),
             ],
@@ -176,6 +179,12 @@ class _SlidingBranchContainerState extends State<SlidingBranchContainer>
     }
     return Offset.zero;
   }
+
+  double _blurSigmaFor(double progress) {
+    final distanceFromMidpoint = (progress - 0.5).abs() * 2;
+    final intensity = (1 - distanceFromMidpoint).clamp(0.0, 1.0);
+    return 1.2 * intensity;
+  }
 }
 
 class _BranchSlot extends StatelessWidget {
@@ -184,6 +193,7 @@ class _BranchSlot extends StatelessWidget {
     required this.visible,
     required this.ignoring,
     required this.translation,
+    required this.blurSigma,
     required this.child,
   });
 
@@ -191,21 +201,34 @@ class _BranchSlot extends StatelessWidget {
   final bool visible;
   final bool ignoring;
   final Offset translation;
+  final double blurSigma;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
+    final translatedChild = FractionalTranslation(
+      translation: translation,
+      transformHitTests: false,
+      child: child,
+    );
+
+    final transitionChild = blurSigma > 0
+        ? ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(
+              sigmaX: blurSigma,
+              sigmaY: blurSigma,
+            ),
+            child: translatedChild,
+          )
+        : translatedChild;
+
     return Offstage(
       offstage: !visible,
       child: TickerMode(
         enabled: active,
         child: IgnorePointer(
           ignoring: ignoring,
-          child: FractionalTranslation(
-            translation: translation,
-            transformHitTests: false,
-            child: child,
-          ),
+          child: transitionChild,
         ),
       ),
     );
