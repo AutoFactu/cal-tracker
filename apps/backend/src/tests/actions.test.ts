@@ -37,9 +37,13 @@ describe("action loop", () => {
     expect(recordFoodFeedback).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: auth.user.id,
-        eventType: "selected_for_proposal",
-        phrase: "selected food matches",
-        items: [testBreadItem],
+        action: "selected",
+        query: "selected food matches",
+        metadata: expect.objectContaining({
+          eventType: "selected_for_proposal",
+          explicitSelection: true,
+          itemName: "Bread",
+        }),
       }),
     );
   });
@@ -105,9 +109,12 @@ describe("action loop", () => {
     expect(recordFoodFeedback).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: auth.user.id,
-        eventType: "proposal_committed",
-        proposalId: proposalEnvelope.output.proposal.id,
-        mealId: committed.output.meal.id,
+        action: "logged",
+        metadata: expect.objectContaining({
+          eventType: "proposal_committed",
+          proposalId: proposalEnvelope.output.proposal.id,
+          mealId: committed.output.meal.id,
+        }),
       }),
     );
 
@@ -434,10 +441,12 @@ describe("action loop", () => {
     expect(recordFoodFeedback).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: auth.user.id,
-        eventType: "meal_corrected",
-        mealId: meal.output.meal.id,
-        items: editedItems,
-        previousItems: meal.output.meal.items,
+        action: "corrected",
+        metadata: expect.objectContaining({
+          eventType: "meal_corrected",
+          mealId: meal.output.meal.id,
+          itemName: "Chicken breast",
+        }),
       }),
     );
   });

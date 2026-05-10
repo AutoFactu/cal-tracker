@@ -325,18 +325,31 @@ export class PostgresRepository implements AppRepository {
     return mapFood(row);
   }
 
-  async recordFoodFeedback(input: FoodFeedbackRecord): Promise<UserFoodPreference> {
+  async recordFoodFeedback(input: FoodFeedbackRecord): Promise<UserFoodPreference | undefined> {
     const normalizedQuery = normalizeText(input.query);
     const delta = foodFeedbackDelta(input.action);
     const positiveDelta = delta > 0 ? 1 : 0;
     const negativeDelta = delta < 0 ? 1 : 0;
 
     const [preference] = await this.sql.begin(async (tx) => {
+      const foodItemId = input.foodItemId ?? (input.externalSource && input.externalId
+        ? (await tx`
+            SELECT id
+            FROM food_items
+            WHERE external_source = ${input.externalSource}
+              AND external_id = ${input.externalId}
+              AND (user_id IS NULL OR user_id = ${input.userId})
+            ORDER BY CASE WHEN user_id = ${input.userId} THEN 0 ELSE 1 END
+            LIMIT 1
+          `)[0]?.id as string | undefined
+        : undefined);
+      if (!foodItemId) return [];
+
       await tx`
         INSERT INTO user_food_feedback_events (user_id, food_item_id, query_text, normalized_query, action, metadata_json)
         VALUES (
           ${input.userId},
-          ${input.foodItemId},
+          ${foodItemId},
           ${input.query},
           ${normalizedQuery},
           ${input.action},
@@ -347,7 +360,7 @@ export class PostgresRepository implements AppRepository {
         INSERT INTO user_food_preferences (
           user_id, food_item_id, affinity_score, positive_feedback_count, negative_feedback_count, last_feedback_at, updated_at
         )
-        VALUES (${input.userId}, ${input.foodItemId}, ${delta}, ${positiveDelta}, ${negativeDelta}, now(), now())
+        VALUES (${input.userId}, ${foodItemId}, ${delta}, ${positiveDelta}, ${negativeDelta}, now(), now())
         ON CONFLICT (user_id, food_item_id)
         DO UPDATE SET
           affinity_score = user_food_preferences.affinity_score + EXCLUDED.affinity_score,
@@ -358,7 +371,7 @@ export class PostgresRepository implements AppRepository {
         RETURNING *
       `;
     });
-    return mapUserFoodPreference(preference);
+    return preference ? mapUserFoodPreference(preference) : undefined;
   }
 
   async getUserFoodPreferences(userId: string): Promise<UserFoodPreference[]> {

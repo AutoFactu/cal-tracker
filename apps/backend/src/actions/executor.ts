@@ -27,7 +27,7 @@ import type {
   NutritionProvider,
   NutritionSearchResult,
 } from "../nutrition/provider.js";
-import type { AppRepository } from "../repository/types.js";
+import type { AppRepository, FoodFeedbackAction, FoodFeedbackRecord } from "../repository/types.js";
 import type { MemoryRetrievalService } from "../memory/retrieval.js";
 import { newId } from "../utils/ids.js";
 import { normalizeText } from "../utils/normalize.js";
@@ -65,10 +65,6 @@ type FoodFeedbackInput = {
   items: MealItem[];
   previousItems?: MealItem[];
   metadata?: Record<string, unknown>;
-};
-
-type RepositoryWithFoodFeedback = {
-  recordFoodFeedback?: (input: FoodFeedbackInput) => Promise<unknown>;
 };
 
 export class ActionExecutor {
@@ -555,10 +551,51 @@ async function recordFoodFeedback(
   repository: AppRepository,
   input: FoodFeedbackInput,
 ): Promise<void> {
-  const recorder = (repository as RepositoryWithFoodFeedback)
-    .recordFoodFeedback;
-  if (typeof recorder !== "function") return;
-  await recorder.call(repository, input);
+  const action = foodFeedbackActionForEvent(input.eventType);
+  await Promise.all(
+    input.items.map((item) => {
+      const record = foodFeedbackRecordForItem(input, item, action);
+      return record ? repository.recordFoodFeedback(record) : Promise.resolve();
+    }),
+  );
+}
+
+function foodFeedbackActionForEvent(
+  eventType: FoodFeedbackEventType,
+): FoodFeedbackAction {
+  switch (eventType) {
+    case "selected_for_proposal":
+      return "selected";
+    case "proposal_committed":
+      return "logged";
+    case "proposal_corrected":
+    case "meal_corrected":
+      return "corrected";
+  }
+}
+
+function foodFeedbackRecordForItem(
+  input: FoodFeedbackInput,
+  item: MealItem,
+  action: FoodFeedbackAction,
+): FoodFeedbackRecord | undefined {
+  return {
+    userId: input.userId,
+    externalSource: item.externalSource,
+    externalId: item.externalId,
+    query: item.originalText ?? item.canonicalName ?? input.phrase ?? item.name,
+    action,
+    metadata: {
+      ...input.metadata,
+      eventType: input.eventType,
+      traceId: input.traceId,
+      source: input.source,
+      proposalId: input.proposalId,
+      mealId: input.mealId,
+      itemName: item.name,
+      confidence: item.confidence,
+    },
+  };
 }
 
 function unsupportedUnitClarification(

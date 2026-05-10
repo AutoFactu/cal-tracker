@@ -209,9 +209,11 @@ export class InMemoryRepository implements AppRepository {
     return food;
   }
 
-  async recordFoodFeedback(input: FoodFeedbackRecord): Promise<UserFoodPreference> {
-    this.foodFeedbackEvents.push({ ...input, createdAt: new Date().toISOString() });
-    const key = preferenceKey(input.userId, input.foodItemId);
+  async recordFoodFeedback(input: FoodFeedbackRecord): Promise<UserFoodPreference | undefined> {
+    const foodItemId = input.foodItemId ?? this.findFoodForFeedback(input)?.id;
+    if (!foodItemId) return undefined;
+    this.foodFeedbackEvents.push({ ...input, foodItemId, createdAt: new Date().toISOString() });
+    const key = preferenceKey(input.userId, foodItemId);
     const existing = this.foodPreferences.get(key);
     const delta = foodFeedbackDelta(input.action);
     const now = new Date().toISOString();
@@ -226,7 +228,7 @@ export class InMemoryRepository implements AppRepository {
         }
       : {
           userId: input.userId,
-          foodItemId: input.foodItemId,
+          foodItemId,
           affinityScore: delta,
           positiveFeedbackCount: delta > 0 ? 1 : 0,
           negativeFeedbackCount: delta < 0 ? 1 : 0,
@@ -235,6 +237,15 @@ export class InMemoryRepository implements AppRepository {
         };
     this.foodPreferences.set(key, preference);
     return preference;
+  }
+
+  private findFoodForFeedback(input: FoodFeedbackRecord): FoodItemRecord | undefined {
+    if (!input.externalSource || !input.externalId) return undefined;
+    return [...this.foods.values()].find((food) =>
+      food.externalSource === input.externalSource &&
+      food.externalId === input.externalId &&
+      (food.userId === undefined || food.userId === input.userId)
+    );
   }
 
   async getUserFoodPreferences(userId: string): Promise<UserFoodPreference[]> {

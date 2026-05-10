@@ -21,6 +21,13 @@ import { RemoteSpeechToTextProvider } from "./stt/speechToTextProvider.js";
 const config = loadConfig();
 const repository = new PostgresRepository(config.DATABASE_URL);
 const authService = new AuthService(config, repository);
+const embeddingProvider = config.EMBEDDING_BASE_URL
+  ? new LocalBgeM3EmbeddingProvider(
+      config.EMBEDDING_BASE_URL,
+      config.EMBEDDING_MODEL,
+      config.EMBEDDING_DIMENSIONS,
+    )
+  : undefined;
 const foodResolver = new FoodResolver(
   new CompositeFoodTextExtractor([
     new OpenRouterFoodTextExtractor(
@@ -30,7 +37,7 @@ const foodResolver = new FoodResolver(
     new DeterministicFoodTextExtractor(),
   ]),
   [
-    new LocalFoodDataProvider(repository),
+    new LocalFoodDataProvider(repository, { embeddingProvider }),
     new OpenFoodFactsFoodDataProvider(
       config.OPENFOODFACTS_BASE_URL,
       config.OPENFOODFACTS_USER_AGENT,
@@ -43,13 +50,6 @@ const foodResolver = new FoodResolver(
   config.FOOD_RESOLVER_MIN_CONFIDENCE,
 );
 const nutritionProvider = new ResolverNutritionProvider(foodResolver);
-const embeddingProvider = config.EMBEDDING_BASE_URL
-  ? new LocalBgeM3EmbeddingProvider(
-      config.EMBEDDING_BASE_URL,
-      config.EMBEDDING_MODEL,
-      config.EMBEDDING_DIMENSIONS,
-    )
-  : undefined;
 const memoryRetrievalService = new MemoryRetrievalService(
   repository,
   embeddingProvider,

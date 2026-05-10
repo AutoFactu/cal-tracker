@@ -4,7 +4,8 @@ import type {
   FoodPortionChoice,
   MealItem,
 } from "@cal-tracker/contracts";
-import type { AppRepository, FoodItemRecord, FoodPortionRecord } from "../repository/types.js";
+import type { EmbeddingProvider } from "../embeddings/provider.js";
+import type { AppRepository, FoodItemRecord, FoodPortionRecord, FoodSearchCandidate } from "../repository/types.js";
 import { normalizeText } from "../utils/normalize.js";
 import { scaleFood } from "../utils/nutrition.js";
 
@@ -200,7 +201,9 @@ export class FoodResolver {
       )
         break;
     }
-    candidates.sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+    candidates.sort((a, b) =>
+      (b.matchScore ?? b.confidence ?? 0) - (a.matchScore ?? a.confidence ?? 0),
+    );
     if (
       candidates.length === 0 &&
       !reason &&
@@ -339,21 +342,23 @@ export class LocalFoodDataProvider implements FoodDataProvider {
 
   constructor(
     private readonly repository: AppRepository,
-    private readonly options: { allowSeededPortionFallback?: boolean } = {},
+    private readonly options: {
+      allowSeededPortionFallback?: boolean;
+      embeddingProvider?: EmbeddingProvider;
+    } = {},
   ) {}
 
   async resolve(
     userId: string,
     mention: FoodMention,
   ): Promise<FoodProviderResolution> {
-    const foods = await this.repository.searchFoods(
-      userId,
-      mention.canonicalEnglishName,
-      mention.barcode,
-    );
+    const foods = await this.searchFoods(userId, mention);
     const compatibleFoods = foods
       .filter((food) => cachedFoodIsCompatible(food, mention))
-      .sort((a, b) => localFoodPriority(a, mention) - localFoodPriority(b, mention));
+      .sort((a, b) =>
+        (b.finalScore ?? 0) - (a.finalScore ?? 0) ||
+        localFoodPriority(a, mention) - localFoodPriority(b, mention),
+      );
     const items: MealItem[] = [];
     let reason: FoodCandidateGroup["reason"] | undefined;
     let portionOptions: FoodPortionChoice[] | undefined;
@@ -370,6 +375,11 @@ export class LocalFoodDataProvider implements FoodDataProvider {
           allowSeededPortionFallback: this.options.allowSeededPortionFallback,
       });
       if (item) {
+        item.lexicalScore = food.lexicalScore ?? item.lexicalScore;
+        item.vectorScore = food.vectorScore ?? item.vectorScore;
+        item.preferenceScore = food.preferenceScore ?? item.preferenceScore;
+        item.matchScore = food.finalScore ?? item.matchScore;
+        item.matchReason = food.vectorScore ? "hybrid_search" : item.matchReason;
         items.push(markLocalCandidate(item));
         continue;
       }
@@ -393,6 +403,34 @@ export class LocalFoodDataProvider implements FoodDataProvider {
           : undefined,
       portionOptions,
     };
+  }
+
+  private async searchFoods(
+    userId: string,
+    mention: FoodMention,
+  ): Promise<Array<FoodItemRecord & Partial<FoodSearchCandidate>>> {
+    if (!mention.barcode && this.options.embeddingProvider) {
+      try {
+        const model = await this.repository.getActiveEmbeddingModel();
+        if (model) {
+          const embedding = (await this.options.embeddingProvider.embed([
+            mention.canonicalEnglishName,
+          ])).data[0]?.embedding;
+          if (embedding) {
+            return await this.repository.searchFoodsHybrid(userId, {
+              query: mention.canonicalEnglishName,
+              barcode: mention.barcode,
+              embedding,
+              embeddingModelId: model.id,
+              limit: 50,
+            });
+          }
+        }
+      } catch {
+        // Fall back to lexical search if embeddings are unavailable.
+      }
+    }
+    return this.repository.searchFoods(userId, mention.canonicalEnglishName, mention.barcode);
   }
 }
 

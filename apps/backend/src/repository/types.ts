@@ -98,7 +98,9 @@ export type FoodFeedbackAction = "selected" | "logged" | "corrected" | "dismisse
 
 export type FoodFeedbackRecord = {
   userId: string;
-  foodItemId: string;
+  foodItemId?: string;
+  externalSource?: string;
+  externalId?: string;
   query: string;
   action: FoodFeedbackAction;
   metadata?: Record<string, unknown>;
@@ -181,7 +183,7 @@ export interface AppRepository {
   searchFoods(userId: string, query: string, barcode?: string): Promise<FoodItemRecord[]>;
   searchFoodsHybrid(userId: string, input: FoodHybridSearchInput): Promise<FoodSearchCandidate[]>;
   upsertFoodItem(input: Omit<FoodItemRecord, "id">): Promise<FoodItemRecord>;
-  recordFoodFeedback(input: FoodFeedbackRecord): Promise<UserFoodPreference>;
+  recordFoodFeedback(input: FoodFeedbackRecord): Promise<UserFoodPreference | undefined>;
   getUserFoodPreferences(userId: string): Promise<UserFoodPreference[]>;
   getActiveEmbeddingModel(): Promise<EmbeddingModelRecord | undefined>;
   upsertFoodItemEmbedding(input: UpsertFoodItemEmbeddingInput): Promise<FoodItemEmbeddingRecord>;
