@@ -25,6 +25,7 @@ import type { AppConfig } from "../config/env.js";
 import type {
   MealTextResolutionProvider,
   NutritionProvider,
+  NutritionSearchResult,
 } from "../nutrition/provider.js";
 import type { AppRepository } from "../repository/types.js";
 import type { MemoryRetrievalService } from "../memory/retrieval.js";
@@ -46,6 +47,29 @@ export class ActionExecutionError extends Error {
     super(message);
   }
 }
+
+type FoodFeedbackEventType =
+  | "selected_for_proposal"
+  | "proposal_committed"
+  | "proposal_corrected"
+  | "meal_corrected";
+
+type FoodFeedbackInput = {
+  userId: string;
+  eventType: FoodFeedbackEventType;
+  traceId: string;
+  source: string;
+  phrase?: string;
+  proposalId?: string;
+  mealId?: string;
+  items: MealItem[];
+  previousItems?: MealItem[];
+  metadata?: Record<string, unknown>;
+};
+
+type RepositoryWithFoodFeedback = {
+  recordFoodFeedback?: (input: FoodFeedbackInput) => Promise<unknown>;
+};
 
 export class ActionExecutor {
   constructor(
@@ -149,12 +173,17 @@ export class ActionExecutor {
       }
       case "search_nutrition_database": {
         const parsed = searchNutritionDatabaseInputSchema.parse(input);
-        return {
-          items: await this.nutritionProvider.search(
+        const searchResult = normalizeNutritionSearchResult(
+          await this.nutritionProvider.search(
             context.actorUserId,
             parsed.query,
             parsed.barcode,
           ),
+        );
+        return {
+          items: searchResult.items,
+          candidates: searchResult.candidateGroups,
+          candidateGroups: searchResult.candidateGroups,
         };
       }
       case "propose_meal_log":
@@ -175,6 +204,18 @@ export class ActionExecutor {
           parsed.items,
           mealLabel,
         );
+        await recordFoodFeedback(this.repository, {
+          userId: context.actorUserId,
+          eventType: "proposal_committed",
+          traceId: context.traceId,
+          source: context.source,
+          phrase: proposal.phrase,
+          proposalId: proposal.id,
+          mealId: meal.id,
+          items: meal.items,
+          previousItems: proposal.items,
+          metadata: { overriddenItems: Boolean(parsed.items?.length) },
+        });
         return { meal };
       }
       case "correct_meal":
@@ -349,9 +390,26 @@ export class ActionExecutor {
         },
         traceId: context.traceId,
       });
+      await recordFoodFeedback(this.repository, {
+        userId: context.actorUserId,
+        eventType: "proposal_committed",
+        traceId: context.traceId,
+        source: context.source,
+        phrase: parsed.text,
+        proposalId: proposal.id,
+        mealId: autoCommittedMeal.id,
+        items: autoCommittedMeal.items,
+        previousItems: proposal.items,
+        metadata: { trustedAutoCommit: true },
+      });
     }
 
-    return { proposal, autoCommittedMeal };
+    return {
+      proposal,
+      autoCommittedMeal,
+      options: resolution?.candidateGroups ?? [],
+      candidateGroups: resolution?.candidateGroups ?? [],
+    };
   }
 
   private async createMealProposalFromItems(
@@ -372,6 +430,16 @@ export class ActionExecutor {
       source: "backend_estimate",
       nutrition: sumNutrition(parsed.items),
       items: parsed.items,
+    });
+    await recordFoodFeedback(this.repository, {
+      userId: context.actorUserId,
+      eventType: "selected_for_proposal",
+      traceId: context.traceId,
+      source: context.source,
+      phrase: parsed.phrase,
+      proposalId: proposal.id,
+      items: parsed.items,
+      metadata: { explicitSelection: true },
     });
     return { proposal };
   }
@@ -404,6 +472,16 @@ export class ActionExecutor {
           nutrition: sumNutrition(parsed.items),
         },
       );
+      await recordFoodFeedback(this.repository, {
+        userId: context.actorUserId,
+        eventType: "proposal_corrected",
+        traceId: context.traceId,
+        source: context.source,
+        phrase: proposal.phrase,
+        proposalId: corrected.id,
+        items: corrected.items,
+        previousItems: proposal.items,
+      });
       return { proposal: corrected };
     }
 
@@ -416,6 +494,15 @@ export class ActionExecutor {
       ...meal,
       items: parsed.items,
       nutrition: sumNutrition(parsed.items),
+    });
+    await recordFoodFeedback(this.repository, {
+      userId: context.actorUserId,
+      eventType: "meal_corrected",
+      traceId: context.traceId,
+      source: context.source,
+      mealId: corrected.id,
+      items: corrected.items,
+      previousItems: meal.items,
     });
     return { meal: corrected };
   }
@@ -447,6 +534,31 @@ function hasMealTextResolution(
     typeof (provider as Partial<MealTextResolutionProvider>).resolveMealText ===
     "function"
   );
+}
+
+function normalizeNutritionSearchResult(
+  result: MealItem[] | NutritionSearchResult,
+): { items: MealItem[]; candidateGroups: FoodCandidateGroup[] } {
+  if (Array.isArray(result)) {
+    return {
+      items: result,
+      candidateGroups: [],
+    };
+  }
+  return {
+    items: result.items,
+    candidateGroups: result.candidateGroups ?? result.candidates ?? [],
+  };
+}
+
+async function recordFoodFeedback(
+  repository: AppRepository,
+  input: FoodFeedbackInput,
+): Promise<void> {
+  const recorder = (repository as RepositoryWithFoodFeedback)
+    .recordFoodFeedback;
+  if (typeof recorder !== "function") return;
+  await recorder.call(repository, input);
 }
 
 function unsupportedUnitClarification(
