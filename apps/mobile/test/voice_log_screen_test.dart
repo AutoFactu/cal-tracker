@@ -1,0 +1,145 @@
+import 'package:cal_tracker_mobile/app/theme.dart';
+import 'package:cal_tracker_mobile/data/repositories/nutrition_repository.dart';
+import 'package:cal_tracker_mobile/data/services/audio_recorder_service.dart';
+import 'package:cal_tracker_mobile/domain/models/nutrition_models.dart';
+import 'package:cal_tracker_mobile/ui/features/voice_log/view_models/voice_log_view_model.dart';
+import 'package:cal_tracker_mobile/ui/features/voice_log/views/voice_log_screen.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:mocktail/mocktail.dart';
+import 'package:provider/provider.dart';
+
+class MockNutritionRepository extends Mock implements NutritionRepository {}
+
+class MockAudioRecorderService extends Mock implements AudioRecorderService {}
+
+void main() {
+  group('MealCreateScreen food candidates', () {
+    late MockNutritionRepository nutritionRepository;
+    late MockAudioRecorderService audioRecorderService;
+    late VoiceLogViewModel viewModel;
+
+    setUp(() {
+      nutritionRepository = MockNutritionRepository();
+      audioRecorderService = MockAudioRecorderService();
+      when(() => audioRecorderService.dispose()).thenAnswer((_) async {});
+      when(
+        () => audioRecorderService.stateStream,
+      ).thenAnswer((_) => const Stream.empty());
+      viewModel = VoiceLogViewModel(
+        nutritionRepository: nutritionRepository,
+        audioRecorderService: audioRecorderService,
+      );
+    });
+
+    tearDown(() {
+      viewModel.dispose();
+    });
+
+    testWidgets('renders compact top 10 candidates without overflow', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final group = _candidateGroup(
+        canonicalEnglishName: 'very_long_food',
+        candidates: [
+          for (var index = 0; index < 10; index++)
+            _mealItem(
+              name:
+                  'Very long branded food candidate number ${index + 1} with extra descriptive words',
+              calories: 100 + index,
+              externalId: 'long_food_${index + 1}',
+            ),
+        ],
+      );
+      when(() => nutritionRepository.logText('long food')).thenAnswer(
+        (_) async => AgentRunResult(
+          kind: 'clarification_required',
+          message: 'Choose a food match.',
+          candidateGroups: [group],
+        ),
+      );
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider<VoiceLogViewModel>.value(
+          value: viewModel,
+          child: MaterialApp(
+            theme: buildTheme(),
+            home: const MealCreateScreen(),
+          ),
+        ),
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey('meal_text_field')),
+        'long food',
+      );
+      await tester.tap(find.byKey(const ValueKey('submit_meal_button')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('food_candidate_very_long_food_0')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('food_candidate_very_long_food_9')),
+        findsNothing,
+      );
+
+      final toggleFinder =
+          find.byKey(const ValueKey('food_candidate_toggle_very_long_food'));
+      await tester.ensureVisible(toggleFinder);
+      await tester.pumpAndSettle();
+      await tester.tap(toggleFinder);
+      await tester.pumpAndSettle();
+      final candidateNineFinder =
+          find.byKey(const ValueKey('food_candidate_very_long_food_9'));
+      await tester.ensureVisible(candidateNineFinder);
+      await tester.pumpAndSettle();
+
+      expect(candidateNineFinder, findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  });
+}
+
+FoodCandidateGroup _candidateGroup({
+  required String canonicalEnglishName,
+  required List<MealItem> candidates,
+}) {
+  return FoodCandidateGroup(
+    mention: FoodMention(
+      originalText: canonicalEnglishName,
+      canonicalEnglishName: canonicalEnglishName,
+      quantity: 100,
+      unit: 'g',
+      confidence: 0.9,
+      marketProduct: false,
+    ),
+    candidates: candidates,
+  );
+}
+
+MealItem _mealItem({
+  required String name,
+  required int calories,
+  required String externalId,
+}) {
+  return MealItem(
+    name: name,
+    quantity: 100,
+    unit: 'g',
+    calories: calories,
+    proteinGrams: 7,
+    carbsGrams: 1,
+    fatGrams: 8,
+    source: 'open_food_facts',
+    externalSource: 'Open Food Facts',
+    externalId: externalId,
+    license: 'CC BY-SA',
+    confidence: 0.91,
+    resolvedGrams: 100,
+  );
+}
