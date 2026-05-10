@@ -23,8 +23,13 @@ import { buildToolSchemas } from "./toolSchemas.js";
 import { filterToolsByPolicy } from "./agentPolicy.js";
 
 export type AgentRunResult =
-  | { kind: "proposal"; proposal: MealProposal; message: string }
-  | { kind: "meal_committed"; meal: Meal; message: string }
+  | {
+      kind: "proposal";
+      proposal: MealProposal;
+      message: string;
+      options?: unknown[];
+    }
+  | { kind: "meal_committed"; meal: Meal; message: string; options?: unknown[] }
   | {
       kind: "meal_corrected";
       meal?: Meal;
@@ -191,10 +196,14 @@ export class AgentService {
       }
       case "search_nutrition_database": {
         const items = (output.items as MealItem[]) ?? [];
+        const options =
+          (output.candidateGroups as unknown[] | undefined) ??
+          (output.candidates as unknown[] | undefined) ??
+          [];
         return {
           kind: "nutrition_search",
           items,
-          options: items,
+          options,
           message:
             items.length > 0
               ? "I found matching nutrition items."
@@ -217,16 +226,22 @@ export class AgentService {
         }
         const proposal = output.proposal as MealProposal;
         const meal = output.autoCommittedMeal as Meal | undefined;
+        const options =
+          (output.options as unknown[] | undefined) ??
+          (output.candidateGroups as unknown[] | undefined) ??
+          [];
         if (meal) {
           return {
             kind: "meal_committed",
             meal,
+            options,
             message: "Meal logged from trusted template.",
           };
         }
         return {
           kind: "proposal",
           proposal,
+          options,
           message: "Meal proposal created.",
         };
       }

@@ -61,6 +61,7 @@ export const searchNutritionDatabaseInputSchema = z.object({
 export const searchNutritionDatabaseOutputSchema = z.object({
   items: z.array(mealItemSchema),
   candidates: z.array(foodCandidateSchema).optional(),
+  candidateGroups: z.array(foodCandidateSchema).optional(),
 });
 
 export const proposeMealLogInputSchema = z.object({

@@ -108,6 +108,53 @@ describe("scoreUsdaCandidate", () => {
   });
 });
 
+describe("FoodResolver candidate groups", () => {
+  it("keeps up to ten ranked alternatives for every detected mention", async () => {
+    const repository = testFoodRepository();
+    const provider: FoodDataProvider = {
+      id: "test-provider",
+      async resolve() {
+        return Array.from({ length: 12 }, (_, index) => ({
+          name: `Candidate ${index + 1}`,
+          quantity: 100,
+          unit: "g",
+          calories: 100 + index,
+          proteinGrams: 10,
+          carbsGrams: 10,
+          fatGrams: 2,
+          source: "test",
+          confidence: 0.99 - index * 0.01,
+        }));
+      },
+    };
+    const resolver = new FoodResolver(
+      {
+        async extract() {
+          return [mention("candidate")];
+        },
+      },
+      [provider],
+      repository,
+      0.75,
+    );
+
+    const result = await resolver.resolveMealText("user-1", "candidate");
+
+    expect(result.candidateGroups).toHaveLength(1);
+    expect(result.candidateGroups[0]!.candidates).toHaveLength(10);
+    expect(result.candidateGroups[0]!.candidates[0]).toEqual(
+      expect.objectContaining({
+        name: "Candidate 1",
+        rank: 1,
+        matchScore: 0.99,
+        lexicalScore: 0.99,
+        matchReason: "test",
+      }),
+    );
+    expect(result.items[0]).toBe(result.candidateGroups[0]!.candidates[0]);
+  });
+});
+
 describe("FoodResolver", () => {
   it("extracts Spanish quantities without translating food names in deterministic fallback", async () => {
     const mentions = await new DeterministicFoodTextExtractor().extract(
@@ -733,12 +780,13 @@ describe("FoodResolver", () => {
     expect(generic.items).toHaveLength(0);
 
     const barcode = await resolver.search("user-1", "cheese", "000111222333");
-    expect(barcode[0]).toEqual(
+    expect(barcode.items[0]).toEqual(
       expect.objectContaining({
         name: "Cheese Crackers",
         externalId: "4001",
       }),
     );
+    expect(barcode.candidateGroups[0]?.candidates[0]).toBe(barcode.items[0]);
   });
 
   it("resolves explicit USDA count sizes for bananas and apples", async () => {

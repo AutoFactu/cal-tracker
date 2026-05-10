@@ -15,6 +15,11 @@ export type FoodResolutionResult = {
   clarificationRequired: boolean;
 };
 
+export type FoodSearchResult = {
+  items: MealItem[];
+  candidateGroups: FoodCandidateGroup[];
+};
+
 export interface FoodTextExtractor {
   extract(text: string): Promise<FoodMention[]>;
 }
@@ -112,7 +117,7 @@ export class FoodResolver {
     userId: string,
     query: string,
     barcode?: string,
-  ): Promise<MealItem[]> {
+  ): Promise<FoodSearchResult> {
     const mention: FoodMention = {
       originalText: query,
       canonicalEnglishName: normalizeFoodName(query),
@@ -124,13 +129,27 @@ export class FoodResolver {
       confidence: 0.95,
       marketProduct: Boolean(barcode),
     };
-    const { candidates } = await this.resolveMention(userId, mention, {
-      includeMarketSearch: true,
-    });
+    const { candidates, reason, portionOptions } = await this.resolveMention(
+      userId,
+      mention,
+      {
+        includeMarketSearch: true,
+      },
+    );
     for (const candidate of candidates.slice(0, 3)) {
       await this.cacheExternalCandidate(candidate);
     }
-    return candidates;
+    return {
+      items: candidates,
+      candidateGroups: [
+        {
+          mention,
+          candidates,
+          reason: candidates.length === 0 ? reason : undefined,
+          portionOptions: candidates.length === 0 ? portionOptions : undefined,
+        },
+      ],
+    };
   }
 
   private async resolveMention(
@@ -188,7 +207,11 @@ export class FoodResolver {
       requiresPortionValidation(mention)
     )
       reason = "unsupported_unit";
-    return { candidates, reason, portionOptions };
+    return {
+      candidates: annotateCandidateMetadata(candidates),
+      reason,
+      portionOptions,
+    };
   }
 
   private async cacheExternalCandidate(item: MealItem): Promise<void> {
@@ -1226,6 +1249,16 @@ function normalizeProviderResolution(
   result: MealItem[] | FoodProviderResolution,
 ): FoodProviderResolution {
   return Array.isArray(result) ? { items: result } : result;
+}
+
+function annotateCandidateMetadata(candidates: MealItem[]): MealItem[] {
+  return candidates.slice(0, 10).map((candidate, index) => {
+    candidate.rank ??= index + 1;
+    candidate.matchScore ??= candidate.confidence;
+    candidate.lexicalScore ??= candidate.confidence;
+    candidate.matchReason ??= candidate.externalSource ?? candidate.source;
+    return candidate;
+  });
 }
 
 function resolvedGrams(item: MealItem): number | undefined {
