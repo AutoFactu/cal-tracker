@@ -215,7 +215,11 @@ const spec = {
         parameters: [{ name: "mealId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
         requestBody: {
           required: true,
-          content: { "application/json": { schema: { type: "object", properties: { correctionText: { type: "string" } }, required: ["correctionText"] } } }
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/correct_meal_input" }
+            }
+          }
         },
         responses: {
           "200": { description: "Correction action result", content: { "application/json": { schema: { $ref: "#/components/schemas/ExecuteActionResponse" } } } }

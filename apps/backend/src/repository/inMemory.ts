@@ -1,4 +1,4 @@
-import { defaultUserScopes, type Meal, type MealItem, type MealProposal, type MealTemplate, type NutritionSnapshot } from "@cal-tracker/contracts";
+import { defaultUserScopes, type Meal, type MealItem, type MealLabel, type MealProposal, type MealTemplate, type NutritionSnapshot } from "@cal-tracker/contracts";
 import { newId } from "../utils/ids.js";
 import { normalizeText } from "../utils/normalize.js";
 import { subtractNutrition, sumNutrition } from "../utils/nutrition.js";
@@ -26,23 +26,7 @@ export class InMemoryRepository implements AppRepository {
   private auditEvents: AuditEventRecord[] = [];
 
   static seeded(): InMemoryRepository {
-    const repo = new InMemoryRepository();
-    repo.seedFoods();
-    return repo;
-  }
-
-  seedFoods(): void {
-    const foods: FoodItemRecord[] = [
-      { id: newId(), name: "Egg", normalizedName: "egg", source: "generic_usda", servingGrams: 50, calories: 72, proteinGrams: 6.3, carbsGrams: 0.4, fatGrams: 4.8 },
-      { id: newId(), name: "Chicken breast", normalizedName: "chicken breast", source: "generic_usda", servingGrams: 100, calories: 165, proteinGrams: 31, carbsGrams: 0, fatGrams: 3.6 },
-      { id: newId(), name: "Cooked rice", normalizedName: "rice", source: "generic_usda", servingGrams: 100, calories: 130, proteinGrams: 2.7, carbsGrams: 28, fatGrams: 0.3 },
-      { id: newId(), name: "Oats", normalizedName: "oats", source: "generic_usda", servingGrams: 100, calories: 389, proteinGrams: 16.9, carbsGrams: 66.3, fatGrams: 6.9 },
-      { id: newId(), name: "Milk", normalizedName: "milk", source: "generic_usda", servingGrams: 250, calories: 122, proteinGrams: 8.1, carbsGrams: 12, fatGrams: 4.8 },
-      { id: newId(), name: "Bread", normalizedName: "bread", source: "generic_usda", servingGrams: 100, calories: 265, proteinGrams: 9, carbsGrams: 49, fatGrams: 3.2 },
-      { id: newId(), name: "Butter", normalizedName: "butter", source: "generic_usda", servingGrams: 100, calories: 717, proteinGrams: 0.9, carbsGrams: 0.1, fatGrams: 81.1 },
-      { id: newId(), name: "Ham", normalizedName: "ham", source: "generic_usda", servingGrams: 100, calories: 145, proteinGrams: 21, carbsGrams: 1.5, fatGrams: 5.5 }
-    ];
-    for (const food of foods) this.foods.set(food.id, food);
+    return new InMemoryRepository();
   }
 
   async createUser(input: { email: string; displayName: string; passwordHash: string; scopes?: typeof defaultUserScopes }): Promise<StoredUser> {
@@ -60,7 +44,6 @@ export class InMemoryRepository implements AppRepository {
     };
     this.users.set(user.id, user);
     this.targets.set(user.id, { calories: 2200, proteinGrams: 160, carbsGrams: 240, fatGrams: 70 });
-    await this.createDefaultTemplate(user.id);
     return user;
   }
 
@@ -198,12 +181,13 @@ export class InMemoryRepository implements AppRepository {
     return proposal;
   }
 
-  async createMealFromProposal(userId: string, proposal: MealProposal, occurredAt: string, items = proposal.items): Promise<Meal> {
+  async createMealFromProposal(userId: string, proposal: MealProposal, occurredAt: string, items = proposal.items, mealLabel?: MealLabel | null): Promise<Meal> {
     const nutrition = sumNutrition(items);
     const meal: Meal & { userId: string } = {
       id: newId(),
       title: proposal.title,
       occurredAt,
+      mealLabel: mealLabel ?? null,
       nutrition,
       items,
       createdAt: new Date().toISOString(),
@@ -321,24 +305,6 @@ export class InMemoryRepository implements AppRepository {
     return user;
   }
 
-  private async createDefaultTemplate(userId: string): Promise<void> {
-    const foods = [...this.foods.values()];
-    const oats = foods.find((food) => food.normalizedName === "oats")!;
-    const milk = foods.find((food) => food.normalizedName === "milk")!;
-    const egg = foods.find((food) => food.normalizedName === "egg")!;
-    const items: MealItem[] = [
-      { name: oats.name, quantity: 60, unit: "g", calories: 233, proteinGrams: 10.1, carbsGrams: 39.8, fatGrams: 4.1, source: oats.source },
-      { name: milk.name, quantity: 250, unit: "ml", calories: 122, proteinGrams: 8.1, carbsGrams: 12, fatGrams: 4.8, source: milk.source },
-      { name: egg.name, quantity: 2, unit: "egg", calories: 144, proteinGrams: 12.6, carbsGrams: 0.8, fatGrams: 9.6, source: egg.source }
-    ];
-    await this.createTemplate(userId, {
-      title: "Usual breakfast",
-      trustedAutoCommitEnabled: false,
-      nutrition: sumNutrition(items),
-      items,
-      aliases: ["usual breakfast", "normal breakfast"]
-    });
-  }
 }
 
 function stripUserId<T extends { userId: string }>(value: T): Omit<T, "userId"> {

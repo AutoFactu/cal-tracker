@@ -21,6 +21,21 @@ export const foodResolutionProvenanceSchema = z.object({
   needsReview: z.boolean().optional()
 });
 
+export const foodPortionChoiceSchema = z.object({
+  label: z.string().min(1),
+  quantity: z.number().positive(),
+  unit: z.string().min(1),
+  gramWeight: z.number().positive().optional(),
+  totalGrams: z.number().positive().optional(),
+  kind: z.enum(["count_size", "whole_item", "household", "piece_shape", "serving", "metric"]).optional(),
+  portionDescriptor: z.string().optional(),
+  canonicalFoodName: z.string().optional(),
+  sourceDescription: z.string().optional(),
+  externalSource: z.string().optional(),
+  externalFoodId: z.string().optional(),
+  actionText: z.string().optional()
+});
+
 export const mealItemSchema = z.object({
   id: uuidSchema.optional(),
   name: z.string().min(1),
@@ -38,7 +53,9 @@ export const mealItemSchema = z.object({
   sourceUrl: foodResolutionProvenanceSchema.shape.sourceUrl,
   license: foodResolutionProvenanceSchema.shape.license,
   confidence: foodResolutionProvenanceSchema.shape.confidence,
-  needsReview: foodResolutionProvenanceSchema.shape.needsReview
+  needsReview: foodResolutionProvenanceSchema.shape.needsReview,
+  resolvedGrams: z.number().positive().optional(),
+  portionDescription: z.string().optional()
 });
 
 export const foodMentionSchema = z.object({
@@ -46,6 +63,10 @@ export const foodMentionSchema = z.object({
   canonicalEnglishName: z.string().min(1),
   quantity: z.number().positive(),
   unit: z.string().min(1),
+  rawUnitText: z.string().min(1).optional(),
+  unitKind: z.enum(["metric", "household", "implicit_count", "unknown"]).optional(),
+  portionDescriptorRaw: z.string().min(1).optional(),
+  portionDescriptor: z.string().min(1).optional(),
   brand: z.string().optional(),
   barcode: z.string().optional(),
   confidence: z.number().min(0).max(1),
@@ -55,7 +76,23 @@ export const foodMentionSchema = z.object({
 export const foodCandidateSchema = z.object({
   mention: foodMentionSchema,
   candidates: z.array(mealItemSchema),
-  reason: z.string().optional()
+  reason: z.string().optional(),
+  portionOptions: z.array(foodPortionChoiceSchema).optional()
+});
+
+export const mealLabelTypeSchema = z.enum([
+  "breakfast",
+  "lunch",
+  "dinner",
+  "snack",
+  "pre_workout",
+  "post_workout",
+  "other"
+]);
+
+export const mealLabelSchema = z.object({
+  type: mealLabelTypeSchema,
+  label: z.string().trim().min(1).max(40)
 });
 
 export const mealProposalSchema = z.object({
@@ -76,6 +113,7 @@ export const mealSchema = z.object({
   id: uuidSchema,
   title: z.string(),
   occurredAt: isoDateTimeSchema,
+  mealLabel: mealLabelSchema.nullable().optional(),
   nutrition: nutritionSnapshotSchema,
   items: z.array(mealItemSchema),
   createdAt: isoDateTimeSchema,
@@ -101,9 +139,12 @@ export const mealTemplateSchema = z.object({
 
 export type NutritionSnapshot = z.infer<typeof nutritionSnapshotSchema>;
 export type FoodResolutionProvenance = z.infer<typeof foodResolutionProvenanceSchema>;
+export type FoodPortionChoice = z.infer<typeof foodPortionChoiceSchema>;
 export type MealItem = z.infer<typeof mealItemSchema>;
 export type FoodMention = z.infer<typeof foodMentionSchema>;
 export type FoodCandidateGroup = z.infer<typeof foodCandidateSchema>;
+export type MealLabelType = z.infer<typeof mealLabelTypeSchema>;
+export type MealLabel = z.infer<typeof mealLabelSchema>;
 export type MealProposal = z.infer<typeof mealProposalSchema>;
 export type Meal = z.infer<typeof mealSchema>;
 export type DailySummary = z.infer<typeof dailySummarySchema>;

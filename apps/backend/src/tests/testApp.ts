@@ -2,11 +2,13 @@ import { ActionExecutor } from "../actions/executor.js";
 import { AuthService } from "../auth/service.js";
 import { loadConfig } from "../config/env.js";
 import { createApp } from "../http/app.js";
+import type { MealItem } from "@cal-tracker/contracts";
 import { DeterministicFoodTextExtractor, FoodResolver, LocalFoodDataProvider } from "../nutrition/foodResolver.js";
 import { ResolverNutritionProvider } from "../nutrition/provider.js";
 import { InMemoryRepository } from "../repository/inMemory.js";
 import type { SpeechToTextProvider, TranscriptionResult } from "../stt/speechToTextProvider.js";
 import type { ChatAgentProvider, AgentToolDecision } from "../agent/chatAgentProvider.js";
+import { seedTestFoods } from "./foodFixtures.js";
 
 class FakeSpeechToTextProvider implements SpeechToTextProvider {
   async transcribe(): Promise<TranscriptionResult> {
@@ -21,13 +23,25 @@ export class FakeChatAgentProvider implements ChatAgentProvider {
   }
 }
 
+export const testBreadItem: MealItem = {
+  name: "Bread",
+  quantity: 100,
+  unit: "g",
+  calories: 265,
+  proteinGrams: 9,
+  carbsGrams: 49,
+  fatGrams: 3.2,
+  source: "test_fixture",
+};
+
 export function buildTestApp(options?: { agentProvider?: ChatAgentProvider }) {
   const config = loadConfig({ NODE_ENV: "test" } as NodeJS.ProcessEnv);
   const repository = InMemoryRepository.seeded();
+  seedTestFoods(repository);
   const authService = new AuthService(config, repository);
   const foodResolver = new FoodResolver(
     new DeterministicFoodTextExtractor(),
-    [new LocalFoodDataProvider(repository)],
+    [new LocalFoodDataProvider(repository, { allowSeededPortionFallback: true })],
     repository,
     config.FOOD_RESOLVER_MIN_CONFIDENCE
   );
@@ -50,6 +64,26 @@ export function buildTestApp(options?: { agentProvider?: ChatAgentProvider }) {
   const app = createApp({ config, repository, authService, actionExecutor, sttProvider, agentProvider: options?.agentProvider ?? defaultAgentProvider });
   const request = (input: string, init?: RequestInit) => Promise.resolve(app.request(input, init));
   return { app, request, config, repository, authService, actionExecutor, sttProvider };
+}
+
+export async function createTestUsualBreakfastTemplate(
+  request: (input: string, init?: RequestInit) => Promise<Response>,
+  authHeader: Record<string, string>
+) {
+  const response = await request("http://localhost/v1/actions/create_meal_template/execute", {
+    method: "POST",
+    headers: authHeader,
+    body: JSON.stringify({
+      input: {
+        title: "Usual breakfast",
+        trustedAutoCommitEnabled: false,
+        items: [testBreadItem],
+        aliases: ["usual breakfast", "normal breakfast"]
+      },
+      source: "flutter"
+    })
+  });
+  return response.json() as Promise<{ output: { template: { id: string; items: MealItem[]; aliases: string[] } } }>;
 }
 
 export async function registerAndAuth(request: (input: string, init?: RequestInit) => Promise<Response>) {

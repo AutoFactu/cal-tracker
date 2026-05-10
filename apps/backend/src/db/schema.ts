@@ -1,5 +1,5 @@
 import { relations, sql } from "drizzle-orm";
-import { boolean, customType, integer, jsonb, numeric, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, customType, date, integer, jsonb, numeric, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 const vector = customType<{ data: number[]; driverData: string }>({
   dataType() {
@@ -55,11 +55,35 @@ export const foodItems = pgTable("food_items", {
   sourceUrl: text("source_url"),
   license: text("license"),
   fetchedAt: timestamp("fetched_at", { withTimezone: true }),
+  dataType: text("data_type"),
+  foodCategory: text("food_category"),
+  publicationDate: date("publication_date"),
+  ndbNumber: text("ndb_number"),
+  foodKey: text("food_key"),
+  ingredients: text("ingredients"),
+  marketCountry: text("market_country"),
+  householdServingFulltext: text("household_serving_fulltext"),
+  nutrientsJson: jsonb("nutrients_json").notNull().default(sql`'{}'::jsonb`),
   servingGrams: numeric("serving_grams", { precision: 10, scale: 2 }).notNull().default("100"),
   calories: integer("calories").notNull(),
   proteinGrams: numeric("protein_grams", { precision: 10, scale: 2 }).notNull(),
   carbsGrams: numeric("carbs_grams", { precision: 10, scale: 2 }).notNull(),
   fatGrams: numeric("fat_grams", { precision: 10, scale: 2 }).notNull()
+});
+
+export const foodPortions = pgTable("food_portions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  foodItemId: uuid("food_item_id").notNull().references(() => foodItems.id, { onDelete: "cascade" }),
+  usdaPortionId: text("usda_portion_id"),
+  amount: numeric("amount", { precision: 10, scale: 4 }),
+  unit: text("unit"),
+  modifier: text("modifier"),
+  description: text("description"),
+  gramWeight: numeric("gram_weight", { precision: 10, scale: 4 }).notNull(),
+  normalizedAliases: text("normalized_aliases").array().notNull().default(sql`'{}'::text[]`),
+  kind: text("kind").notNull().default("serving"),
+  sourceDescription: text("source_description").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 });
 
 export const mealProposals = pgTable("meal_proposals", {
@@ -85,6 +109,8 @@ export const meals = pgTable("meals", {
   proposalId: uuid("proposal_id").references(() => mealProposals.id),
   title: text("title").notNull(),
   occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+  mealType: text("meal_type"),
+  mealTypeLabel: text("meal_type_label"),
   calories: integer("calories").notNull(),
   proteinGrams: numeric("protein_grams", { precision: 10, scale: 2 }).notNull(),
   carbsGrams: numeric("carbs_grams", { precision: 10, scale: 2 }).notNull(),

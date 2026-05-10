@@ -5,5 +5,6 @@ coverage
 .github
 .env
 *.log
+data/usda
 apps/mobile/build
 apps/mobile/.dart_tool

@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { AgentToolDecision, ChatAgentProvider } from "../agent/chatAgentProvider.js";
-import { buildTestApp, FakeChatAgentProvider, registerAndAuth } from "./testApp.js";
+import type {
+  AgentToolDecision,
+  ChatAgentProvider,
+} from "../agent/chatAgentProvider.js";
+import {
+  buildTestApp,
+  createTestUsualBreakfastTemplate,
+  FakeChatAgentProvider,
+  registerAndAuth,
+  testBreadItem,
+} from "./testApp.js";
 
 class QueueChatAgentProvider implements ChatAgentProvider {
   constructor(private readonly decisions: AgentToolDecision[] = []) {}
@@ -23,7 +32,7 @@ class ThrowingChatAgentProvider implements ChatAgentProvider {
 }
 
 describe("AgentService", () => {
-  it("maps chicken and rice to propose_meal_log", async () => {
+  it("maps chicken and rice with quantities to propose_meal_log", async () => {
     const { request } = buildTestApp({
       agentProvider: new FakeChatAgentProvider({
         toolCalls: [
@@ -32,7 +41,9 @@ describe("AgentService", () => {
             type: "function",
             function: {
               name: "propose_meal_log",
-              arguments: JSON.stringify({ text: "chicken and rice" }),
+              arguments: JSON.stringify({
+                text: "Add 100 grams of chicken breast and 100 grams of rice",
+              }),
             },
           },
         ],
@@ -40,10 +51,14 @@ describe("AgentService", () => {
       }),
     });
     const { authHeader } = await registerAndAuth(request);
+    await createTestUsualBreakfastTemplate(request, authHeader);
     const res = await request("http://localhost/v1/agent/runs", {
       method: "POST",
       headers: authHeader,
-      body: JSON.stringify({ text: "chicken and rice", source: "flutter" }),
+      body: JSON.stringify({
+        text: "Add 100 grams of chicken breast and 100 grams of rice",
+        source: "flutter",
+      }),
     });
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -52,7 +67,7 @@ describe("AgentService", () => {
     expect(body.message).toBe("Meal proposal created.");
   });
 
-  it("forces a Spanish meal logging request to a meal proposal when the model chooses lookup", async () => {
+  it("forces a meal logging request to a meal proposal when the model chooses lookup", async () => {
     const { request } = buildTestApp({
       agentProvider: new FakeChatAgentProvider({
         toolCalls: [
@@ -61,7 +76,7 @@ describe("AgentService", () => {
             type: "function",
             function: {
               name: "search_nutrition_database",
-              arguments: JSON.stringify({ query: "pan mantequilla" }),
+              arguments: JSON.stringify({ query: "bread butter" }),
             },
           },
         ],
@@ -69,22 +84,31 @@ describe("AgentService", () => {
       }),
     });
     const { authHeader } = await registerAndAuth(request);
+    await createTestUsualBreakfastTemplate(request, authHeader);
     const res = await request("http://localhost/v1/agent/runs", {
       method: "POST",
       headers: authHeader,
-      body: JSON.stringify({ text: "quiero añadir un desayuno de 100g de pan y 20g de mantequilla", source: "flutter" }),
+      body: JSON.stringify({
+        text: "I want to add a breakfast with 100g of bread and 20g of butter",
+        source: "flutter",
+      }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json() as { kind: string; proposal: { title: string; items: { name: string; quantity: number }[] } };
+    const body = (await res.json()) as {
+      kind: string;
+      proposal: { title: string; items: { name: string; quantity: number }[] };
+    };
     expect(body.kind).toBe("proposal");
     expect(body.proposal.title).toBe("Bread and Butter");
-    expect(body.proposal.items).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: "Bread", quantity: 100 }),
-      expect.objectContaining({ name: "Butter", quantity: 20 }),
-    ]));
+    expect(body.proposal.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "Bread", quantity: 100 }),
+        expect.objectContaining({ name: "Butter", quantity: 20 }),
+      ]),
+    );
   });
 
-  it("parses Spanish bread and ham quantities into a complete proposal", async () => {
+  it("parses bread and ham quantities into a complete proposal", async () => {
     const { request } = buildTestApp({
       agentProvider: new FakeChatAgentProvider({
         toolCalls: [
@@ -93,7 +117,9 @@ describe("AgentService", () => {
             type: "function",
             function: {
               name: "propose_meal_log",
-              arguments: JSON.stringify({ text: "Añade a mi desayuno 100 gramos de pan y 100 gramos de jamón." }),
+              arguments: JSON.stringify({
+                text: "Add 100 grams of bread and 100 grams of ham.",
+              }),
             },
           },
         ],
@@ -104,16 +130,24 @@ describe("AgentService", () => {
     const res = await request("http://localhost/v1/agent/runs", {
       method: "POST",
       headers: authHeader,
-      body: JSON.stringify({ text: "Añade a mi desayuno 100 gramos de pan y 100 gramos de jamón.", source: "flutter" }),
+      body: JSON.stringify({
+        text: "Add 100 grams of bread and 100 grams of ham.",
+        source: "flutter",
+      }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json() as { kind: string; proposal: { title: string; items: { name: string; quantity: number }[] } };
+    const body = (await res.json()) as {
+      kind: string;
+      proposal: { title: string; items: { name: string; quantity: number }[] };
+    };
     expect(body.kind).toBe("proposal");
     expect(body.proposal.title).toBe("Bread and Ham");
-    expect(body.proposal.items).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: "Bread", quantity: 100 }),
-      expect.objectContaining({ name: "Ham", quantity: 100 }),
-    ]));
+    expect(body.proposal.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "Bread", quantity: 100 }),
+        expect.objectContaining({ name: "Ham", quantity: 100 }),
+      ]),
+    );
   });
 
   it("returns clarification instead of dropping unresolved ingredients", async () => {
@@ -125,7 +159,9 @@ describe("AgentService", () => {
             type: "function",
             function: {
               name: "propose_meal_log",
-              arguments: JSON.stringify({ text: "Añade 100 gramos de pan y 100 gramos de queso." }),
+              arguments: JSON.stringify({
+                text: "Add 100 grams of bread and 100 grams of cheese.",
+              }),
             },
           },
         ],
@@ -136,31 +172,92 @@ describe("AgentService", () => {
     const res = await request("http://localhost/v1/agent/runs", {
       method: "POST",
       headers: authHeader,
-      body: JSON.stringify({ text: "Añade 100 gramos de pan y 100 gramos de queso.", source: "flutter" }),
+      body: JSON.stringify({
+        text: "Add 100 grams of bread and 100 grams of cheese.",
+        source: "flutter",
+      }),
     });
 
-    const body = await res.json() as { kind: string; options: Array<{ mention: { canonicalEnglishName: string } }> };
+    const body = (await res.json()) as {
+      kind: string;
+      options: Array<{ mention: { canonicalEnglishName: string } }>;
+    };
     expect(body.kind).toBe("clarification_required");
-    expect(body.options).toEqual(expect.arrayContaining([
-      expect.objectContaining({ mention: expect.objectContaining({ canonicalEnglishName: "cheese" }) }),
-    ]));
+    expect(body.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          mention: expect.objectContaining({ canonicalEnglishName: "cheese" }),
+        }),
+      ]),
+    );
   });
 
-  it("falls back to deterministic meal logging when the agent provider is unavailable", async () => {
-    const { request } = buildTestApp({ agentProvider: new ThrowingChatAgentProvider() });
+  it("asks for clarification when a food uses an unsupported unit", async () => {
+    const { request } = buildTestApp({
+      agentProvider: new FakeChatAgentProvider({
+        toolCalls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: {
+              name: "propose_meal_log",
+              arguments: JSON.stringify({ text: "Add 1 rice" }),
+            },
+          },
+        ],
+        rawResponse: {},
+      }),
+    });
     const { authHeader } = await registerAndAuth(request);
     const res = await request("http://localhost/v1/agent/runs", {
       method: "POST",
       headers: authHeader,
-      body: JSON.stringify({ text: "Añade 100 gramos de pan y 100 gramos de queso.", source: "flutter" }),
+      body: JSON.stringify({ text: "Add 1 rice", source: "flutter" }),
+    });
+
+    const body = (await res.json()) as {
+      kind: string;
+      message: string;
+      options: Array<{ reason?: string }>;
+    };
+    expect(body.kind).toBe("clarification_required");
+    expect(body.message).toContain("1 rice");
+    expect(body.message).toContain("grams");
+    expect(body.message).toContain("cups");
+    expect(body.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ reason: "unsupported_unit" }),
+      ]),
+    );
+  });
+
+  it("falls back to deterministic meal logging when the agent provider is unavailable", async () => {
+    const { request } = buildTestApp({
+      agentProvider: new ThrowingChatAgentProvider(),
+    });
+    const { authHeader } = await registerAndAuth(request);
+    const res = await request("http://localhost/v1/agent/runs", {
+      method: "POST",
+      headers: authHeader,
+      body: JSON.stringify({
+        text: "Add 100 grams of bread and 100 grams of cheese.",
+        source: "flutter",
+      }),
     });
 
     expect(res.status).toBe(200);
-    const body = await res.json() as { kind: string; options: Array<{ mention: { canonicalEnglishName: string } }> };
+    const body = (await res.json()) as {
+      kind: string;
+      options: Array<{ mention: { canonicalEnglishName: string } }>;
+    };
     expect(body.kind).toBe("clarification_required");
-    expect(body.options).toEqual(expect.arrayContaining([
-      expect.objectContaining({ mention: expect.objectContaining({ canonicalEnglishName: "cheese" }) }),
-    ]));
+    expect(body.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          mention: expect.objectContaining({ canonicalEnglishName: "cheese" }),
+        }),
+      ]),
+    );
   });
 
   it("maps calories left to get_remaining_targets", async () => {
@@ -183,7 +280,10 @@ describe("AgentService", () => {
     const res = await request("http://localhost/v1/agent/runs", {
       method: "POST",
       headers: authHeader,
-      body: JSON.stringify({ text: "how many calories do I have left", source: "flutter" }),
+      body: JSON.stringify({
+        text: "how many calories do I have left",
+        source: "flutter",
+      }),
     });
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -201,7 +301,9 @@ describe("AgentService", () => {
             type: "function",
             function: {
               name: "delete_meal",
-              arguments: JSON.stringify({ mealId: "00000000-0000-0000-0000-000000000001" }),
+              arguments: JSON.stringify({
+                mealId: "00000000-0000-0000-0000-000000000001",
+              }),
             },
           },
         ],
@@ -212,7 +314,10 @@ describe("AgentService", () => {
     const res = await request("http://localhost/v1/agent/runs", {
       method: "POST",
       headers: authHeader,
-      body: JSON.stringify({ text: "delete the snack I just added", source: "flutter" }),
+      body: JSON.stringify({
+        text: "delete the snack I just added",
+        source: "flutter",
+      }),
     });
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -241,10 +346,16 @@ describe("AgentService", () => {
     const res = await request("http://localhost/v1/agent/runs", {
       method: "POST",
       headers: authHeader,
-      body: JSON.stringify({ text: "search nutrition database for bread", source: "flutter" }),
+      body: JSON.stringify({
+        text: "search nutrition database for bread",
+        source: "flutter",
+      }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json() as { kind: string; items: { name: string }[] };
+    const body = (await res.json()) as {
+      kind: string;
+      items: { name: string }[];
+    };
     expect(body.kind).toBe("nutrition_search");
     expect(body.items.some((item) => item.name === "Bread")).toBe(true);
   });
@@ -266,116 +377,168 @@ describe("AgentService", () => {
       }),
     });
     const { authHeader } = await registerAndAuth(request);
+    await createTestUsualBreakfastTemplate(request, authHeader);
     const res = await request("http://localhost/v1/agent/runs", {
       method: "POST",
       headers: authHeader,
       body: JSON.stringify({ text: "show my usual meals", source: "flutter" }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json() as { kind: string; templates: { title: string }[] };
+    const body = (await res.json()) as {
+      kind: string;
+      templates: { title: string }[];
+    };
     expect(body.kind).toBe("templates");
-    expect(body.templates.some((template) => template.title === "Usual breakfast")).toBe(true);
+    expect(
+      body.templates.some((template) => template.title === "Usual breakfast"),
+    ).toBe(true);
   });
 
   it("maps memory lookup, history, and template mutations to explicit result kinds", async () => {
     const agentProvider = new QueueChatAgentProvider();
     const { request } = buildTestApp({ agentProvider });
     const { authHeader } = await registerAndAuth(request);
+    await createTestUsualBreakfastTemplate(request, authHeader);
 
     agentProvider.push({
-      toolCalls: [{
-        id: "call_1",
-        type: "function",
-        function: { name: "query_food_memory", arguments: JSON.stringify({ text: "usual breakfast" }) },
-      }],
+      toolCalls: [
+        {
+          id: "call_1",
+          type: "function",
+          function: {
+            name: "query_food_memory",
+            arguments: JSON.stringify({ text: "usual breakfast" }),
+          },
+        },
+      ],
       rawResponse: {},
     });
     const memory = await request("http://localhost/v1/agent/runs", {
       method: "POST",
       headers: authHeader,
-      body: JSON.stringify({ text: "look up usual breakfast memory", source: "flutter" }),
-    }).then((response) => response.json() as Promise<{ kind: string; matches: unknown[] }>);
+      body: JSON.stringify({
+        text: "look up usual breakfast memory",
+        source: "flutter",
+      }),
+    }).then(
+      (response) =>
+        response.json() as Promise<{ kind: string; matches: unknown[] }>,
+    );
     expect(memory.kind).toBe("food_memory");
     expect(memory.matches.length).toBeGreaterThan(0);
 
     agentProvider.push({
-      toolCalls: [{
-        id: "call_2",
-        type: "function",
-        function: { name: "get_meal_history", arguments: JSON.stringify({ limit: 5 }) },
-      }],
+      toolCalls: [
+        {
+          id: "call_2",
+          type: "function",
+          function: {
+            name: "get_meal_history",
+            arguments: JSON.stringify({ limit: 5 }),
+          },
+        },
+      ],
       rawResponse: {},
     });
     const history = await request("http://localhost/v1/agent/runs", {
       method: "POST",
       headers: authHeader,
       body: JSON.stringify({ text: "show meal history", source: "flutter" }),
-    }).then((response) => response.json() as Promise<{ kind: string; meals: unknown[] }>);
+    }).then(
+      (response) =>
+        response.json() as Promise<{ kind: string; meals: unknown[] }>,
+    );
     expect(history.kind).toBe("history");
     expect(history.meals).toEqual([]);
 
-    const breadItem = {
-      name: "Bread",
-      quantity: 100,
-      unit: "g",
-      calories: 265,
-      proteinGrams: 9,
-      carbsGrams: 49,
-      fatGrams: 3.2,
-      source: "generic_usda",
-    };
-
     agentProvider.push({
-      toolCalls: [{
-        id: "call_3",
-        type: "function",
-        function: {
-          name: "create_meal_template",
-          arguments: JSON.stringify({ title: "Toast", trustedAutoCommitEnabled: false, items: [breadItem], aliases: ["toast"] }),
+      toolCalls: [
+        {
+          id: "call_3",
+          type: "function",
+          function: {
+            name: "create_meal_template",
+            arguments: JSON.stringify({
+              title: "Toast",
+              trustedAutoCommitEnabled: false,
+              items: [testBreadItem],
+              aliases: ["toast"],
+            }),
+          },
         },
-      }],
+      ],
       rawResponse: {},
     });
     const created = await request("http://localhost/v1/agent/runs", {
       method: "POST",
       headers: authHeader,
       body: JSON.stringify({ text: "create usual toast", source: "flutter" }),
-    }).then((response) => response.json() as Promise<{ kind: string; template: { id: string; title: string } }>);
+    }).then(
+      (response) =>
+        response.json() as Promise<{
+          kind: string;
+          template: { id: string; title: string };
+        }>,
+    );
     expect(created.kind).toBe("template_saved");
     expect(created.template.title).toBe("Toast");
 
     agentProvider.push({
-      toolCalls: [{
-        id: "call_4",
-        type: "function",
-        function: {
-          name: "update_meal_template",
-          arguments: JSON.stringify({ templateId: created.template.id, title: "Toast updated", items: [breadItem], aliases: ["toast"] }),
+      toolCalls: [
+        {
+          id: "call_4",
+          type: "function",
+          function: {
+            name: "update_meal_template",
+            arguments: JSON.stringify({
+              templateId: created.template.id,
+              title: "Toast updated",
+              items: [testBreadItem],
+              aliases: ["toast"],
+            }),
+          },
         },
-      }],
+      ],
       rawResponse: {},
     });
     const updated = await request("http://localhost/v1/agent/runs", {
       method: "POST",
       headers: authHeader,
       body: JSON.stringify({ text: "rename toast", source: "flutter" }),
-    }).then((response) => response.json() as Promise<{ kind: string; template: { title: string } }>);
+    }).then(
+      (response) =>
+        response.json() as Promise<{
+          kind: string;
+          template: { title: string };
+        }>,
+    );
     expect(updated.kind).toBe("template_saved");
     expect(updated.template.title).toBe("Toast updated");
 
     agentProvider.push({
-      toolCalls: [{
-        id: "call_5",
-        type: "function",
-        function: { name: "delete_meal_template", arguments: JSON.stringify({ templateId: created.template.id }) },
-      }],
+      toolCalls: [
+        {
+          id: "call_5",
+          type: "function",
+          function: {
+            name: "delete_meal_template",
+            arguments: JSON.stringify({ templateId: created.template.id }),
+          },
+        },
+      ],
       rawResponse: {},
     });
     const deleted = await request("http://localhost/v1/agent/runs", {
       method: "POST",
       headers: authHeader,
-      body: JSON.stringify({ text: "delete toast usual meal", source: "flutter" }),
-    }).then((response) => response.json() as Promise<{ kind: string; deleted: boolean }>);
+      body: JSON.stringify({
+        text: "delete toast usual meal",
+        source: "flutter",
+      }),
+    }).then(
+      (response) =>
+        response.json() as Promise<{ kind: string; deleted: boolean }>,
+    );
     expect(deleted.kind).toBe("template_deleted");
     expect(deleted.deleted).toBe(true);
   });
@@ -384,11 +547,22 @@ describe("AgentService", () => {
     const agentProvider = new QueueChatAgentProvider();
     const { request } = buildTestApp({ agentProvider });
     const { authHeader } = await registerAndAuth(request);
-    const proposal = await request("http://localhost/v1/actions/propose_meal_log/execute", {
-      method: "POST",
-      headers: authHeader,
-      body: JSON.stringify({ input: { text: "Chicken and rice" }, source: "flutter" }),
-    }).then((response) => response.json() as Promise<{ output: { proposal: { id: string } } }>);
+    const proposal = await request(
+      "http://localhost/v1/actions/propose_meal_log/execute",
+      {
+        method: "POST",
+        headers: authHeader,
+        body: JSON.stringify({
+          input: {
+            text: "Add 100 grams of chicken breast and 100 grams of rice",
+          },
+          source: "flutter",
+        }),
+      },
+    ).then(
+      (response) =>
+        response.json() as Promise<{ output: { proposal: { id: string } } }>,
+    );
 
     agentProvider.push({
       toolCalls: [
@@ -397,7 +571,9 @@ describe("AgentService", () => {
           type: "function",
           function: {
             name: "commit_meal",
-            arguments: JSON.stringify({ proposalId: proposal.output.proposal.id }),
+            arguments: JSON.stringify({
+              proposalId: proposal.output.proposal.id,
+            }),
           },
         },
       ],
@@ -406,10 +582,28 @@ describe("AgentService", () => {
     const committed = await request("http://localhost/v1/agent/runs", {
       method: "POST",
       headers: authHeader,
-      body: JSON.stringify({ text: "confirm that proposal", source: "flutter" }),
+      body: JSON.stringify({
+        text: "confirm that proposal",
+        source: "flutter",
+      }),
     });
-    const committedBody = await committed.json() as { kind: string; meal: { id: string } };
+    const committedBody = (await committed.json()) as {
+      kind: string;
+      meal: { id: string; items: Array<Record<string, unknown>> };
+    };
     expect(committedBody.kind).toBe("meal_committed");
+
+    const editedItems = committedBody.meal.items.map((item) => {
+      if (item.name !== "Chicken breast") return item;
+      return {
+        ...item,
+        quantity: 200,
+        calories: 330,
+        proteinGrams: 62,
+        carbsGrams: 0,
+        fatGrams: 7.2,
+      };
+    });
 
     agentProvider.push({
       toolCalls: [
@@ -418,7 +612,10 @@ describe("AgentService", () => {
           type: "function",
           function: {
             name: "correct_meal",
-            arguments: JSON.stringify({ mealId: committedBody.meal.id, correctionText: "No, the chicken was 200 grams." }),
+            arguments: JSON.stringify({
+              mealId: committedBody.meal.id,
+              items: editedItems,
+            }),
           },
         },
       ],
@@ -427,11 +624,20 @@ describe("AgentService", () => {
     const corrected = await request("http://localhost/v1/agent/runs", {
       method: "POST",
       headers: authHeader,
-      body: JSON.stringify({ text: "No, the chicken was 200 grams.", source: "flutter" }),
+      body: JSON.stringify({
+        text: "No, the chicken was 200 grams.",
+        source: "flutter",
+      }),
     });
-    const correctedBody = await corrected.json() as { kind: string; meal: { items: { name: string; quantity: number }[] } };
+    const correctedBody = (await corrected.json()) as {
+      kind: string;
+      meal: { items: { name: string; quantity: number }[] };
+    };
     expect(correctedBody.kind).toBe("meal_corrected");
-    expect(correctedBody.meal.items.find((item) => item.name === "Chicken breast")?.quantity).toBe(200);
+    expect(
+      correctedBody.meal.items.find((item) => item.name === "Chicken breast")
+        ?.quantity,
+    ).toBe(200);
   });
 
   it("rejects unknown model-selected actions", async () => {
@@ -485,6 +691,8 @@ describe("AgentService", () => {
     });
 
     const actionCalls = await repository.listActionCalls(user.id);
-    expect(actionCalls.some((call) => call.actionId === "get_daily_summary")).toBe(true);
+    expect(
+      actionCalls.some((call) => call.actionId === "get_daily_summary"),
+    ).toBe(true);
   });
 });

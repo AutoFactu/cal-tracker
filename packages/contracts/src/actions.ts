@@ -3,12 +3,13 @@ import {
   dailySummarySchema,
   foodCandidateSchema,
   foodMentionSchema,
+  mealLabelTypeSchema,
   mealItemSchema,
   mealProposalSchema,
   mealSchema,
   mealTemplateSchema,
   nutritionSnapshotSchema,
-  uuidSchema
+  uuidSchema,
 } from "./common.js";
 import { PermissionScope } from "./permissions.js";
 
@@ -17,7 +18,7 @@ export const actionSourceSchema = z.enum([
   "internal_agent",
   "android_appfunctions",
   "ios_appintents",
-  "rest"
+  "rest",
 ]);
 
 export type ActionSource = z.infer<typeof actionSourceSchema>;
@@ -30,7 +31,7 @@ export const actionContextSchema = z.object({
   timezone: z.string(),
   locale: z.string(),
   trustedModeEnabled: z.boolean(),
-  traceId: z.string()
+  traceId: z.string(),
 });
 
 export type ActionContext = z.infer<typeof actionContextSchema>;
@@ -38,116 +39,142 @@ export type ActionContext = z.infer<typeof actionContextSchema>;
 const emptyInputSchema = z.object({}).default({});
 
 export const queryFoodMemoryInputSchema = z.object({
-  text: z.string().min(1)
+  text: z.string().min(1),
 });
 export const queryFoodMemoryOutputSchema = z.object({
-  matches: z.array(z.object({
-    id: uuidSchema,
-    label: z.string(),
-    normalizedText: z.string(),
-    confidence: z.number().min(0).max(1),
-    template: mealTemplateSchema.nullable()
-  })),
-  needsClarification: z.boolean()
+  matches: z.array(
+    z.object({
+      id: uuidSchema,
+      label: z.string(),
+      normalizedText: z.string(),
+      confidence: z.number().min(0).max(1),
+      template: mealTemplateSchema.nullable(),
+    }),
+  ),
+  needsClarification: z.boolean(),
 });
 
 export const searchNutritionDatabaseInputSchema = z.object({
   query: z.string().min(1),
-  barcode: z.string().optional()
+  barcode: z.string().optional(),
 });
 export const searchNutritionDatabaseOutputSchema = z.object({
   items: z.array(mealItemSchema),
-  candidates: z.array(foodCandidateSchema).optional()
+  candidates: z.array(foodCandidateSchema).optional(),
 });
 
 export const proposeMealLogInputSchema = z.object({
   text: z.string().min(1),
-  occurredAt: z.string().datetime().optional()
+  occurredAt: z.string().datetime().optional(),
 });
 export const proposeMealLogOutputSchema = z.object({
   proposal: mealProposalSchema.optional(),
   autoCommittedMeal: mealSchema.nullable().optional(),
   clarificationRequired: z.boolean().optional(),
+  resolvedItems: z.array(mealItemSchema).optional(),
   unresolvedMentions: z.array(foodMentionSchema).optional(),
   options: z.array(foodCandidateSchema).optional(),
-  message: z.string().optional()
+  message: z.string().optional(),
+});
+
+export const createMealProposalFromItemsInputSchema = z.object({
+  phrase: z.string().min(1),
+  title: z.string().min(1).optional(),
+  items: z.array(mealItemSchema).min(1),
+  occurredAt: z.string().datetime().optional(),
+});
+export const createMealProposalFromItemsOutputSchema = z.object({
+  proposal: mealProposalSchema,
 });
 
 export const commitMealInputSchema = z.object({
   proposalId: uuidSchema,
   occurredAt: z.string().datetime().optional(),
-  items: z.array(mealItemSchema).optional()
+  items: z.array(mealItemSchema).optional(),
+  mealLabel: z.object({
+    type: mealLabelTypeSchema,
+    label: z.string().trim().max(40).optional(),
+  }).nullable().optional(),
 });
 export const commitMealOutputSchema = z.object({
-  meal: mealSchema
+  meal: mealSchema,
 });
 
-export const correctMealInputSchema = z.object({
-  mealId: uuidSchema.optional(),
-  proposalId: uuidSchema.optional(),
-  correctionText: z.string().min(1),
-  items: z.array(mealItemSchema).optional()
-}).refine((value) => value.mealId || value.proposalId, "mealId or proposalId is required");
+export const correctMealInputSchema = z
+  .object({
+    mealId: uuidSchema.optional(),
+    proposalId: uuidSchema.optional(),
+    items: z.array(mealItemSchema).min(1),
+  })
+  .refine(
+    (value) => value.mealId || value.proposalId,
+    "mealId or proposalId is required",
+  );
 export const correctMealOutputSchema = z.object({
   proposal: mealProposalSchema.optional(),
-  meal: mealSchema.optional()
+  meal: mealSchema.optional(),
 });
 
 export const deleteMealInputSchema = z.object({
   mealId: uuidSchema,
-  confirmationToken: z.string().optional()
+  confirmationToken: z.string().optional(),
 });
 export const deleteMealOutputSchema = z.object({
   deleted: z.boolean(),
-  confirmationRequired: z.boolean()
+  confirmationRequired: z.boolean(),
 });
 
 export const getDailySummaryInputSchema = z.object({
-  date: z.string().optional()
+  date: z.string().optional(),
 });
 export const getDailySummaryOutputSchema = z.object({
-  summary: dailySummarySchema
+  summary: dailySummarySchema,
 });
 
 export const getRemainingTargetsInputSchema = getDailySummaryInputSchema;
 export const getRemainingTargetsOutputSchema = z.object({
-  remaining: nutritionSnapshotSchema
+  remaining: nutritionSnapshotSchema,
 });
 
 export const getMealHistoryInputSchema = z.object({
-  limit: z.number().int().min(1).max(100).default(25)
+  limit: z.number().int().min(1).max(100).default(25),
 });
 export const getMealHistoryOutputSchema = z.object({
-  meals: z.array(mealSchema)
+  meals: z.array(mealSchema),
 });
 
 export const getUsualMealsOutputSchema = z.object({
-  templates: z.array(mealTemplateSchema)
+  templates: z.array(mealTemplateSchema),
 });
 
 export const createMealTemplateInputSchema = z.object({
   title: z.string().min(1),
   trustedAutoCommitEnabled: z.boolean().default(false),
   items: z.array(mealItemSchema).min(1),
-  aliases: z.array(z.string()).default([])
+  aliases: z.array(z.string()).default([]),
 });
 export const createMealTemplateOutputSchema = z.object({
-  template: mealTemplateSchema
+  template: mealTemplateSchema,
 });
 
-export const updateMealTemplateInputSchema = createMealTemplateInputSchema.partial().extend({
-  templateId: uuidSchema
-});
+export const updateMealTemplateInputSchema = createMealTemplateInputSchema
+  .partial()
+  .extend({
+    templateId: uuidSchema,
+  });
 export const updateMealTemplateOutputSchema = createMealTemplateOutputSchema;
 
 export const deleteMealTemplateInputSchema = z.object({
-  templateId: uuidSchema
+  templateId: uuidSchema,
 });
 export const deleteMealTemplateOutputSchema = z.object({
-  deleted: z.boolean()
+  deleted: z.boolean(),
 });
 
-export type ConfirmationPolicy = "never" | "required" | "trusted_auto_commit_allowed";
+export type ConfirmationPolicy =
+  | "never"
+  | "required"
+  | "trusted_auto_commit_allowed";
 export type SideEffect = "none" | "proposal" | "write" | "destructive";
 export type ExecutionMode = "deterministic" | "agent_assisted";
 
@@ -175,7 +202,7 @@ export const actionDefinitions = [
     permissionScope: PermissionScope.NutritionReadMemory,
     sideEffect: "none",
     confirmationPolicy: "never",
-    executionMode: "deterministic"
+    executionMode: "deterministic",
   },
   {
     id: "search_nutrition_database",
@@ -187,19 +214,20 @@ export const actionDefinitions = [
     permissionScope: PermissionScope.NutritionReadMemory,
     sideEffect: "none",
     confirmationPolicy: "never",
-    executionMode: "deterministic"
+    executionMode: "deterministic",
   },
   {
     id: "propose_meal_log",
     version: "1.0.0",
     title: "Propose Meal Log",
-    description: "Create a meal proposal from typed or transcribed natural language.",
+    description:
+      "Create a meal proposal from typed or transcribed natural language.",
     inputSchema: proposeMealLogInputSchema,
     outputSchema: proposeMealLogOutputSchema,
     permissionScope: PermissionScope.NutritionWritePropose,
     sideEffect: "proposal",
     confirmationPolicy: "trusted_auto_commit_allowed",
-    executionMode: "agent_assisted"
+    executionMode: "agent_assisted",
   },
   {
     id: "commit_meal",
@@ -211,7 +239,20 @@ export const actionDefinitions = [
     permissionScope: PermissionScope.NutritionWriteCommit,
     sideEffect: "write",
     confirmationPolicy: "required",
-    executionMode: "deterministic"
+    executionMode: "deterministic",
+  },
+  {
+    id: "create_meal_proposal_from_items",
+    version: "1.0.0",
+    title: "Create Meal Proposal From Items",
+    description:
+      "Create a meal proposal from explicit user-selected nutrition items.",
+    inputSchema: createMealProposalFromItemsInputSchema,
+    outputSchema: createMealProposalFromItemsOutputSchema,
+    permissionScope: PermissionScope.NutritionWritePropose,
+    sideEffect: "proposal",
+    confirmationPolicy: "required",
+    executionMode: "deterministic",
   },
   {
     id: "correct_meal",
@@ -223,7 +264,7 @@ export const actionDefinitions = [
     permissionScope: PermissionScope.NutritionWriteCorrect,
     sideEffect: "write",
     confirmationPolicy: "required",
-    executionMode: "deterministic"
+    executionMode: "deterministic",
   },
   {
     id: "delete_meal",
@@ -235,7 +276,7 @@ export const actionDefinitions = [
     permissionScope: PermissionScope.NutritionWriteDelete,
     sideEffect: "destructive",
     confirmationPolicy: "required",
-    executionMode: "deterministic"
+    executionMode: "deterministic",
   },
   {
     id: "get_daily_summary",
@@ -247,7 +288,7 @@ export const actionDefinitions = [
     permissionScope: PermissionScope.NutritionReadSummary,
     sideEffect: "none",
     confirmationPolicy: "never",
-    executionMode: "deterministic"
+    executionMode: "deterministic",
   },
   {
     id: "get_remaining_targets",
@@ -259,7 +300,7 @@ export const actionDefinitions = [
     permissionScope: PermissionScope.NutritionReadSummary,
     sideEffect: "none",
     confirmationPolicy: "never",
-    executionMode: "deterministic"
+    executionMode: "deterministic",
   },
   {
     id: "get_meal_history",
@@ -271,7 +312,7 @@ export const actionDefinitions = [
     permissionScope: PermissionScope.NutritionReadHistory,
     sideEffect: "none",
     confirmationPolicy: "never",
-    executionMode: "deterministic"
+    executionMode: "deterministic",
   },
   {
     id: "get_usual_meals",
@@ -283,7 +324,7 @@ export const actionDefinitions = [
     permissionScope: PermissionScope.NutritionTemplatesRead,
     sideEffect: "none",
     confirmationPolicy: "never",
-    executionMode: "deterministic"
+    executionMode: "deterministic",
   },
   {
     id: "create_meal_template",
@@ -295,7 +336,7 @@ export const actionDefinitions = [
     permissionScope: PermissionScope.NutritionTemplatesWrite,
     sideEffect: "write",
     confirmationPolicy: "required",
-    executionMode: "deterministic"
+    executionMode: "deterministic",
   },
   {
     id: "update_meal_template",
@@ -307,7 +348,7 @@ export const actionDefinitions = [
     permissionScope: PermissionScope.NutritionTemplatesWrite,
     sideEffect: "write",
     confirmationPolicy: "required",
-    executionMode: "deterministic"
+    executionMode: "deterministic",
   },
   {
     id: "delete_meal_template",
@@ -319,10 +360,12 @@ export const actionDefinitions = [
     permissionScope: PermissionScope.NutritionTemplatesWrite,
     sideEffect: "destructive",
     confirmationPolicy: "required",
-    executionMode: "deterministic"
-  }
+    executionMode: "deterministic",
+  },
 ] satisfies ActionDefinition[];
 
 export type ActionId = (typeof actionDefinitions)[number]["id"];
 
-export const actionById = new Map(actionDefinitions.map((definition) => [definition.id, definition]));
+export const actionById = new Map(
+  actionDefinitions.map((definition) => [definition.id, definition]),
+);

@@ -7,3 +7,6 @@ coverage/
 dist/
 .env
 *.log
+data/usda/
+__pycache__/
+*.pyc

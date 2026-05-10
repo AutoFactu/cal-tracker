@@ -815,26 +815,46 @@ Vector memory is not for:
 Initial sources:
 
 ```text
-OpenFoodFacts
 USDA FoodData Central
+Open Food Facts
 custom user foods
 manual entries
 ```
 
-For Spain and Europe, OpenFoodFacts and custom foods are important. The app should also support metric units by default.
+USDA FoodData Central is the authoritative provider for single-ingredient basic foods and generic ingredient nutrition. Open Food Facts is the provider for branded, packaged, supermarket, and barcode-based products. For Spain and Europe, Open Food Facts and custom foods are important because packaged product coverage is stronger there than USDA generic data. The app should support metric units by default.
 
 Nutrition lookup priority:
 
 ```text
 1. User-confirmed meal templates and user custom foods.
-2. Barcode or exact branded product match from OpenFoodFacts.
-3. Manual user-provided nutrition values.
-4. Generic food match from USDA FoodData Central or another reliable generic nutrition database.
-5. Backend-calculated estimates from known ingredients, quantities, and unit conversions.
-6. LLM-only estimate only as a low-confidence fallback, requiring user confirmation.
+2. USDA FoodData Central cached generic ingredient match for basic single-ingredient foods.
+3. USDA FoodData Central live lookup when the generic ingredient is not cached.
+4. Open Food Facts barcode or exact branded/packaged product match.
+5. Manual user-provided nutrition values for explicit custom foods.
 ```
 
-The LLM must not be treated as an authoritative nutrition database. If the backend cannot resolve nutrition values from trusted sources, the proposal must clearly expose uncertainty and require confirmation or correction.
+The backend must not use LLM-only nutrition values or unprovenanced seed values as authoritative nutrition data. If the backend cannot resolve nutrition values from USDA FoodData Central, Open Food Facts, user custom foods, or user-confirmed templates, the proposal must ask for clarification or explicit manual nutrition values rather than inventing calories/macros.
+
+Provider roles:
+
+| Food type | Provider |
+| --- | --- |
+| Single-ingredient generic foods such as eggs, rice, chicken, oats, vegetables, fruit, oil, butter, and milk | USDA FoodData Central |
+| Generic household/count units such as cup rice, one egg, one banana, tbsp oil | USDA FoodData Central food portion metadata |
+| Branded packaged products, supermarket products, barcode scans, label nutrition | Open Food Facts |
+| User recipes, personal foods, usual meals | User-confirmed custom foods/templates |
+
+Food rows imported into the database must preserve provider provenance:
+
+* `external_source`,
+* `external_id`,
+* source URL when available,
+* license,
+* fetch/import timestamp,
+* normalized serving gram weight,
+* provider portion metadata when used for non-metric unit conversion.
+
+Rows without provider provenance may exist only as explicit user custom foods or test fixtures. They must not be labeled as USDA or Open Food Facts data.
 
 The system must support:
 
@@ -1046,21 +1066,22 @@ Priority order:
 
 ```text
 1. User-confirmed meal templates and user custom foods.
-2. Barcode or exact branded product match from OpenFoodFacts.
-3. Manual user-provided nutrition values.
-4. Generic food match from USDA FoodData Central or another reliable generic nutrition database.
-5. Backend-calculated estimates from known ingredients, quantities, and unit conversions.
-6. LLM-only estimate only as a low-confidence fallback, requiring user confirmation.
+2. USDA FoodData Central cached generic ingredient match for basic single-ingredient foods.
+3. USDA FoodData Central live lookup when the generic ingredient is not cached.
+4. Open Food Facts barcode or exact branded/packaged product match.
+5. Manual user-provided nutrition values for explicit custom foods.
 ```
 
 Rules:
 
 * User-confirmed templates and custom foods override public databases for that user.
-* OpenFoodFacts is preferred for branded packaged foods, especially Spain/EU products.
-* USDA or equivalent generic databases are preferred for generic whole foods such as eggs, chicken, rice, oats, and vegetables.
+* USDA FoodData Central is the authoritative public source for generic whole foods and single ingredients such as eggs, chicken, rice, oats, vegetables, fruit, dairy, oils, and basic pantry ingredients.
+* USDA FoodData Central portion metadata is the authority for validating household/count units for generic foods.
+* Open Food Facts is preferred for branded packaged foods, supermarket products, and barcode flows, especially Spain/EU products.
 * Manual user-provided values can be used when the user explicitly enters calories/macros or creates a custom food.
-* Backend estimates must be traceable to ingredients, quantities, and conversion assumptions.
-* LLM-only nutrition values must be marked low confidence and must not be committed without user confirmation.
+* Backend calculations must be traceable to provider facts, user-provided values, quantities, and conversion assumptions.
+* LLM-only nutrition values and unprovenanced seed nutrition values must not be used as authoritative meal-item nutrition.
+* Cached provider data must store provenance fields and must be refreshable.
 
 ### Production Database Hosting
 

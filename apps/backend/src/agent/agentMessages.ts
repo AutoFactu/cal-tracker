@@ -14,7 +14,7 @@ Rules:
 - For questions about calories left, use get_remaining_targets.
 - For history lookup, use get_meal_history.
 - For deletion, use delete_meal (the user will be asked to confirm).
-- For corrections, use correct_meal.
+- For corrections, use correct_meal only when you can provide the complete corrected ingredient item list. Do not send free-text correction instructions.
 - Do not invent nutrition facts. Use the provided tools.
 - If the request is ambiguous, ask for clarification instead of guessing.`,
   };

@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+const stringBooleanSchema = z.preprocess((value) => {
+  if (typeof value !== "string") return value;
+  if (["1", "true", "yes", "on"].includes(value.toLowerCase())) return true;
+  if (["0", "false", "no", "off"].includes(value.toLowerCase())) return false;
+  return value;
+}, z.boolean());
+
 const envSchema = z.object({
   DATABASE_URL: z.string().url(),
   JWT_ACCESS_SECRET: z.string().min(32),
@@ -10,6 +17,7 @@ const envSchema = z.object({
   STT_MODEL: z.string().min(1).default("whisper-large-v3-turbo"),
   STT_BASE_URL: z.string().url().default("https://api.groq.com/openai/v1"),
   USDA_FDC_API_KEY: z.string().optional(),
+  USDA_LIVE_FALLBACK_ENABLED: stringBooleanSchema.default(true),
   OPENFOODFACTS_BASE_URL: z.string().url().default("https://world.openfoodfacts.org"),
   OPENFOODFACTS_USER_AGENT: z.string().min(1).default("CalTracker/0.1 (development)"),
   FOOD_RESOLVER_MIN_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.75),
@@ -43,6 +51,7 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
         STT_MODEL: "test-stt-model",
         STT_BASE_URL: "http://localhost:9999",
         USDA_FDC_API_KEY: "test-usda-key",
+        USDA_LIVE_FALLBACK_ENABLED: "true",
         OPENFOODFACTS_BASE_URL: "http://localhost:9998",
         OPENFOODFACTS_USER_AGENT: "CalTrackerTests/1.0",
         FOOD_RESOLVER_MIN_CONFIDENCE: "0.75",

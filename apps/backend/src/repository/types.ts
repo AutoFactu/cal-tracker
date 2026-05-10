@@ -3,6 +3,7 @@ import type {
   DailySummary,
   Meal,
   MealItem,
+  MealLabel,
   MealProposal,
   MealTemplate,
   NutritionSnapshot,
@@ -38,11 +39,35 @@ export type FoodItemRecord = {
   sourceUrl?: string;
   license?: string;
   fetchedAt?: string;
+  dataType?: string;
+  foodCategory?: string;
+  publicationDate?: string;
+  ndbNumber?: string;
+  foodKey?: string;
+  ingredients?: string;
+  marketCountry?: string;
+  householdServingFulltext?: string;
+  nutrients?: Record<string, unknown>;
+  portions?: FoodPortionRecord[];
   servingGrams: number;
   calories: number;
   proteinGrams: number;
   carbsGrams: number;
   fatGrams: number;
+};
+
+export type FoodPortionRecord = {
+  id: string;
+  foodItemId: string;
+  usdaPortionId?: string;
+  amount?: number;
+  unit?: string;
+  modifier?: string;
+  description?: string;
+  gramWeight: number;
+  normalizedAliases: string[];
+  kind: string;
+  sourceDescription: string;
 };
 
 export type MemoryMatch = {
@@ -102,7 +127,7 @@ export interface AppRepository {
   createProposal(userId: string, proposal: Omit<MealProposal, "id" | "createdAt">): Promise<MealProposal>;
   getProposal(userId: string, proposalId: string): Promise<MealProposal | undefined>;
   updateProposal(userId: string, proposal: MealProposal): Promise<MealProposal>;
-  createMealFromProposal(userId: string, proposal: MealProposal, occurredAt: string, items?: MealItem[]): Promise<Meal>;
+  createMealFromProposal(userId: string, proposal: MealProposal, occurredAt: string, items?: MealItem[], mealLabel?: MealLabel | null): Promise<Meal>;
   updateMeal(userId: string, meal: Meal): Promise<Meal>;
   softDeleteMeal(userId: string, mealId: string): Promise<boolean>;
   getDailySummary(userId: string, date: string): Promise<DailySummary>;

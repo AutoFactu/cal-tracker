@@ -1,5 +1,5 @@
 import postgres, { type Sql } from "postgres";
-import { defaultUserScopes, type Meal, type MealItem, type MealProposal, type MealTemplate, type NutritionSnapshot, type PermissionScope } from "@cal-tracker/contracts";
+import { defaultUserScopes, type Meal, type MealItem, type MealLabel, type MealProposal, type MealTemplate, type NutritionSnapshot, type PermissionScope } from "@cal-tracker/contracts";
 import { newId } from "../utils/ids.js";
 import { normalizeText } from "../utils/normalize.js";
 import { subtractNutrition, sumNutrition } from "../utils/nutrition.js";
@@ -8,6 +8,7 @@ import type {
   AppRepository,
   AuditEventRecord,
   FoodItemRecord,
+  FoodPortionRecord,
   MemoryMatch,
   StoredSession,
   StoredUser
@@ -32,7 +33,6 @@ export class PostgresRepository implements AppRepository {
       VALUES (${row.id}, 2200, 160, 240, 70)
     `;
     const user = this.mapUser(row, input.passwordHash, input.scopes);
-    await this.createDefaultTemplate(user.id);
     return user;
   }
 
@@ -122,7 +122,7 @@ export class PostgresRepository implements AppRepository {
 
   async listFoods(userId: string): Promise<FoodItemRecord[]> {
     const rows = await this.sql`SELECT * FROM food_items WHERE user_id IS NULL OR user_id = ${userId}`;
-    return rows.map(mapFood);
+    return this.mapFoodsWithPortions(rows);
   }
 
   async searchFoods(userId: string, query: string, barcode?: string): Promise<FoodItemRecord[]> {
@@ -130,16 +130,38 @@ export class PostgresRepository implements AppRepository {
     const rows = barcode
       ? await this.sql`SELECT * FROM food_items WHERE (user_id IS NULL OR user_id = ${userId}) AND barcode = ${barcode}`
       : await this.sql`
-          SELECT * FROM food_items
-          WHERE (user_id IS NULL OR user_id = ${userId})
+          WITH food_query AS (SELECT ${normalized}::text AS q)
+          SELECT food_items.*,
+                 GREATEST(
+                   similarity(food_items.normalized_name, food_query.q),
+                   similarity(COALESCE(food_items.canonical_name, ''), food_query.q),
+                   similarity(COALESCE(food_items.brand, ''), food_query.q)
+                 ) AS search_score
+          FROM food_items, food_query
+          WHERE (food_items.user_id IS NULL OR food_items.user_id = ${userId})
             AND (
-              ${normalized} LIKE '%' || normalized_name || '%'
-              OR normalized_name LIKE '%' || ${normalized} || '%'
-              OR ${normalized} LIKE '%' || COALESCE(canonical_name, normalized_name) || '%'
-              OR COALESCE(canonical_name, normalized_name) LIKE '%' || ${normalized} || '%'
+              food_items.normalized_name % food_query.q
+              OR COALESCE(food_items.canonical_name, '') % food_query.q
+              OR COALESCE(food_items.brand, '') % food_query.q
+              OR food_query.q LIKE '%' || food_items.normalized_name || '%'
+              OR food_items.normalized_name LIKE '%' || food_query.q || '%'
+              OR food_query.q LIKE '%' || COALESCE(food_items.canonical_name, food_items.normalized_name) || '%'
+              OR COALESCE(food_items.canonical_name, food_items.normalized_name) LIKE '%' || food_query.q || '%'
             )
+          ORDER BY
+            CASE WHEN food_items.user_id = ${userId} THEN 0 ELSE 1 END,
+            CASE food_items.data_type
+              WHEN 'SR Legacy' THEN 0
+              WHEN 'Foundation' THEN 1
+              WHEN 'Branded' THEN 3
+              ELSE 2
+            END,
+            search_score DESC,
+            char_length(food_items.normalized_name),
+            food_items.name
+          LIMIT 50
         `;
-    return rows.map(mapFood);
+    return this.mapFoodsWithPortions(rows);
   }
 
   async upsertFoodItem(input: Omit<FoodItemRecord, "id">): Promise<FoodItemRecord> {
@@ -173,6 +195,15 @@ export class PostgresRepository implements AppRepository {
             source_url = ${input.sourceUrl ?? null},
             license = ${input.license ?? null},
             fetched_at = ${input.fetchedAt ?? new Date().toISOString()},
+            data_type = ${input.dataType ?? null},
+            food_category = ${input.foodCategory ?? null},
+            publication_date = ${input.publicationDate ?? null},
+            ndb_number = ${input.ndbNumber ?? null},
+            food_key = ${input.foodKey ?? null},
+            ingredients = ${input.ingredients ?? null},
+            market_country = ${input.marketCountry ?? null},
+            household_serving_fulltext = ${input.householdServingFulltext ?? null},
+            nutrients_json = ${this.sql.json((input.nutrients ?? {}) as never)},
             serving_grams = ${input.servingGrams},
             calories = ${input.calories},
             protein_grams = ${input.proteinGrams},
@@ -187,6 +218,8 @@ export class PostgresRepository implements AppRepository {
       INSERT INTO food_items (
         user_id, name, normalized_name, canonical_name, brand, barcode, source,
         external_source, external_id, source_url, license, fetched_at,
+        data_type, food_category, publication_date, ndb_number, food_key,
+        ingredients, market_country, household_serving_fulltext, nutrients_json,
         serving_grams, calories, protein_grams, carbs_grams, fat_grams
       )
       VALUES (
@@ -194,6 +227,10 @@ export class PostgresRepository implements AppRepository {
         ${input.brand ?? null}, ${input.barcode ?? null}, ${input.source},
         ${input.externalSource ?? null}, ${input.externalId ?? null}, ${input.sourceUrl ?? null},
         ${input.license ?? null}, ${input.fetchedAt ?? new Date().toISOString()},
+        ${input.dataType ?? null}, ${input.foodCategory ?? null}, ${input.publicationDate ?? null},
+        ${input.ndbNumber ?? null}, ${input.foodKey ?? null}, ${input.ingredients ?? null},
+        ${input.marketCountry ?? null}, ${input.householdServingFulltext ?? null},
+        ${this.sql.json((input.nutrients ?? {}) as never)},
         ${input.servingGrams}, ${input.calories}, ${input.proteinGrams}, ${input.carbsGrams}, ${input.fatGrams}
       )
       RETURNING *
@@ -254,13 +291,13 @@ export class PostgresRepository implements AppRepository {
     return proposal;
   }
 
-  async createMealFromProposal(userId: string, proposal: MealProposal, occurredAt: string, items = proposal.items): Promise<Meal> {
+  async createMealFromProposal(userId: string, proposal: MealProposal, occurredAt: string, items = proposal.items, mealLabel?: MealLabel | null): Promise<Meal> {
     return this.sql.begin(async (tx) => {
       const id = newId();
       const nutrition = sumNutrition(items);
       const [row] = await tx`
-        INSERT INTO meals (id, user_id, proposal_id, title, occurred_at, calories, protein_grams, carbs_grams, fat_grams)
-        VALUES (${id}, ${userId}, ${proposal.id}, ${proposal.title}, ${occurredAt}, ${nutrition.calories}, ${nutrition.proteinGrams}, ${nutrition.carbsGrams}, ${nutrition.fatGrams})
+        INSERT INTO meals (id, user_id, proposal_id, title, occurred_at, meal_type, meal_type_label, calories, protein_grams, carbs_grams, fat_grams)
+        VALUES (${id}, ${userId}, ${proposal.id}, ${proposal.title}, ${occurredAt}, ${mealLabel?.type ?? null}, ${mealLabel?.label ?? null}, ${nutrition.calories}, ${nutrition.proteinGrams}, ${nutrition.carbsGrams}, ${nutrition.fatGrams})
         RETURNING *
       `;
       for (const item of items) await insertMealItem(tx, id, item);
@@ -396,28 +433,13 @@ export class PostgresRepository implements AppRepository {
     return rows.map(mapAuditEvent);
   }
 
-  private async createDefaultTemplate(userId: string): Promise<void> {
-    const foods = await this.listFoods(userId);
-    const items: MealItem[] = [
-      { name: "Oats", quantity: 60, unit: "g", calories: 233, proteinGrams: 10.1, carbsGrams: 39.8, fatGrams: 4.1, source: foods.find((food) => food.normalizedName === "oats")?.source ?? "generic_usda" },
-      { name: "Milk", quantity: 250, unit: "ml", calories: 122, proteinGrams: 8.1, carbsGrams: 12, fatGrams: 4.8, source: "generic_usda" },
-      { name: "Egg", quantity: 2, unit: "egg", calories: 144, proteinGrams: 12.6, carbsGrams: 0.8, fatGrams: 9.6, source: "generic_usda" }
-    ];
-    await this.createTemplate(userId, {
-      title: "Usual breakfast",
-      trustedAutoCommitEnabled: false,
-      nutrition: sumNutrition(items),
-      items,
-      aliases: ["usual breakfast", "normal breakfast"]
-    });
-  }
-
   private async mapMeal(row: Record<string, unknown>, sqlClient: Sql | any = this.sql): Promise<Meal> {
     const items = await sqlClient`SELECT * FROM meal_items WHERE meal_id = ${row.id as string}`;
     return {
       id: row.id as string,
       title: row.title as string,
       occurredAt: toIso(row.occurred_at),
+      mealLabel: mapMealLabel(row),
       nutrition: mapNutrition(row),
       items: items.map(mapItem),
       createdAt: toIso(row.created_at),
@@ -458,6 +480,25 @@ export class PostgresRepository implements AppRepository {
   private async getTemplateById(userId: string, templateId: string): Promise<MealTemplate | null> {
     const [row] = await this.sql`SELECT * FROM meal_templates WHERE id = ${templateId} AND user_id = ${userId} AND deleted_at IS NULL`;
     return row ? this.mapTemplate(row) : null;
+  }
+
+  private async mapFoodsWithPortions(rows: Record<string, unknown>[]): Promise<FoodItemRecord[]> {
+    if (rows.length === 0) return [];
+    const foods = rows.map(mapFood);
+    const portions = await this.sql`
+      SELECT *
+      FROM food_portions
+      WHERE food_item_id IN ${this.sql(foods.map((food) => food.id))}
+      ORDER BY food_item_id, gram_weight, source_description
+    `;
+    const byFoodId = new Map<string, FoodPortionRecord[]>();
+    for (const row of portions) {
+      const portion = mapFoodPortion(row);
+      const list = byFoodId.get(portion.foodItemId) ?? [];
+      list.push(portion);
+      byFoodId.set(portion.foodItemId, list);
+    }
+    return foods.map((food) => ({ ...food, portions: byFoodId.get(food.id) ?? [] }));
   }
 
   private mapUser(row: Record<string, unknown>, passwordHash: string, scopes: PermissionScope[]): StoredUser {
@@ -518,23 +559,49 @@ async function insertTemplateItem(sql: Sql | any, templateId: string, item: Meal
 function mapFood(row: Record<string, unknown>): FoodItemRecord {
   return {
     id: row.id as string,
-    userId: row.user_id as string | undefined,
+    userId: optionalString(row.user_id),
     name: row.name as string,
     normalizedName: row.normalized_name as string,
-    canonicalName: row.canonical_name as string | undefined,
-    brand: row.brand as string | undefined,
-    barcode: row.barcode as string | undefined,
+    canonicalName: optionalString(row.canonical_name),
+    brand: optionalString(row.brand),
+    barcode: optionalString(row.barcode),
     source: row.source as string,
-    externalSource: row.external_source as string | undefined,
-    externalId: row.external_id as string | undefined,
-    sourceUrl: row.source_url as string | undefined,
-    license: row.license as string | undefined,
+    externalSource: optionalString(row.external_source),
+    externalId: optionalString(row.external_id),
+    sourceUrl: optionalString(row.source_url),
+    license: optionalString(row.license),
     fetchedAt: row.fetched_at ? toIso(row.fetched_at) : undefined,
+    dataType: optionalString(row.data_type),
+    foodCategory: optionalString(row.food_category),
+    publicationDate: row.publication_date ? toDateOnly(row.publication_date) : undefined,
+    ndbNumber: optionalString(row.ndb_number),
+    foodKey: optionalString(row.food_key),
+    ingredients: optionalString(row.ingredients),
+    marketCountry: optionalString(row.market_country),
+    householdServingFulltext: optionalString(row.household_serving_fulltext),
+    nutrients: isRecord(row.nutrients_json) ? row.nutrients_json : undefined,
+    portions: [],
     servingGrams: Number(row.serving_grams),
     calories: Number(row.calories),
     proteinGrams: Number(row.protein_grams),
     carbsGrams: Number(row.carbs_grams),
     fatGrams: Number(row.fat_grams)
+  };
+}
+
+function mapFoodPortion(row: Record<string, unknown>): FoodPortionRecord {
+  return {
+    id: row.id as string,
+    foodItemId: row.food_item_id as string,
+    usdaPortionId: optionalString(row.usda_portion_id),
+    amount: row.amount == null ? undefined : Number(row.amount),
+    unit: optionalString(row.unit),
+    modifier: optionalString(row.modifier),
+    description: optionalString(row.description),
+    gramWeight: Number(row.gram_weight),
+    normalizedAliases: Array.isArray(row.normalized_aliases) ? row.normalized_aliases.map(String) : [],
+    kind: (row.kind as string | undefined) ?? "serving",
+    sourceDescription: row.source_description as string
   };
 }
 
@@ -545,6 +612,12 @@ function mapNutrition(row: Record<string, unknown>): NutritionSnapshot {
     carbsGrams: Number(row.carbs_grams),
     fatGrams: Number(row.fat_grams)
   };
+}
+
+function mapMealLabel(row: Record<string, unknown>): MealLabel | null {
+  const type = row.meal_type as MealLabel["type"] | null | undefined;
+  const label = row.meal_type_label as string | null | undefined;
+  return type && label ? { type, label } : null;
 }
 
 function mapItem(row: Record<string, unknown>): MealItem {
@@ -609,4 +682,16 @@ function mapAuditEvent(row: Record<string, unknown>): AuditEventRecord {
 
 function toIso(value: unknown): string {
   return value instanceof Date ? value.toISOString() : new Date(value as string).toISOString();
+}
+
+function toDateOnly(value: unknown): string {
+  return value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

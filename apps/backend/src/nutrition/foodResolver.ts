@@ -1,5 +1,10 @@
-import type { FoodCandidateGroup, FoodMention, MealItem } from "@cal-tracker/contracts";
-import type { AppRepository, FoodItemRecord } from "../repository/types.js";
+import type {
+  FoodCandidateGroup,
+  FoodMention,
+  FoodPortionChoice,
+  MealItem,
+} from "@cal-tracker/contracts";
+import type { AppRepository, FoodItemRecord, FoodPortionRecord } from "../repository/types.js";
 import { normalizeText } from "../utils/normalize.js";
 import { scaleFood } from "../utils/nutrition.js";
 
@@ -16,28 +21,77 @@ export interface FoodTextExtractor {
 
 export interface FoodDataProvider {
   readonly id: string;
-  resolve(userId: string, mention: FoodMention): Promise<MealItem[]>;
+  resolve(
+    userId: string,
+    mention: FoodMention,
+  ): Promise<MealItem[] | FoodProviderResolution>;
 }
+
+type UnitKind = NonNullable<FoodMention["unitKind"]>;
+
+export type FoodProviderResolution = {
+  items: MealItem[];
+  reason?: FoodCandidateGroup["reason"];
+  portionOptions?: FoodPortionChoice[];
+};
+
+type PortionKind = NonNullable<FoodPortionChoice["kind"]>;
+type PortionSize =
+  | "extra small"
+  | "small"
+  | "medium"
+  | "large"
+  | "extra large"
+  | "jumbo";
+
+type PortionOption = {
+  unitName: string;
+  aliases: string[];
+  gramWeight: number;
+  sourceDescription: string;
+  externalFoodId?: string;
+  kind: PortionKind;
+  size?: PortionSize;
+  shape?: string;
+};
+
+const resolvedGramsSymbol = Symbol("resolvedGrams");
+const localCandidateSymbol = Symbol("localCandidate");
+type MealItemWithResolvedGrams = MealItem & { [resolvedGramsSymbol]?: number };
+type MealItemWithLocalMarker = MealItem & { [localCandidateSymbol]?: boolean };
 
 export class FoodResolver {
   constructor(
     private readonly extractor: FoodTextExtractor,
     private readonly providers: FoodDataProvider[],
     private readonly repository: AppRepository,
-    private readonly minConfidence: number
+    private readonly minConfidence: number,
   ) {}
 
-  async resolveMealText(userId: string, text: string): Promise<FoodResolutionResult> {
+  async resolveMealText(
+    userId: string,
+    text: string,
+  ): Promise<FoodResolutionResult> {
     const mentions = await this.extractor.extract(text);
     const items: MealItem[] = [];
     const unresolvedMentions: FoodMention[] = [];
     const candidateGroups: FoodCandidateGroup[] = [];
 
     for (const mention of mentions) {
-      const candidates = await this.resolveMention(userId, mention);
-      candidateGroups.push({ mention, candidates });
+      const resolution = await this.resolveMention(userId, mention);
+      const candidates = resolution.candidates;
+      candidateGroups.push({
+        mention,
+        candidates,
+        reason: candidates.length === 0 ? resolution.reason : undefined,
+        portionOptions:
+          candidates.length === 0 ? resolution.portionOptions : undefined,
+      });
       const selected = candidates[0];
-      if (!selected || (selected.confidence ?? mention.confidence) < this.minConfidence) {
+      if (
+        !selected ||
+        (selected.confidence ?? mention.confidence) < this.minConfidence
+      ) {
         unresolvedMentions.push(mention);
         continue;
       }
@@ -49,21 +103,30 @@ export class FoodResolver {
       items,
       unresolvedMentions,
       candidateGroups,
-      clarificationRequired: mentions.length === 0 || unresolvedMentions.length > 0
+      clarificationRequired:
+        mentions.length === 0 || unresolvedMentions.length > 0,
     };
   }
 
-  async search(userId: string, query: string, barcode?: string): Promise<MealItem[]> {
+  async search(
+    userId: string,
+    query: string,
+    barcode?: string,
+  ): Promise<MealItem[]> {
     const mention: FoodMention = {
       originalText: query,
-      canonicalEnglishName: normalizeAlias(query),
+      canonicalEnglishName: normalizeFoodName(query),
       quantity: 100,
       unit: "g",
+      rawUnitText: "g",
+      unitKind: "metric",
       barcode,
       confidence: 0.95,
-      marketProduct: Boolean(barcode)
+      marketProduct: Boolean(barcode),
     };
-    const candidates = await this.resolveMention(userId, mention, { includeMarketSearch: true });
+    const { candidates } = await this.resolveMention(userId, mention, {
+      includeMarketSearch: true,
+    });
     for (const candidate of candidates.slice(0, 3)) {
       await this.cacheExternalCandidate(candidate);
     }
@@ -73,26 +136,63 @@ export class FoodResolver {
   private async resolveMention(
     userId: string,
     mention: FoodMention,
-    options: { includeMarketSearch?: boolean } = {}
-  ): Promise<MealItem[]> {
+    options: { includeMarketSearch?: boolean } = {},
+  ): Promise<{
+    candidates: MealItem[];
+    reason?: FoodCandidateGroup["reason"];
+    portionOptions?: FoodPortionChoice[];
+  }> {
     const candidates: MealItem[] = [];
+    let reason: FoodCandidateGroup["reason"] | undefined;
+    let portionOptions: FoodPortionChoice[] | undefined;
     for (const provider of this.providers) {
-      if (provider.id === "openfoodfacts" && !options.includeMarketSearch && !mention.barcode && !mention.brand && !mention.marketProduct) {
+      if (
+        provider.id === "openfoodfacts" &&
+        !options.includeMarketSearch &&
+        !mention.barcode &&
+        !mention.brand &&
+        !mention.marketProduct
+      ) {
         continue;
       }
-      let resolved: MealItem[];
+      let resolved: FoodProviderResolution;
       try {
-        resolved = await provider.resolve(userId, mention);
+        resolved = normalizeProviderResolution(
+          await provider.resolve(userId, mention),
+        );
       } catch {
-        resolved = [];
+        resolved = { items: [] };
       }
-      candidates.push(...resolved);
-      if (resolved.some((item) => (item.confidence ?? 0) >= this.minConfidence)) break;
+      if (resolved.items.length === 0 && resolved.reason) {
+        if (
+          !reason ||
+          resolved.reason === "ambiguous_portion" ||
+          resolved.portionOptions?.length
+        ) {
+          reason = resolved.reason;
+          portionOptions = resolved.portionOptions ?? portionOptions;
+        }
+      }
+      candidates.push(...resolved.items);
+      if (
+        resolved.items.some(
+          (item) => (item.confidence ?? 0) >= this.minConfidence,
+        )
+      )
+        break;
     }
-    return candidates.sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+    candidates.sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+    if (
+      candidates.length === 0 &&
+      !reason &&
+      requiresPortionValidation(mention)
+    )
+      reason = "unsupported_unit";
+    return { candidates, reason, portionOptions };
   }
 
   private async cacheExternalCandidate(item: MealItem): Promise<void> {
+    if ((item as MealItemWithLocalMarker)[localCandidateSymbol]) return;
     if (!item.externalSource || !item.externalId) return;
     await this.repository.upsertFoodItem({
       name: item.name,
@@ -104,21 +204,36 @@ export class FoodResolver {
       sourceUrl: item.sourceUrl,
       license: item.license,
       fetchedAt: new Date().toISOString(),
-      servingGrams: item.unit === "g" ? item.quantity : 100,
+      servingGrams: servingGramsForMealItem(item),
       calories: item.calories,
       proteinGrams: item.proteinGrams,
       carbsGrams: item.carbsGrams,
-      fatGrams: item.fatGrams
+      fatGrams: item.fatGrams,
     });
   }
+}
+
+function servingGramsForMealItem(item: MealItem): number {
+  const grams = item.resolvedGrams ?? resolvedGrams(item);
+  if (grams) return grams;
+  if (item.unit === "g") return item.quantity;
+  const fallbackPortion = seededFallbackPortionForMention({
+    originalText: item.originalText ?? item.name,
+    canonicalEnglishName: item.canonicalName ?? item.name,
+    quantity: item.quantity,
+    unit: item.unit,
+    confidence: item.confidence ?? 0.8,
+    marketProduct: false,
+  });
+  return (fallbackPortion?.gramWeight ?? 100) * item.quantity;
 }
 
 export class DeterministicFoodTextExtractor implements FoodTextExtractor {
   async extract(text: string): Promise<FoodMention[]> {
     const normalized = normalizeText(text);
-    const mentions = extractQuantityMentions(normalized);
-    if (mentions.length > 0) return mentions;
-    return extractUnquantifiedMentions(normalized);
+    const measuredMentions = extractQuantityMentions(normalized);
+    const countedMentions = extractCountMentions(normalized);
+    return mergeDuplicateMentions([...measuredMentions, ...countedMentions]);
   }
 }
 
@@ -127,41 +242,57 @@ export class OpenRouterFoodTextExtractor implements FoodTextExtractor {
     private readonly apiKey: string,
     private readonly model: string,
     private readonly baseUrl = "https://openrouter.ai/api/v1",
-    private readonly timeoutMs = 10000
+    private readonly timeoutMs = 25000,
   ) {}
 
   async extract(text: string): Promise<FoodMention[]> {
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: "POST",
-      signal: timeoutSignal(this.timeoutMs),
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: this.model,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content: [
-              "Extract foods from meal text as JSON.",
-              "Translate every food name to English in canonicalEnglishName.",
-              "Return {\"mentions\":[{\"originalText\":\"...\",\"canonicalEnglishName\":\"...\",\"quantity\":100,\"unit\":\"g\",\"confidence\":0.9,\"marketProduct\":false}]}",
-              "Use grams when the user gives gram quantities. Do not invent nutrition values."
-            ].join(" ")
-          },
-          { role: "user", content: text }
-        ]
-      })
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        signal: timeoutSignal(this.timeoutMs),
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: this.model,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content: [
+                "Extract foods from meal text as strict JSON.",
+                "For every food, preserve the user's exact food phrase in originalText.",
+                "Translate each food name into a generic English USDA FoodData Central search term in canonicalEnglishName.",
+                "Use common generic food names, not brands, recipes, or nutrition estimates.",
+                'Return {"mentions":[{"originalText":"...","canonicalEnglishName":"...","quantity":100,"unit":"g","rawUnitText":"grams","unitKind":"metric","portionDescriptorRaw":"extra large","portionDescriptor":"extra large","confidence":0.9,"marketProduct":false}]}',
+                "Use the text only to parse quantity, raw unit, and food name; do not decide whether a non-metric unit is valid.",
+                "Use grams when the user gives gram quantities.",
+                "Use household for explicit measures like cup, tbsp, slice, breast, or egg.",
+                "Use implicit_count when the user gives only a number and food name, for example one egg, 1 banana, or 1 rice.",
+                "Preserve count-size descriptors such as small, medium, large, extra large, XL, and jumbo.",
+                "Do not invent nutrition values or calories.",
+              ].join(" "),
+            },
+            { role: "user", content: text },
+          ],
+        }),
+      });
+    } catch {
+      return [];
+    }
     if (!response.ok) return [];
-    const json = await response.json() as { choices?: Array<{ message?: { content?: string | null } }> };
+    const json = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string | null } }>;
+    };
     const content = json.choices?.[0]?.message?.content;
     if (!content) return [];
     try {
       const parsed = JSON.parse(content) as { mentions?: unknown[] };
-      return (parsed.mentions ?? []).map(parseMention).filter((mention): mention is FoodMention => Boolean(mention));
+      return (parsed.mentions ?? [])
+        .map(parseMention)
+        .filter((mention): mention is FoodMention => Boolean(mention));
     } catch {
       return [];
     }
@@ -183,15 +314,94 @@ export class CompositeFoodTextExtractor implements FoodTextExtractor {
 export class LocalFoodDataProvider implements FoodDataProvider {
   readonly id = "local";
 
-  constructor(private readonly repository: AppRepository) {}
+  constructor(
+    private readonly repository: AppRepository,
+    private readonly options: { allowSeededPortionFallback?: boolean } = {},
+  ) {}
 
-  async resolve(userId: string, mention: FoodMention): Promise<MealItem[]> {
-    const foods = await this.repository.searchFoods(userId, mention.canonicalEnglishName, mention.barcode);
-    return foods.map((food) => itemFromFood(food, mention, {
-      confidence: localConfidence(food, mention),
-      source: food.source
-    }));
+  async resolve(
+    userId: string,
+    mention: FoodMention,
+  ): Promise<FoodProviderResolution> {
+    const foods = await this.repository.searchFoods(
+      userId,
+      mention.canonicalEnglishName,
+      mention.barcode,
+    );
+    const compatibleFoods = foods
+      .filter((food) => cachedFoodIsCompatible(food, mention))
+      .sort((a, b) => localFoodPriority(a, mention) - localFoodPriority(b, mention));
+    const items: MealItem[] = [];
+    let reason: FoodCandidateGroup["reason"] | undefined;
+    let portionOptions: FoodPortionChoice[] | undefined;
+
+    for (const food of compatibleFoods) {
+      const localPortionOptions = portionOptionsFromFoodPortions(
+        food.portions ?? [],
+        food.externalId,
+      );
+      const item = itemFromFood(food, mention, {
+          confidence: localConfidence(food, mention),
+          source: food.source,
+          portionOptions: localPortionOptions,
+          allowSeededPortionFallback: this.options.allowSeededPortionFallback,
+      });
+      if (item) {
+        items.push(markLocalCandidate(item));
+        continue;
+      }
+      if (requiresPortionValidation(mention) && localPortionOptions.length > 0) {
+        const portionResolution = resolvePortionForMention(
+          mention,
+          localPortionOptions,
+        );
+        reason ??= portionResolution.reason;
+        portionOptions ??= portionResolution.choices;
+      }
+    }
+
+    return {
+      items,
+      reason:
+        foods.length > 0 &&
+        items.length === 0 &&
+        requiresPortionValidation(mention)
+          ? (reason ?? "unsupported_unit")
+          : undefined,
+      portionOptions,
+    };
   }
+}
+
+function cachedFoodIsCompatible(
+  food: FoodItemRecord,
+  mention: FoodMention,
+): boolean {
+  if (isBrandedFood(food) && !hasMarketProductIntent(mention)) return false;
+  if (food.externalSource !== "usda_fdc") return true;
+  return Boolean(scoreUsdaCandidate(usdaFoodFromRecord(food), mention));
+}
+
+function hasMarketProductIntent(mention: FoodMention): boolean {
+  return Boolean(mention.barcode || mention.brand || mention.marketProduct);
+}
+
+function isBrandedFood(food: FoodItemRecord): boolean {
+  return food.dataType === "Branded" || food.source === "usda_branded";
+}
+
+function localFoodPriority(food: FoodItemRecord, mention: FoodMention): number {
+  if (food.userId) return 0;
+  if (hasMarketProductIntent(mention) && isBrandedFood(food)) return 1;
+  if (food.dataType === "SR Legacy") return 2;
+  if (food.dataType === "Foundation") return 3;
+  if (isBrandedFood(food)) return 6;
+  return 4;
+}
+
+function markLocalCandidate(item: MealItem): MealItem {
+  Object.defineProperty(item, localCandidateSymbol, { value: true });
+  return item;
 }
 
 export class OpenFoodFactsFoodDataProvider implements FoodDataProvider {
@@ -200,7 +410,7 @@ export class OpenFoodFactsFoodDataProvider implements FoodDataProvider {
   constructor(
     private readonly baseUrl: string,
     private readonly userAgent: string,
-    private readonly timeoutMs = 5000
+    private readonly timeoutMs = 5000,
   ) {}
 
   async resolve(_userId: string, mention: FoodMention): Promise<MealItem[]> {
@@ -211,125 +421,298 @@ export class OpenFoodFactsFoodDataProvider implements FoodDataProvider {
     return item ? [item] : [];
   }
 
-  private async fetchBarcode(barcode: string): Promise<OpenFoodFactsProduct | null> {
-    const response = await fetch(`${this.baseUrl}/api/v2/product/${encodeURIComponent(barcode)}.json`, {
-      signal: timeoutSignal(this.timeoutMs),
-      headers: { "User-Agent": this.userAgent }
-    });
+  private async fetchBarcode(
+    barcode: string,
+  ): Promise<OpenFoodFactsProduct | null> {
+    const response = await fetch(
+      `${this.baseUrl}/api/v2/product/${encodeURIComponent(barcode)}.json`,
+      {
+        signal: timeoutSignal(this.timeoutMs),
+        headers: { "User-Agent": this.userAgent },
+      },
+    );
     if (!response.ok) return null;
-    const json = await response.json() as { status?: number; product?: OpenFoodFactsProduct };
-    return json.status === 1 ? json.product ?? null : null;
+    const json = (await response.json()) as {
+      status?: number;
+      product?: OpenFoodFactsProduct;
+    };
+    return json.status === 1 ? (json.product ?? null) : null;
   }
 
-  private async searchFirst(mention: FoodMention): Promise<OpenFoodFactsProduct | null> {
+  private async searchFirst(
+    mention: FoodMention,
+  ): Promise<OpenFoodFactsProduct | null> {
     const url = new URL(`${this.baseUrl}/cgi/search.pl`);
-    url.searchParams.set("search_terms", [mention.brand, mention.canonicalEnglishName].filter(Boolean).join(" "));
+    url.searchParams.set(
+      "search_terms",
+      [mention.brand, mention.canonicalEnglishName].filter(Boolean).join(" "),
+    );
     url.searchParams.set("search_simple", "1");
     url.searchParams.set("action", "process");
     url.searchParams.set("json", "1");
     url.searchParams.set("page_size", "1");
-    const response = await fetch(url, { signal: timeoutSignal(this.timeoutMs), headers: { "User-Agent": this.userAgent } });
+    const response = await fetch(url, {
+      signal: timeoutSignal(this.timeoutMs),
+      headers: { "User-Agent": this.userAgent },
+    });
     if (!response.ok) return null;
-    const json = await response.json() as { products?: OpenFoodFactsProduct[] };
+    const json = (await response.json()) as {
+      products?: OpenFoodFactsProduct[];
+    };
     return json.products?.[0] ?? null;
   }
 }
 
 export class UsdaFoodDataProvider implements FoodDataProvider {
   readonly id = "usda_fdc";
+  private readonly portionCache = new Map<number, PortionOption[]>();
 
   constructor(
     private readonly apiKey?: string,
     private readonly baseUrl = "https://api.nal.usda.gov/fdc/v1",
-    private readonly timeoutMs = 5000
+    private readonly timeoutMs = 5000,
   ) {}
 
-  async resolve(_userId: string, mention: FoodMention): Promise<MealItem[]> {
-    if (!this.apiKey) return [];
+  async resolve(
+    _userId: string,
+    mention: FoodMention,
+  ): Promise<FoodProviderResolution> {
+    if (!this.apiKey)
+      return {
+        items: [],
+        reason: requiresPortionValidation(mention)
+          ? "unsupported_unit"
+          : undefined,
+      };
     const url = new URL(`${this.baseUrl}/foods/search`);
     url.searchParams.set("api_key", this.apiKey);
     url.searchParams.set("query", mention.canonicalEnglishName);
-    url.searchParams.set("pageSize", "5");
-    url.searchParams.append("dataType", "Foundation");
-    url.searchParams.append("dataType", "SR Legacy");
-    url.searchParams.append("dataType", "Survey (FNDDS)");
-    const response = await fetch(url, { signal: timeoutSignal(this.timeoutMs) });
-    if (!response.ok) return [];
-    const json = await response.json() as { foods?: UsdaFood[] };
-    return (json.foods ?? [])
-      .map((food) => mapUsdaFood(food, mention))
-      .filter((item): item is MealItem => Boolean(item))
-      .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+    url.searchParams.set("pageSize", "25");
+    url.searchParams.set("dataType", "Foundation,SR Legacy");
+    const response = await fetch(url, {
+      signal: timeoutSignal(this.timeoutMs),
+    });
+    if (!response.ok) return { items: [] };
+    let json: { foods?: UsdaFood[] };
+    try {
+      json = (await response.json()) as { foods?: UsdaFood[] };
+    } catch {
+      return { items: [] };
+    }
+    const items: MealItem[] = [];
+    let reason: FoodCandidateGroup["reason"] | undefined;
+    let portionChoices: FoodPortionChoice[] | undefined;
+    const scoredFoods = (json.foods ?? [])
+      .map((food) => ({ food, score: scoreUsdaCandidate(food, mention) }))
+      .filter(
+        (entry): entry is { food: UsdaFood; score: UsdaCandidateScore } =>
+          Boolean(entry.score),
+      )
+      .sort((a, b) => b.score.confidence - a.score.confidence);
+    for (const { food, score } of scoredFoods) {
+      const foodWithNutrition = hasUsdaNutrition(food)
+        ? food
+        : ((await this.fetchFoodDetail(food.fdcId)) ?? food);
+      let portionOptions: PortionOption[] | undefined;
+      let portionResolution: PortionResolution | undefined;
+      if (requiresPortionValidation(mention)) {
+        portionOptions = await this.fetchPortionOptions(food.fdcId);
+        portionResolution = resolvePortionForMention(mention, portionOptions);
+        if (portionResolution.reason) {
+          reason ??= portionResolution.reason;
+          portionChoices ??= portionResolution.choices;
+        }
+      }
+      const item = mapUsdaFood(
+        foodWithNutrition,
+        mention,
+        portionOptions,
+        portionResolution?.portion,
+        score,
+      );
+      if (item) {
+        items.push(item);
+        continue;
+      }
+      if (
+        requiresPortionValidation(mention) &&
+        hasUsdaNutrition(foodWithNutrition)
+      ) {
+        reason ??= portionResolution?.reason ?? "unsupported_unit";
+        portionChoices ??= portionResolution?.choices;
+      }
+    }
+    items.sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+    return {
+      items,
+      reason: items.length === 0 ? reason : undefined,
+      portionOptions: items.length === 0 ? portionChoices : undefined,
+    };
+  }
+
+  private async fetchPortionOptions(fdcId: number): Promise<PortionOption[]> {
+    const cached = this.portionCache.get(fdcId);
+    if (cached) return cached;
+    const detail = await this.fetchFoodDetail(fdcId);
+    const options = detail ? normalizeUsdaPortions(detail, String(fdcId)) : [];
+    this.portionCache.set(fdcId, options);
+    return options;
+  }
+
+  private async fetchFoodDetail(fdcId: number): Promise<UsdaFood | null> {
+    const url = new URL(`${this.baseUrl}/food/${fdcId}`);
+    url.searchParams.set("api_key", this.apiKey!);
+    try {
+      const response = await fetch(url, {
+        signal: timeoutSignal(this.timeoutMs),
+      });
+      if (!response.ok) return null;
+      return (await response.json()) as UsdaFood;
+    } catch {
+      return null;
+    }
   }
 }
 
 function extractQuantityMentions(text: string): FoodMention[] {
   const mentions: FoodMention[] = [];
-  const unit = "(g|gr|gramo|gramos|gram|grams|kg|oz)";
-  const quantityBefore = new RegExp(`(\\d+(?:[\\.,]\\d+)?)\\s*${unit}\\b\\s*(?:de\\s+|of\\s+)?([a-z][a-z\\s]{0,40}?)(?=\\s+(?:y|and)\\s+\\d|,|\\.|$)`, "g");
+  const unit =
+    "(g|gr|gramo|gramos|gram|grams|kg|kilogram|kilograms|kilo|kilos|oz|ounce|ounces)";
+  const quantityBefore = new RegExp(
+    `(\\d+(?:[\\.,]\\d+)?)\\s*${unit}\\b\\s*(?:de\\s+|of\\s+)?([a-z][a-z\\s]{0,40}?)(?=\\s+(?:y|and)\\s+|,|\\.|$)`,
+    "g",
+  );
   for (const match of text.matchAll(quantityBefore)) {
-    const quantity = normalizeQuantity(Number(match[1]!.replace(",", ".")), match[2]!);
+    const quantity = normalizeQuantity(
+      Number(match[1]!.replace(",", ".")),
+      match[2]!,
+    );
     const unitValue = normalizeUnit(match[2]!);
     const originalText = match[3]!.trim();
-    mentions.push(buildMention(originalText, quantity, unitValue));
+    mentions.push(
+      buildMention(originalText, quantity, unitValue, match[2], "metric"),
+    );
+  }
+
+  const householdUnit = householdUnitPattern();
+  const countPattern = countTokenPattern();
+  const householdBefore = new RegExp(
+    `\\b(${countPattern})\\s+(${householdUnit})\\b\\s*(?:de\\s+|of\\s+)?([a-z][a-z\\s]{0,40}?)(?=\\s+(?:y|and)\\s+|,|\\.|$)`,
+    "g",
+  );
+  for (const match of text.matchAll(householdBefore)) {
+    const quantity = parseCountToken(match[1]!);
+    if (!quantity) continue;
+    const rawUnitText = match[2]!;
+    const foodText = match[3]!.trim();
+    mentions.push(
+      buildMention(
+        foodText,
+        quantity,
+        normalizeUnit(rawUnitText, normalizeFoodName(foodText)),
+        rawUnitText,
+        "household",
+        `${match[1]} ${rawUnitText} ${foodText}`,
+      ),
+    );
   }
   return mergeDuplicateMentions(mentions);
 }
 
-function extractUnquantifiedMentions(text: string): FoodMention[] {
+function extractCountMentions(text: string): FoodMention[] {
   const mentions: FoodMention[] = [];
-  for (const [alias, canonical] of aliasEntries()) {
-    if (new RegExp(`\\b${escapeRegExp(alias)}\\b`).test(text)) {
-      mentions.push({
-        originalText: alias,
-        canonicalEnglishName: canonical,
-        quantity: defaultQuantity(canonical),
-        unit: "g",
-        confidence: 0.82,
-        marketProduct: false
-      });
-    }
+  const countPattern = countTokenPattern();
+  const descriptorPattern = portionDescriptorPattern();
+  const pattern = new RegExp(
+    `\\b(${countPattern})\\s+(?:(${descriptorPattern})\\s+)?(?:de\\s+|of\\s+)?([a-z][a-z\\s]{0,40}?)(?=\\s+(?:y|and)\\s+|,|\\.|$)`,
+    "g",
+  );
+  for (const match of text.matchAll(pattern)) {
+    const quantity = parseCountToken(match[1]!);
+    if (!quantity) continue;
+    const portionDescriptorRaw = match[2]?.trim();
+    const portionDescriptor = normalizePortionDescriptor(portionDescriptorRaw);
+    const foodText = match[3]!.trim();
+    const firstFoodToken = normalizeText(foodText).split(" ")[0] ?? "";
+    if (metricUnits.has(firstFoodToken) || countPrefixUnits.has(firstFoodToken))
+      continue;
+    const canonical = normalizeFoodName(foodText);
+    mentions.push({
+      originalText: [match[1], portionDescriptorRaw, foodText]
+        .filter(Boolean)
+        .join(" "),
+      canonicalEnglishName: canonical,
+      quantity,
+      unit: normalizeUnit(foodText, canonical),
+      rawUnitText: foodText,
+      unitKind: "implicit_count",
+      portionDescriptorRaw,
+      portionDescriptor,
+      confidence: 0.86,
+      marketProduct: false,
+    });
   }
   return mergeDuplicateMentions(mentions);
 }
 
-function defaultQuantity(canonicalName: string): number {
-  if (canonicalName === "milk") return 250;
-  if (canonicalName === "chicken breast" || canonicalName === "rice") return 150;
-  if (canonicalName === "butter") return 10;
-  return 100;
-}
-
-function buildMention(originalText: string, quantity: number, unit: string): FoodMention {
-  const canonicalEnglishName = normalizeAlias(originalText);
+function buildMention(
+  foodText: string,
+  quantity: number,
+  unit: string,
+  rawUnitText: string,
+  unitKind: UnitKind,
+  originalText = foodText,
+): FoodMention {
+  const canonicalEnglishName = normalizeFoodName(foodText);
   return {
     originalText,
     canonicalEnglishName,
     quantity,
     unit,
-    confidence: canonicalEnglishName === normalizeText(originalText) ? 0.72 : 0.92,
-    marketProduct: false
+    rawUnitText,
+    unitKind,
+    confidence: unitKind === "metric" || unitKind === "household" ? 0.86 : 0.78,
+    marketProduct: false,
   };
 }
 
-function normalizeAlias(value: string): string {
+function normalizeFoodName(value: string): string {
   const normalized = normalizeText(value)
-    .replace(/\b(de|del|a|mi|my|the|fresh|cooked|raw|sliced)\b/g, " ")
+    .replace(/\b(de|del|of|a|mi|my|the|fresh|cooked|raw|sliced)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const exact = aliasMap.get(normalized);
-  if (exact) return exact;
-  const tokenMatch = normalized.split(" ").find((token) => aliasMap.has(token));
-  return tokenMatch ? aliasMap.get(tokenMatch)! : normalized;
+  return singularizeLastToken(normalized);
+}
+
+function singularizeLastToken(value: string): string {
+  const parts = value.split(" ").filter(Boolean);
+  if (parts.length === 0) return value;
+  const last = parts[parts.length - 1]!;
+  if (last.length > 3 && last.endsWith("ies")) {
+    parts[parts.length - 1] = `${last.slice(0, -3)}y`;
+  } else if (last.length > 4 && last.endsWith("oes")) {
+    parts[parts.length - 1] = last.slice(0, -2);
+  } else if (last.length > 3 && last.endsWith("s") && !last.endsWith("ss")) {
+    parts[parts.length - 1] = last.slice(0, -1);
+  }
+  return parts.join(" ");
 }
 
 function itemFromFood(
   food: FoodItemRecord,
   mention: FoodMention,
-  options: { confidence: number; source: string }
-): MealItem {
+  options: {
+    confidence: number;
+    source: string;
+    portionOptions?: PortionOption[];
+    selectedPortion?: PortionOption;
+    allowSeededPortionFallback?: boolean;
+  },
+): MealItem | null {
+  const item = scaleMentionFood(food, mention, options);
+  if (!item) return null;
   return {
-    ...scaleFood(food, mention.quantity, mention.unit),
+    ...item,
     source: options.source,
     originalText: mention.originalText,
     canonicalName: mention.canonicalEnglishName,
@@ -338,27 +721,90 @@ function itemFromFood(
     sourceUrl: food.sourceUrl,
     license: food.license,
     confidence: Math.min(mention.confidence, options.confidence),
-    needsReview: Math.min(mention.confidence, options.confidence) < 0.9
+    needsReview: Math.min(mention.confidence, options.confidence) < 0.9,
   };
 }
 
+function scaleMentionFood(
+  food: FoodItemRecord,
+  mention: FoodMention,
+  options: {
+    portionOptions?: PortionOption[];
+    selectedPortion?: PortionOption;
+    allowSeededPortionFallback?: boolean;
+  },
+): MealItem | null {
+  if (!requiresPortionValidation(mention))
+    return scaleFood(food, mention.quantity, "g");
+
+  const portion =
+    options.selectedPortion ??
+    resolvePortionForMention(mention, options.portionOptions ?? []).portion ??
+    (options.allowSeededPortionFallback
+      ? seededFallbackPortionForMention(mention)
+      : undefined);
+  if (!portion) return null;
+
+  const grams = roundOne(mention.quantity * portion.gramWeight);
+  const item: MealItemWithResolvedGrams = {
+    ...scaleFood(food, grams, portionDisplayUnit(mention, portion)),
+    quantity: mention.quantity,
+    unit: portionDisplayUnit(mention, portion),
+    resolvedGrams: grams,
+    portionDescription: portion.sourceDescription,
+  };
+  Object.defineProperty(item, resolvedGramsSymbol, { value: grams });
+  return item;
+}
+
 function localConfidence(food: FoodItemRecord, mention: FoodMention): number {
+  if (food.externalSource === "usda_fdc") {
+    const score = scoreUsdaCandidate(usdaFoodFromRecord(food), mention);
+    if (!score) return 0.2;
+    const localCorpusBoost =
+      food.dataType === "SR Legacy" ? 0.04 :
+        food.dataType === "Foundation" ? 0.01 :
+          0;
+    return Math.min(0.99, roundTwo(score.confidence + localCorpusBoost));
+  }
   const canonical = normalizeText(food.canonicalName ?? food.normalizedName);
   if (canonical === normalizeText(mention.canonicalEnglishName)) return 0.96;
-  if (food.normalizedName === normalizeText(mention.canonicalEnglishName)) return 0.94;
+  if (food.normalizedName === normalizeText(mention.canonicalEnglishName))
+    return 0.94;
   return 0.78;
 }
 
-function mapOpenFoodFactsProduct(product: OpenFoodFactsProduct, mention: FoodMention): MealItem | null {
+function usdaFoodFromRecord(food: FoodItemRecord): UsdaFood {
+  return {
+    fdcId: Number(food.externalId ?? 0),
+    description: food.name,
+    dataType: food.dataType,
+  };
+}
+
+function mapOpenFoodFactsProduct(
+  product: OpenFoodFactsProduct,
+  mention: FoodMention,
+): MealItem | null {
   const nutriments = product.nutriments;
   const calories = nutriments?.["energy-kcal_100g"];
   const proteinGrams = nutriments?.["proteins_100g"];
   const carbsGrams = nutriments?.["carbohydrates_100g"];
   const fatGrams = nutriments?.["fat_100g"];
-  if (!isNumber(calories) || !isNumber(proteinGrams) || !isNumber(carbsGrams) || !isNumber(fatGrams)) return null;
+  if (
+    !isNumber(calories) ||
+    !isNumber(proteinGrams) ||
+    !isNumber(carbsGrams) ||
+    !isNumber(fatGrams)
+  )
+    return null;
   const base: FoodItemRecord = {
     id: product.code ?? mention.canonicalEnglishName,
-    name: product.product_name || product.product_name_en || product.brands || mention.canonicalEnglishName,
+    name:
+      product.product_name ||
+      product.product_name_en ||
+      product.brands ||
+      mention.canonicalEnglishName,
     normalizedName: normalizeText(mention.canonicalEnglishName),
     canonicalName: mention.canonicalEnglishName,
     brand: product.brands,
@@ -372,20 +818,33 @@ function mapOpenFoodFactsProduct(product: OpenFoodFactsProduct, mention: FoodMen
     calories,
     proteinGrams,
     carbsGrams,
-    fatGrams
+    fatGrams,
   };
-  return itemFromFood(base, mention, { confidence: mention.barcode ? 0.98 : 0.86, source: "openfoodfacts" });
+  return itemFromFood(base, mention, {
+    confidence: mention.barcode ? 0.98 : 0.86,
+    source: "openfoodfacts",
+  });
 }
 
-function mapUsdaFood(food: UsdaFood, mention: FoodMention): MealItem | null {
+function mapUsdaFood(
+  food: UsdaFood,
+  mention: FoodMention,
+  portionOptions?: PortionOption[],
+  selectedPortion?: PortionOption,
+  candidateScore?: UsdaCandidateScore,
+): MealItem | null {
   const calories = findUsdaNutrient(food, 1008);
   const proteinGrams = findUsdaNutrient(food, 1003);
   const carbsGrams = findUsdaNutrient(food, 1005);
   const fatGrams = findUsdaNutrient(food, 1004);
-  if (!isNumber(calories) || !isNumber(proteinGrams) || !isNumber(carbsGrams) || !isNumber(fatGrams)) return null;
-  const dataTypeBonus = food.dataType === "Foundation" ? 0.08 : food.dataType === "SR Legacy" ? 0.05 : 0;
+  if (
+    !isNumber(calories) ||
+    !isNumber(proteinGrams) ||
+    !isNumber(carbsGrams) ||
+    !isNumber(fatGrams)
+  )
+    return null;
   const description = food.description ?? mention.canonicalEnglishName;
-  const exactBonus = normalizeText(description).includes(normalizeText(mention.canonicalEnglishName)) ? 0.08 : 0;
   const base: FoodItemRecord = {
     id: String(food.fdcId),
     name: titleCase(description),
@@ -394,95 +853,1130 @@ function mapUsdaFood(food: UsdaFood, mention: FoodMention): MealItem | null {
     source: "usda_fdc",
     externalSource: "usda_fdc",
     externalId: String(food.fdcId),
+    dataType: food.dataType,
     sourceUrl: `https://fdc.nal.usda.gov/fdc-app.html#/food-details/${food.fdcId}/nutrients`,
     license: "CC0-1.0",
     servingGrams: 100,
     calories,
     proteinGrams,
     carbsGrams,
-    fatGrams
+    fatGrams,
   };
-  return itemFromFood(base, mention, { confidence: Math.min(0.97, 0.78 + dataTypeBonus + exactBonus), source: "usda_fdc" });
+  return itemFromFood(base, mention, {
+    confidence:
+      candidateScore?.confidence ??
+      scoreUsdaCandidate(food, mention)?.confidence ??
+      0.74,
+    source: "usda_fdc",
+    portionOptions,
+    selectedPortion,
+  });
 }
 
-function findUsdaNutrient(food: UsdaFood, nutrientNumber: number): number | undefined {
-  const match = food.foodNutrients?.find((nutrient) => nutrient.nutrientNumber === nutrientNumber || nutrient.nutrientId === nutrientNumber);
-  return isNumber(match?.value) ? match!.value : undefined;
+type UsdaCandidateScore = {
+  confidence: number;
+  matchedTokenCount: number;
+  extraPenalty: number;
+};
+
+export function scoreUsdaCandidate(
+  food: Pick<UsdaFood, "description" | "dataType">,
+  mention: FoodMention,
+): UsdaCandidateScore | null {
+  const canonicalTokens = meaningfulFoodTokens(mention.canonicalEnglishName);
+  if (canonicalTokens.length === 0) return null;
+
+  const description = food.description ?? "";
+  const descriptionTokens = tokenizeFoodText(description);
+  if (descriptionTokens.length === 0) return null;
+
+  const descriptionTokenSet = new Set(descriptionTokens);
+  const matchedTokenCount = canonicalTokens.filter((token) =>
+    descriptionTokenSet.has(token),
+  ).length;
+  if (matchedTokenCount !== canonicalTokens.length) return null;
+
+  const normalizedDescription = normalizeText(description);
+  const normalizedCanonical = normalizeText(mention.canonicalEnglishName);
+  const inputTokenSet = new Set([
+    ...meaningfulFoodTokens(mention.canonicalEnglishName),
+    ...meaningfulFoodTokens(mention.originalText),
+  ]);
+  const segments = description
+    .split(",")
+    .map((segment) => tokenizeFoodText(segment))
+    .filter((segment) => segment.length > 0);
+  const firstSegment = segments[0] ?? [];
+  const firstToken = descriptionTokens[0];
+  const canonicalTokenSet = new Set(canonicalTokens);
+  const canonicalIndexes = canonicalTokens
+    .map((token) => descriptionTokens.indexOf(token))
+    .filter((index) => index >= 0);
+  const firstCanonicalIndex = Math.min(...canonicalIndexes);
+
+  let confidence = 0.55 + 0.2 * (matchedTokenCount / canonicalTokens.length);
+  if (food.dataType === "Foundation") confidence += 0.04;
+  if (food.dataType === "SR Legacy") confidence += 0.03;
+
+  if (normalizedDescription === normalizedCanonical) {
+    confidence += 0.18;
+  } else if (
+    canonicalTokens.length > 1 &&
+    (normalizedDescription.startsWith(`${normalizedCanonical} `) ||
+      descriptionContainsTokenPhrase(descriptionTokens, canonicalTokens))
+  ) {
+    confidence += 0.13;
+  }
+
+  if (canonicalTokens.length === 1) {
+    const token = canonicalTokens[0]!;
+    if (firstToken === token) confidence += 0.18;
+    else if (firstSegment.includes(token)) confidence += 0.1;
+    else if (firstToken && usdaCategoryWords.has(firstToken))
+      confidence += 0.04;
+    else confidence -= 0.08;
+  } else {
+    const sameSegment = segments.some((segment) =>
+      canonicalTokens.every((token) => segment.includes(token)),
+    );
+    if (sameSegment) confidence += 0.1;
+    if (firstSegment.some((token) => canonicalTokenSet.has(token)))
+      confidence += 0.04;
+    if (firstCanonicalIndex > 2) confidence -= 0.05;
+  }
+
+  const extraPenalty = usdaExtraDescriptionPenalty(
+    descriptionTokens,
+    canonicalTokenSet,
+    inputTokenSet,
+    firstCanonicalIndex,
+  );
+  confidence -= extraPenalty;
+
+  if (descriptionHasUnrequestedConnector(normalizedDescription, inputTokenSet)) {
+    confidence -= 0.08;
+  }
+
+  confidence = Math.max(0.1, Math.min(0.97, roundTwo(confidence)));
+  if (confidence < 0.55) return null;
+  return { confidence, matchedTokenCount, extraPenalty: roundTwo(extraPenalty) };
+}
+
+function descriptionContainsTokenPhrase(
+  descriptionTokens: string[],
+  phraseTokens: string[],
+): boolean {
+  if (
+    phraseTokens.length === 0 ||
+    phraseTokens.length > descriptionTokens.length
+  )
+    return false;
+  for (
+    let index = 0;
+    index <= descriptionTokens.length - phraseTokens.length;
+    index++
+  ) {
+    if (
+      phraseTokens.every(
+        (token, phraseIndex) => descriptionTokens[index + phraseIndex] === token,
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function usdaExtraDescriptionPenalty(
+  descriptionTokens: string[],
+  canonicalTokenSet: Set<string>,
+  inputTokenSet: Set<string>,
+  firstCanonicalIndex: number,
+): number {
+  let penalty = 0;
+  const canonicalStartsDescription = firstCanonicalIndex === 0;
+  const hasLeadingCategory = descriptionTokens
+    .slice(0, firstCanonicalIndex)
+    .some((token) => usdaCategoryWords.has(token));
+  for (const [index, token] of descriptionTokens.entries()) {
+    if (
+      canonicalTokenSet.has(token) ||
+      inputTokenSet.has(token) ||
+      usdaScoringStopWords.has(token) ||
+      usdaNeutralDescriptorWords.has(token) ||
+      usdaCategoryWords.has(token)
+    ) {
+      continue;
+    }
+    if (usdaStrongFormWords.has(token)) {
+      penalty += index < firstCanonicalIndex ? 0.28 : 0.25;
+      continue;
+    }
+    if (usdaPartDescriptorWords.has(token)) {
+      penalty += 0.12;
+      continue;
+    }
+    penalty +=
+      index < firstCanonicalIndex
+        ? hasLeadingCategory
+          ? 0.035
+          : 0.16
+        : canonicalStartsDescription
+          ? 0.14
+          : 0.025;
+  }
+  return Math.min(0.45, penalty);
+}
+
+function descriptionHasUnrequestedConnector(
+  description: string,
+  inputTokenSet: Set<string>,
+): boolean {
+  if (inputTokenSet.has("with") || inputTokenSet.has("and")) return false;
+  if (/\bwith\s+(skin|salt)\b/.test(description)) return false;
+  return /\b(with|and|blend|mixed|mixture)\b/.test(description);
+}
+
+function meaningfulFoodTokens(value: string): string[] {
+  return tokenizeFoodText(value).filter(
+    (token) => !usdaScoringStopWords.has(token) && token.length > 1,
+  );
+}
+
+function tokenizeFoodText(value: string): string[] {
+  return normalizeText(value)
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(singularizeToken);
+}
+
+function singularizeToken(token: string): string {
+  if (token.length > 3 && token.endsWith("ies")) return `${token.slice(0, -3)}y`;
+  if (token.length > 4 && token.endsWith("oes")) return token.slice(0, -2);
+  if (token.length > 3 && token.endsWith("s") && !token.endsWith("ss"))
+    return token.slice(0, -1);
+  return token;
+}
+
+function roundTwo(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function findUsdaNutrient(
+  food: UsdaFood,
+  nutrientNumber: number,
+): number | undefined {
+  const match = food.foodNutrients?.find((nutrient) => {
+    const numbers = [
+      nutrient.nutrientNumber,
+      nutrient.nutrientId,
+      nutrient.nutrient?.number,
+      nutrient.nutrient?.id,
+    ].map((value) => (typeof value === "string" ? Number(value) : value));
+    return numbers.includes(nutrientNumber);
+  });
+  const value = match?.value ?? match?.amount;
+  return isNumber(value) ? value : undefined;
+}
+
+function hasUsdaNutrition(food: UsdaFood): boolean {
+  return [1008, 1003, 1005, 1004].every((nutrient) =>
+    isNumber(findUsdaNutrient(food, nutrient)),
+  );
 }
 
 function parseMention(input: unknown): FoodMention | null {
   if (!input || typeof input !== "object") return null;
   const value = input as Record<string, unknown>;
-  const originalText = typeof value.originalText === "string" ? value.originalText : undefined;
-  const canonicalEnglishName = typeof value.canonicalEnglishName === "string" ? value.canonicalEnglishName : undefined;
-  const quantity = typeof value.quantity === "number" ? value.quantity : undefined;
+  const originalText =
+    typeof value.originalText === "string" ? value.originalText : undefined;
+  const canonicalEnglishName =
+    typeof value.canonicalEnglishName === "string"
+      ? value.canonicalEnglishName
+      : undefined;
+  const quantity =
+    typeof value.quantity === "number" ? value.quantity : undefined;
   const unit = typeof value.unit === "string" ? value.unit : undefined;
   if (!originalText || !canonicalEnglishName || !quantity || !unit) return null;
+  const normalizedCanonical = normalizeText(canonicalEnglishName);
+  const rawUnitText =
+    typeof value.rawUnitText === "string" ? value.rawUnitText : unit;
+  const unitKind = parseUnitKind(
+    value.unitKind,
+    rawUnitText,
+    unit,
+    normalizedCanonical,
+  );
+  const portionDescriptorRaw =
+    typeof value.portionDescriptorRaw === "string"
+      ? value.portionDescriptorRaw
+      : undefined;
+  const portionDescriptor = normalizePortionDescriptor(
+    typeof value.portionDescriptor === "string"
+      ? value.portionDescriptor
+      : portionDescriptorRaw,
+  );
   return {
     originalText,
-    canonicalEnglishName: normalizeText(canonicalEnglishName),
-    quantity,
-    unit: normalizeUnit(unit),
+    canonicalEnglishName: normalizedCanonical,
+    quantity:
+      unitKind === "metric"
+        ? normalizeQuantity(quantity, rawUnitText)
+        : quantity,
+    unit: normalizeUnit(unit, normalizedCanonical),
+    rawUnitText,
+    unitKind,
+    portionDescriptorRaw,
+    portionDescriptor,
     brand: typeof value.brand === "string" ? value.brand : undefined,
     barcode: typeof value.barcode === "string" ? value.barcode : undefined,
     confidence: typeof value.confidence === "number" ? value.confidence : 0.78,
-    marketProduct: Boolean(value.marketProduct)
+    marketProduct: Boolean(value.marketProduct),
   };
 }
 
 function normalizeQuantity(quantity: number, unit: string): number {
-  if (unit === "kg") return quantity * 1000;
-  if (unit === "oz") return Math.round(quantity * 28.3495 * 10) / 10;
+  const normalized = normalizeText(unit);
+  if (["kg", "kilogram", "kilograms", "kilo", "kilos"].includes(normalized))
+    return quantity * 1000;
+  if (["oz", "ounce", "ounces"].includes(normalized))
+    return Math.round(quantity * 28.3495 * 10) / 10;
   return quantity;
 }
 
-function normalizeUnit(unit: string): string {
-  if (unit === "kg" || unit === "oz") return "g";
-  return "g";
+function normalizeUnit(unit: string, canonicalName?: string): string {
+  const normalized = normalizeText(unit);
+  if (
+    [
+      "kg",
+      "kilogram",
+      "kilograms",
+      "kilo",
+      "kilos",
+      "oz",
+      "ounce",
+      "ounces",
+    ].includes(normalized)
+  )
+    return "g";
+  if (["g", "gr", "gramo", "gramos", "gram", "grams"].includes(normalized))
+    return "g";
+
+  const householdUnit = householdUnitAliases.get(normalized);
+  if (householdUnit) return householdUnit;
+
+  return normalized || "g";
+}
+
+function parseUnitKind(
+  value: unknown,
+  rawUnitText: string,
+  unit: string,
+  canonicalName: string,
+): UnitKind {
+  if (
+    value === "metric" ||
+    value === "household" ||
+    value === "implicit_count" ||
+    value === "unknown"
+  )
+    return value;
+  return inferUnitKind(rawUnitText || unit, unit, canonicalName);
+}
+
+function inferUnitKind(
+  rawUnitText: string,
+  unit: string,
+  canonicalName?: string,
+): UnitKind {
+  const raw = normalizeText(rawUnitText);
+  const normalizedUnit = normalizeUnit(unit, canonicalName);
+  if (normalizedUnit === "g" || metricUnits.has(raw)) return "metric";
+  if (
+    householdUnitAliases.has(raw) ||
+    householdCanonicalUnits.has(normalizedUnit)
+  )
+    return "household";
+  if (
+    canonicalName &&
+    (raw === normalizeText(canonicalName) ||
+      normalizedUnit === normalizeText(canonicalName))
+  ) {
+    return "implicit_count";
+  }
+  return "unknown";
+}
+
+function requiresPortionValidation(mention: FoodMention): boolean {
+  return unitKindForMention(mention) !== "metric";
+}
+
+function unitKindForMention(mention: FoodMention): UnitKind {
+  return (
+    mention.unitKind ??
+    inferUnitKind(
+      mention.rawUnitText ?? mention.unit,
+      mention.unit,
+      mention.canonicalEnglishName,
+    )
+  );
+}
+
+function normalizeProviderResolution(
+  result: MealItem[] | FoodProviderResolution,
+): FoodProviderResolution {
+  return Array.isArray(result) ? { items: result } : result;
+}
+
+function resolvedGrams(item: MealItem): number | undefined {
+  const value = (item as MealItemWithResolvedGrams)[resolvedGramsSymbol];
+  return isNumber(value) ? value : undefined;
 }
 
 function mergeDuplicateMentions(mentions: FoodMention[]): FoodMention[] {
   const deduped = new Map<string, FoodMention>();
   for (const mention of mentions) {
-    const key = `${mention.canonicalEnglishName}:${mention.quantity}:${mention.unit}`;
+    const key = `${mention.canonicalEnglishName}:${mention.quantity}:${mention.unit}:${mention.portionDescriptor ?? ""}`;
     if (!deduped.has(key)) deduped.set(key, mention);
   }
   return [...deduped.values()];
 }
 
-function aliasEntries(): [string, string][] {
-  return [...aliasMap.entries()].sort((a, b) => b[0].length - a[0].length);
-}
+const portionDescriptorAliases = new Map<string, PortionSize>([
+  ["extra small", "extra small"],
+  ["extrasmall", "extra small"],
+  ["xs", "extra small"],
+  ["small", "small"],
+  ["sm", "small"],
+  ["medium", "medium"],
+  ["med", "medium"],
+  ["large", "large"],
+  ["lg", "large"],
+  ["extra large", "extra large"],
+  ["extralarge", "extra large"],
+  ["xl", "extra large"],
+  ["x large", "extra large"],
+  ["jumbo", "jumbo"],
+]);
 
-const aliasMap = new Map<string, string>([
-  ["pan", "bread"],
-  ["bread", "bread"],
-  ["jamon", "ham"],
-  ["ham", "ham"],
-  ["mantequilla", "butter"],
-  ["butter", "butter"],
-  ["pollo", "chicken breast"],
-  ["pechuga de pollo", "chicken breast"],
-  ["carne", "chicken breast"],
-  ["chicken", "chicken breast"],
-  ["chicken breast", "chicken breast"],
-  ["arroz", "rice"],
-  ["rice", "rice"],
-  ["huevo", "egg"],
-  ["huevos", "egg"],
+const countWords = new Map<string, number>([
+  ["a", 1],
+  ["an", 1],
+  ["one", 1],
+  ["two", 2],
+  ["three", 3],
+  ["four", 4],
+  ["five", 5],
+  ["six", 6],
+  ["seven", 7],
+  ["eight", 8],
+  ["nine", 9],
+  ["ten", 10],
+  ["un", 1],
+  ["una", 1],
+  ["uno", 1],
+  ["dos", 2],
+  ["tres", 3],
+  ["cuatro", 4],
+  ["cinco", 5],
+  ["seis", 6],
+  ["siete", 7],
+  ["ocho", 8],
+  ["nueve", 9],
+  ["diez", 10],
+]);
+
+const metricUnits = new Set([
+  "g",
+  "gr",
+  "gram",
+  "grams",
+  "gramo",
+  "gramos",
+  "kg",
+  "kilogram",
+  "kilograms",
+  "kilo",
+  "kilos",
+  "oz",
+  "ounce",
+  "ounces",
+]);
+
+const householdUnitAliases = new Map<string, string>([
+  ["cup", "cup"],
+  ["cups", "cup"],
+  ["taza", "cup"],
+  ["tazas", "cup"],
+  ["tbsp", "tablespoon"],
+  ["tablespoon", "tablespoon"],
+  ["tablespoons", "tablespoon"],
+  ["cucharada", "tablespoon"],
+  ["cucharadas", "tablespoon"],
+  ["tsp", "teaspoon"],
+  ["teaspoon", "teaspoon"],
+  ["teaspoons", "teaspoon"],
+  ["cucharadita", "teaspoon"],
+  ["cucharaditas", "teaspoon"],
+  ["slice", "slice"],
+  ["slices", "slice"],
+  ["rebanada", "slice"],
+  ["rebanadas", "slice"],
+  ["piece", "piece"],
+  ["pieces", "piece"],
+  ["pieza", "piece"],
+  ["piezas", "piece"],
+  ["serving", "serving"],
+  ["servings", "serving"],
+  ["portion", "serving"],
+  ["portions", "serving"],
+  ["breast", "breast"],
+  ["breasts", "breast"],
+  ["leg", "leg"],
+  ["legs", "leg"],
+  ["fruit", "fruit"],
+  ["fruits", "fruit"],
+  ["item", "item"],
+  ["items", "item"],
+  ["unit", "unit"],
+  ["units", "unit"],
   ["egg", "egg"],
   ["eggs", "egg"],
-  ["avena", "oats"],
-  ["oats", "oats"],
-  ["leche", "milk"],
-  ["milk", "milk"],
-  ["queso", "cheese"],
-  ["cheese", "cheese"],
-  ["manzana", "apple"],
-  ["apple", "apple"],
-  ["platano", "banana"],
-  ["banana", "banana"]
+  ["huevo", "egg"],
+  ["huevos", "egg"],
 ]);
+
+const householdCanonicalUnits = new Set(householdUnitAliases.values());
+
+// These vocabularies only score USDA result descriptions after a provider
+// search. They are not ingredient aliases and must not trigger local nutrition
+// estimates.
+const usdaScoringStopWords = new Set([
+  "a",
+  "an",
+  "and",
+  "de",
+  "del",
+  "for",
+  "in",
+  "of",
+  "or",
+  "the",
+  "to",
+  "with",
+]);
+
+const usdaNeutralDescriptorWords = new Set([
+  "boneless",
+  "chopped",
+  "clarified",
+  "commercial",
+  "commercially",
+  "cooked",
+  "delicious",
+  "diced",
+  "drained",
+  "dry",
+  "extra",
+  "fresh",
+  "frozen",
+  "golden",
+  "green",
+  "large",
+  "light",
+  "medium",
+  "plain",
+  "prepared",
+  "raw",
+  "red",
+  "ripe",
+  "salted",
+  "skin",
+  "skinless",
+  "sliced",
+  "small",
+  "toasted",
+  "unsalted",
+  "unsweetened",
+  "virgin",
+  "whole",
+]);
+
+const usdaCategoryWords = new Set([
+  "cereal",
+  "dairy",
+  "fish",
+  "food",
+  "fruit",
+  "grain",
+  "meat",
+  "poultry",
+  "seed",
+  "vegetable",
+]);
+
+// Product-form descriptors that make a USDA hit less likely to be the requested
+// generic ingredient unless the user asked for that form.
+const usdaStrongFormWords = new Set([
+  "bar",
+  "battered",
+  "beverage",
+  "blend",
+  "breaded",
+  "cake",
+  "candy",
+  "capsule",
+  "concentrate",
+  "cookie",
+  "cracker",
+  "deli",
+  "dessert",
+  "dressing",
+  "drink",
+  "extract",
+  "flour",
+  "fried",
+  "gravy",
+  "glazed",
+  "honey",
+  "juice",
+  "lunchmeat",
+  "luncheon",
+  "mayonnaise",
+  "mix",
+  "nugget",
+  "oil",
+  "oven",
+  "patty",
+  "powder",
+  "prepackaged",
+  "roll",
+  "rotisserie",
+  "sauce",
+  "sausage",
+  "seasoned",
+  "smoked",
+  "soup",
+  "spread",
+  "supplement",
+  "syrup",
+  "tablet",
+  "tender",
+]);
+
+const usdaPartDescriptorWords = new Set([
+  "breast",
+  "kernel",
+  "leg",
+  "peel",
+  "seed",
+  "shell",
+  "thigh",
+  "white",
+  "wing",
+  "yolk",
+]);
+
+const countPrefixUnits = new Set([
+  "cup",
+  "cups",
+  "taza",
+  "tazas",
+  "tbsp",
+  "tablespoon",
+  "tablespoons",
+  "cucharada",
+  "cucharadas",
+  "tsp",
+  "teaspoon",
+  "teaspoons",
+  "cucharadita",
+  "cucharaditas",
+  "slice",
+  "slices",
+  "rebanada",
+  "rebanadas",
+  "piece",
+  "pieces",
+  "pieza",
+  "piezas",
+  "serving",
+  "servings",
+  "portion",
+  "portions",
+  "breast",
+  "breasts",
+  "leg",
+  "legs",
+]);
+
+const seededPortionFallbacks = new Map<string, PortionOption[]>([
+  [
+    "egg",
+    [
+      {
+        unitName: "egg",
+        aliases: ["egg", "eggs", "huevo", "huevos"],
+        gramWeight: 50,
+        sourceDescription: "local seeded egg fallback",
+        kind: "whole_item",
+      },
+    ],
+  ],
+]);
+
+function countTokenPattern(): string {
+  return `\\d+(?:[\\.,]\\d+)?|${[...countWords.keys()].map(escapeRegExp).join("|")}`;
+}
+
+function portionDescriptorPattern(): string {
+  return [...portionDescriptorAliases.keys()]
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp)
+    .join("|");
+}
+
+function normalizePortionDescriptor(value?: string): PortionSize | undefined {
+  const normalized = normalizeText(value ?? "");
+  if (!normalized) return undefined;
+  const exact = portionDescriptorAliases.get(normalized);
+  if (exact) return exact;
+  if (/\bextra\s+small\b|\bxs\b/.test(normalized)) return "extra small";
+  if (/\bextra\s+large\b|\bxl\b|\bx\s+large\b/.test(normalized))
+    return "extra large";
+  if (/\bjumbo\b/.test(normalized)) return "jumbo";
+  if (/\bmedium\b|\bmed\b/.test(normalized)) return "medium";
+  if (/\blarge\b|\blg\b/.test(normalized)) return "large";
+  if (/\bsmall\b|\bsm\b/.test(normalized)) return "small";
+  return undefined;
+}
+
+function parseCountToken(token: string): number | null {
+  const normalized = normalizeText(token);
+  if (/^\d+(?:[\.,]\d+)?$/.test(normalized))
+    return Number(normalized.replace(",", "."));
+  return countWords.get(normalized) ?? null;
+}
+
+function householdUnitPattern(): string {
+  return [...householdUnitAliases.keys()]
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp)
+    .join("|");
+}
+
+function seededFallbackPortionForMention(
+  mention: FoodMention,
+): PortionOption | undefined {
+  return findMatchingPortion(
+    mention,
+    seededPortionFallbacks.get(normalizeText(mention.canonicalEnglishName)) ??
+      [],
+  );
+}
+
+type PortionResolution = {
+  portion?: PortionOption;
+  reason?: FoodCandidateGroup["reason"];
+  choices?: FoodPortionChoice[];
+};
+
+function resolvePortionForMention(
+  mention: FoodMention,
+  portions: PortionOption[],
+): PortionResolution {
+  if (!requiresPortionValidation(mention)) return {};
+  const descriptor = mention.portionDescriptor;
+  const unitKind = unitKindForMention(mention);
+
+  if (descriptor) {
+    const portion = portions.find(
+      (option) =>
+        (option.kind === "count_size" || option.kind === "whole_item") &&
+        (option.size === descriptor ||
+          option.aliases.map(normalizeText).includes(descriptor)),
+    );
+    if (portion) return { portion };
+    return {
+      reason: "unsupported_unit",
+      choices: portionChoicesForMention(mention, portions),
+    };
+  }
+
+  if (unitKind === "household") {
+    const portion = findExplicitUnitPortion(mention, portions);
+    if (portion) return { portion };
+    return {
+      reason: "unsupported_unit",
+      choices: portionChoicesForMention(mention, portions),
+    };
+  }
+
+  if (unitKind === "implicit_count") {
+    const countOptions = implicitCountPortions(portions);
+    if (countOptions.length === 1) return { portion: countOptions[0] };
+    if (countOptions.length > 1) {
+      return {
+        reason: "ambiguous_portion",
+        choices: portionChoicesForMention(mention, countOptions),
+      };
+    }
+    return {
+      reason: "unsupported_unit",
+      choices: portionChoicesForMention(mention, portions),
+    };
+  }
+
+  return {
+    reason: "unsupported_unit",
+    choices: portionChoicesForMention(mention, portions),
+  };
+}
+
+function findMatchingPortion(
+  mention: FoodMention,
+  portions: PortionOption[],
+): PortionOption | undefined {
+  return resolvePortionForMention(mention, portions).portion;
+}
+
+function findExplicitUnitPortion(
+  mention: FoodMention,
+  portions: PortionOption[],
+): PortionOption | undefined {
+  if (!requiresPortionValidation(mention)) return undefined;
+  const unitKind = unitKindForMention(mention);
+  const desired = normalizeText(mention.unit);
+  const raw = normalizeText(mention.rawUnitText ?? mention.unit);
+  const canonical = normalizeText(mention.canonicalEnglishName);
+  const foodAliases = aliasesForCanonical(canonical);
+
+  return portions.find((portion) => {
+    const aliases = new Set(portion.aliases.map(normalizeText));
+    if (unitKind === "household") {
+      return aliases.has(desired) || aliases.has(raw);
+    }
+    if (unitKind === "implicit_count") {
+      if (aliases.has(raw) || aliases.has(desired)) return true;
+      if (foodAliases.some((alias) => aliases.has(alias))) return true;
+      return ["whole", "piece", "item", "each", "fruit", "unit"].some((alias) =>
+        aliases.has(alias),
+      );
+    }
+    return false;
+  });
+}
+
+function implicitCountPortions(portions: PortionOption[]): PortionOption[] {
+  return portions.filter(
+    (portion) => portion.kind === "count_size" || portion.kind === "whole_item",
+  );
+}
+
+function portionChoicesForMention(
+  mention: FoodMention,
+  portions: PortionOption[],
+): FoodPortionChoice[] {
+  const seen = new Set<string>();
+  const choices: FoodPortionChoice[] = [];
+  for (const portion of portions) {
+    if (portion.kind === "serving") continue;
+    const unit = portionDisplayUnit(mention, portion);
+    const key = `${unit}:${portion.gramWeight}:${portion.sourceDescription}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const totalGrams = roundOne(mention.quantity * portion.gramWeight);
+    const label =
+      portion.kind === "household" || portion.kind === "piece_shape"
+        ? `${formatQuantity(mention.quantity)} ${unit} ${mention.canonicalEnglishName}`
+        : `${formatQuantity(mention.quantity)} ${unit}`;
+    choices.push({
+      label,
+      quantity: mention.quantity,
+      unit,
+      gramWeight: portion.gramWeight,
+      totalGrams,
+      kind: portion.kind,
+      portionDescriptor: portion.size ?? portion.shape,
+      canonicalFoodName: mention.canonicalEnglishName,
+      sourceDescription: portion.sourceDescription,
+      externalSource: "usda_fdc",
+      externalFoodId: portion.externalFoodId,
+      actionText: `Add ${label}`,
+    });
+  }
+  if (!seen.has("g:1:metric")) {
+    choices.push({
+      label: "Use grams",
+      quantity: 1,
+      unit: "g",
+      gramWeight: 1,
+      kind: "metric",
+      canonicalFoodName: mention.canonicalEnglishName,
+    });
+  }
+  return choices;
+}
+
+function portionDisplayUnit(
+  mention: FoodMention,
+  portion: PortionOption,
+): string {
+  if (portion.kind === "count_size" && portion.size) {
+    return pluralizeUnit(
+      `${portion.size} ${baseCountUnit(mention)}`,
+      mention.quantity,
+    );
+  }
+  if (portion.kind === "whole_item") {
+    return pluralizeUnit(
+      portion.unitName || baseCountUnit(mention),
+      mention.quantity,
+    );
+  }
+  return pluralizeUnit(portion.unitName, mention.quantity);
+}
+
+function baseCountUnit(mention: FoodMention): string {
+  const normalized = normalizeText(mention.unit);
+  if (normalized && normalized !== "g") return normalized;
+  return normalizeText(mention.canonicalEnglishName);
+}
+
+function pluralizeUnit(unit: string, quantity: number): string {
+  if (quantity === 1) return unit;
+  const parts = unit.split(" ");
+  const last = parts.pop() ?? unit;
+  const plural = last.endsWith("s")
+    ? last
+    : last.endsWith("y")
+      ? `${last.slice(0, -1)}ies`
+      : `${last}s`;
+  return [...parts, plural].join(" ");
+}
+
+function formatQuantity(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(value);
+}
+
+function aliasesForCanonical(canonicalName: string): string[] {
+  const normalized = normalizeText(canonicalName);
+  return [...new Set([normalized, ...normalized.split(" ").filter(Boolean)])];
+}
+
+function normalizeUsdaPortions(
+  food: UsdaFood,
+  externalFoodId: string,
+): PortionOption[] {
+  return (food.foodPortions ?? [])
+    .map((portion) => normalizeUsdaPortion(portion, externalFoodId))
+    .filter((portion): portion is PortionOption => Boolean(portion));
+}
+
+function portionOptionsFromFoodPortions(
+  portions: FoodPortionRecord[],
+  externalFoodId?: string,
+): PortionOption[] {
+  return portions
+    .map((portion) => portionOptionFromFoodPortion(portion, externalFoodId))
+    .filter((portion): portion is PortionOption => Boolean(portion));
+}
+
+function portionOptionFromFoodPortion(
+  portion: FoodPortionRecord,
+  externalFoodId?: string,
+): PortionOption | null {
+  if (!isNumber(portion.gramWeight) || portion.gramWeight <= 0) return null;
+  const sourceDescription =
+    portion.sourceDescription ||
+    [portion.amount, portion.unit, portion.modifier, portion.description]
+      .filter((part) => part !== undefined && part !== null && String(part).trim())
+      .join(" ");
+  const aliases = [
+    ...(portion.normalizedAliases ?? []),
+    ...aliasesFromPortionUnit(portion.unit),
+    ...aliasesFromPortionDescription(portion.modifier),
+    ...aliasesFromPortionDescription(portion.description),
+    ...aliasesFromPortionDescription(sourceDescription),
+  ].map(normalizeText).filter(Boolean);
+  const sourceText = normalizeText(sourceDescription);
+  const size = normalizePortionDescriptor(sourceText);
+  const kind = isKnownPortionKind(portion.kind)
+    ? portion.kind
+    : classifyPortionKind(sourceText, size);
+  const shape = shapeFromPortionDescription(sourceText, kind);
+  const unitName = unitNameForPortion(kind, size, shape, aliases, sourceText);
+  if (aliases.length === 0) return null;
+  return {
+    unitName,
+    aliases: [...new Set(aliases)],
+    gramWeight: roundOne(portion.gramWeight),
+    sourceDescription,
+    externalFoodId,
+    kind,
+    size,
+    shape,
+  };
+}
+
+function isKnownPortionKind(value: string): value is PortionKind {
+  return ["count_size", "whole_item", "household", "piece_shape", "serving"].includes(value);
+}
+
+function normalizeUsdaPortion(
+  portion: UsdaFoodPortion,
+  externalFoodId: string,
+): PortionOption | null {
+  if (!isNumber(portion.gramWeight) || portion.gramWeight <= 0) return null;
+  const amount =
+    isNumber(portion.amount) && portion.amount > 0 ? portion.amount : 1;
+  const gramWeight = roundOne(portion.gramWeight / amount);
+  const sourceParts = [
+    isNumber(portion.amount) ? String(portion.amount) : undefined,
+    portion.measureUnit?.name,
+    portion.measureUnit?.abbreviation,
+    portion.modifier,
+    portion.portionDescription,
+  ].filter((part): part is string => Boolean(part && part.trim()));
+  const sourceDescription = sourceParts.join(" ");
+  const aliases = [
+    ...aliasesFromPortionUnit(portion.measureUnit?.name),
+    ...aliasesFromPortionUnit(portion.measureUnit?.abbreviation),
+    ...aliasesFromPortionDescription(portion.modifier),
+    ...aliasesFromPortionDescription(portion.portionDescription),
+  ];
+  const sourceText = normalizeText(sourceDescription);
+  const size = normalizePortionDescriptor(sourceText);
+  const kind = classifyPortionKind(sourceText, size);
+  const shape = shapeFromPortionDescription(sourceText, kind);
+  const unitName = unitNameForPortion(kind, size, shape, aliases, sourceText);
+  if (aliases.length === 0) return null;
+  return {
+    unitName,
+    aliases: [...new Set(aliases)],
+    gramWeight,
+    sourceDescription,
+    externalFoodId,
+    kind,
+    size,
+    shape,
+  };
+}
+
+function classifyPortionKind(
+  sourceText: string,
+  size?: PortionSize,
+): PortionKind {
+  if (
+    /\b(cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons)\b/.test(
+      sourceText,
+    )
+  )
+    return "household";
+  if (
+    /\b(slice|slices|wedge|wedges|piece|pieces|clove|cloves|head|heads|stalk|stalks|bunch|bunches|breast|breasts|leg|legs|fillet|fillets)\b/.test(
+      sourceText,
+    )
+  )
+    return "piece_shape";
+  if (size) return "count_size";
+  if (/\b(whole|fruit|item|each)\b/.test(sourceText)) return "whole_item";
+  if (/\b(racc|nlea|serving|servings)\b/.test(sourceText)) return "serving";
+  return "serving";
+}
+
+function shapeFromPortionDescription(
+  sourceText: string,
+  kind: PortionKind,
+): string | undefined {
+  if (kind === "household") {
+    for (const shape of ["cup", "tablespoon", "teaspoon"]) {
+      if (sourceText.includes(shape) || sourceText.includes(`${shape}s`))
+        return shape;
+    }
+    if (/\btbsp\b/.test(sourceText)) return "tablespoon";
+    if (/\btsp\b/.test(sourceText)) return "teaspoon";
+  }
+  if (kind === "piece_shape") {
+    for (const shape of [
+      "slice",
+      "wedge",
+      "piece",
+      "clove",
+      "head",
+      "stalk",
+      "bunch",
+      "breast",
+      "leg",
+      "fillet",
+    ]) {
+      if (sourceText.includes(shape) || sourceText.includes(`${shape}s`))
+        return shape;
+    }
+  }
+  if (kind === "whole_item") {
+    for (const shape of ["fruit", "whole", "item", "each"]) {
+      if (sourceText.includes(shape)) return shape;
+    }
+  }
+  return undefined;
+}
+
+function unitNameForPortion(
+  kind: PortionKind,
+  size: PortionSize | undefined,
+  shape: string | undefined,
+  aliases: string[],
+  sourceText: string,
+): string {
+  if (kind === "count_size" && size) return size;
+  if (shape) return shape;
+  const usefulAlias = aliases.find(
+    (alias) => !["undetermined", "unit"].includes(alias),
+  );
+  if (usefulAlias) return usefulAlias;
+  return sourceText || "serving";
+}
+
+function aliasesFromPortionUnit(value?: string): string[] {
+  const normalized = normalizeText(value ?? "");
+  if (!normalized) return [];
+  const aliases = new Set<string>(aliasesFromPortionDescription(normalized));
+  for (const token of normalized.split(" ")) {
+    if (token.length > 1) aliases.add(token);
+  }
+  return [...aliases];
+}
+
+function aliasesFromPortionDescription(value?: string): string[] {
+  const normalized = normalizeText(value ?? "");
+  if (!normalized) return [];
+  const aliases = new Set<string>();
+  for (const [alias, canonical] of householdUnitAliases) {
+    if ((alias === "egg" || alias === "eggs") && /\bcups?\b/.test(normalized))
+      continue;
+    if (new RegExp(`\\b${escapeRegExp(alias)}\\b`).test(normalized)) {
+      aliases.add(alias);
+      aliases.add(canonical);
+    }
+  }
+  const hasExtraSmall = /\bextra\s+small\b/.test(normalized);
+  if (hasExtraSmall) aliases.add("extra small");
+  if (/\bextra\s+large\b/.test(normalized)) aliases.add("extra large");
+  else if (/\blarge\b/.test(normalized)) aliases.add("large");
+  for (const size of ["medium", "jumbo"]) {
+    if (new RegExp(`\\b${escapeRegExp(size)}\\b`).test(normalized))
+      aliases.add(size);
+  }
+  if (!hasExtraSmall && /\bsmall\b/.test(normalized)) aliases.add("small");
+  if (/\bwhole\b/.test(normalized)) aliases.add("whole");
+  if (/\beach\b/.test(normalized)) aliases.add("each");
+  return [...aliases];
+}
+
+function roundOne(value: number): number {
+  return Math.round(value * 10) / 10;
+}
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -497,7 +1991,11 @@ function titleCase(value: string): string {
 }
 
 function timeoutSignal(timeoutMs: number): AbortSignal | undefined {
-  return (AbortSignal as typeof AbortSignal & { timeout?: (milliseconds: number) => AbortSignal }).timeout?.(timeoutMs);
+  return (
+    AbortSignal as typeof AbortSignal & {
+      timeout?: (milliseconds: number) => AbortSignal;
+    }
+  ).timeout?.(timeoutMs);
 }
 
 type OpenFoodFactsProduct = {
@@ -508,9 +2006,9 @@ type OpenFoodFactsProduct = {
   brands?: string;
   nutriments?: {
     "energy-kcal_100g"?: number;
-    "proteins_100g"?: number;
-    "carbohydrates_100g"?: number;
-    "fat_100g"?: number;
+    proteins_100g?: number;
+    carbohydrates_100g?: number;
+    fat_100g?: number;
   };
 };
 
@@ -518,9 +2016,26 @@ type UsdaFood = {
   fdcId: number;
   description?: string;
   dataType?: string;
+  foodPortions?: UsdaFoodPortion[];
   foodNutrients?: Array<{
     nutrientId?: number;
-    nutrientNumber?: number;
+    nutrientNumber?: number | string;
     value?: number;
+    amount?: number;
+    nutrient?: {
+      id?: number;
+      number?: string;
+    };
   }>;
+};
+
+type UsdaFoodPortion = {
+  amount?: number;
+  gramWeight?: number;
+  modifier?: string;
+  portionDescription?: string;
+  measureUnit?: {
+    name?: string;
+    abbreviation?: string;
+  };
 };

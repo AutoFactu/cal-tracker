@@ -15,23 +15,9 @@ await sql`
     SELECT 1 FROM embedding_models
     WHERE provider = ${config.EMBEDDING_PROVIDER}
       AND model = ${config.EMBEDDING_MODEL}
-      AND dimensions = ${config.EMBEDDING_DIMENSIONS}
+    AND dimensions = ${config.EMBEDDING_DIMENSIONS}
   )
 `;
 
-await sql`
-  INSERT INTO food_items (name, normalized_name, source, serving_grams, calories, protein_grams, carbs_grams, fat_grams)
-  VALUES
-    ('Egg', 'egg', 'generic_usda', 50, 72, 6.3, 0.4, 4.8),
-    ('Chicken breast', 'chicken breast', 'generic_usda', 100, 165, 31, 0, 3.6),
-    ('Cooked rice', 'rice', 'generic_usda', 100, 130, 2.7, 28, 0.3),
-    ('Oats', 'oats', 'generic_usda', 100, 389, 16.9, 66.3, 6.9),
-    ('Milk', 'milk', 'generic_usda', 250, 122, 8.1, 12, 4.8),
-    ('Bread', 'bread', 'generic_usda', 100, 265, 9, 49, 3.2),
-    ('Butter', 'butter', 'generic_usda', 100, 717, 0.9, 0.1, 81.1),
-    ('Ham', 'ham', 'generic_usda', 100, 145, 21, 1.5, 5.5)
-  ON CONFLICT DO NOTHING
-`;
-
-console.log(`Seeded generic food items and embedding model metadata in ${schema}.`);
+console.log("Seeded embedding model metadata. Food items must be imported from a trusted provider with provenance.");
 await sql.end();
