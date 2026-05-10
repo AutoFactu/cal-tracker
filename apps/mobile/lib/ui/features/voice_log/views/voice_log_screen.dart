@@ -253,7 +253,10 @@ class _MealCreateScreenState extends State<MealCreateScreen> {
   }
 }
 
-class _ResolverClarificationCard extends StatelessWidget {
+const _candidatePreviewCount = 3;
+const _candidateDisplayLimit = 10;
+
+class _ResolverClarificationCard extends StatefulWidget {
   const _ResolverClarificationCard({
     required this.groups,
     required this.isCandidateSelected,
@@ -269,6 +272,15 @@ class _ResolverClarificationCard extends StatelessWidget {
   final ValueChanged<FoodPortionChoice> onPortionSelected;
 
   @override
+  State<_ResolverClarificationCard> createState() =>
+      _ResolverClarificationCardState();
+}
+
+class _ResolverClarificationCardState
+    extends State<_ResolverClarificationCard> {
+  final Set<String> _expandedGroups = <String>{};
+
+  @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     return FreshCard(
@@ -278,10 +290,12 @@ class _ResolverClarificationCard extends StatelessWidget {
         children: [
           const FreshSectionTitle(title: 'Food matches'),
           const SizedBox(height: FreshSpacing.sm),
-          for (final group in groups) ...[
+          for (final group in widget.groups) ...[
             Text(
               '${group.mention.originalText} -> ${group.mention.canonicalEnglishName}',
               style: textTheme.titleSmall,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 4),
             if (group.portionOptions?.isNotEmpty ?? false) ...[
@@ -297,7 +311,7 @@ class _ResolverClarificationCard extends StatelessWidget {
                         'portion_option_${group.mention.canonicalEnglishName}_$index',
                       ),
                       choice: group.portionOptions![index],
-                      onSelected: onPortionSelected,
+                      onSelected: widget.onPortionSelected,
                     ),
                 ],
               ),
@@ -306,27 +320,125 @@ class _ResolverClarificationCard extends StatelessWidget {
             if (group.candidates.isEmpty)
               Text(
                 'No confident match yet',
-                style:
-                    textTheme.bodyMedium?.copyWith(color: FreshColors.inkMuted),
+                style: textTheme.bodyMedium?.copyWith(
+                  color: FreshColors.inkMuted,
+                ),
               )
             else
-              for (var index = 0;
-                  index < group.candidates.take(3).length;
-                  index++)
-                _CandidateMealLine(
-                  key: ValueKey(
-                    'food_candidate_${group.mention.canonicalEnglishName}_$index',
-                  ),
-                  candidate: group.candidates[index],
-                  selected: isCandidateSelected(group, group.candidates[index]),
-                  onSelected: () =>
-                      onCandidateSelected(group, group.candidates[index]),
-                ),
+              _CandidateList(
+                group: group,
+                expanded: _expandedGroups.contains(_groupKey(group)),
+                isCandidateSelected: widget.isCandidateSelected,
+                onCandidateSelected: widget.onCandidateSelected,
+                onToggleExpanded: () => _toggleExpanded(group),
+              ),
             const SizedBox(height: FreshSpacing.md),
           ],
         ],
       ),
     );
+  }
+
+  void _toggleExpanded(FoodCandidateGroup group) {
+    final key = _groupKey(group);
+    setState(() {
+      if (!_expandedGroups.add(key)) {
+        _expandedGroups.remove(key);
+      }
+    });
+  }
+
+  String _groupKey(FoodCandidateGroup group) {
+    final mention = group.mention;
+    return [
+      mention.originalText,
+      mention.canonicalEnglishName,
+      mention.quantity.toStringAsFixed(3),
+      mention.unit,
+    ].join('|');
+  }
+}
+
+class _CandidateList extends StatelessWidget {
+  const _CandidateList({
+    required this.group,
+    required this.expanded,
+    required this.isCandidateSelected,
+    required this.onCandidateSelected,
+    required this.onToggleExpanded,
+  });
+
+  final FoodCandidateGroup group;
+  final bool expanded;
+  final bool Function(FoodCandidateGroup group, MealItem candidate)
+      isCandidateSelected;
+  final Future<void> Function(FoodCandidateGroup group, MealItem candidate)
+      onCandidateSelected;
+  final VoidCallback onToggleExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    final candidates = group.candidates.take(_candidateDisplayLimit).toList();
+    final visibleIndexes = _visibleCandidateIndexes(candidates);
+    final hiddenCount = candidates.length - visibleIndexes.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final index in visibleIndexes)
+          _CandidateMealLine(
+            key: ValueKey(
+              'food_candidate_${group.mention.canonicalEnglishName}_$index',
+            ),
+            candidate: candidates[index],
+            selected: isCandidateSelected(group, candidates[index]),
+            onSelected: () => onCandidateSelected(group, candidates[index]),
+          ),
+        if (candidates.length > _candidatePreviewCount) ...[
+          const SizedBox(height: FreshSpacing.xs),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: ValueKey(
+                'food_candidate_toggle_${group.mention.canonicalEnglishName}',
+              ),
+              onPressed: onToggleExpanded,
+              icon: Icon(
+                expanded
+                    ? Icons.keyboard_arrow_up_rounded
+                    : Icons.keyboard_arrow_down_rounded,
+              ),
+              label: Text(
+                expanded
+                    ? 'Show fewer'
+                    : 'Show ${hiddenCount.clamp(0, candidates.length)} more',
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  List<int> _visibleCandidateIndexes(List<MealItem> candidates) {
+    if (expanded) {
+      return [for (var index = 0; index < candidates.length; index++) index];
+    }
+
+    final indexes = <int>{};
+    for (var index = 0;
+        index < candidates.length && index < _candidatePreviewCount;
+        index++) {
+      indexes.add(index);
+    }
+
+    for (var index = 0; index < candidates.length; index++) {
+      if (isCandidateSelected(group, candidates[index])) {
+        indexes.add(index);
+        break;
+      }
+    }
+
+    return indexes.toList()..sort();
   }
 }
 
@@ -345,20 +457,21 @@ class _CandidateMealLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    final subtitle = candidate.externalSource ?? candidate.source;
+    final metadata = _candidateMetadata(candidate);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Material(
         color: selected
             ? FreshColors.lime.withValues(alpha: 0.16)
-            : Colors.transparent,
+            : FreshColors.surfaceSoft,
         borderRadius: BorderRadius.circular(FreshRadii.md),
         child: InkWell(
           borderRadius: BorderRadius.circular(FreshRadii.md),
           onTap: onSelected,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 FreshIconChip(
                   icon: selected
@@ -374,21 +487,61 @@ class _CandidateMealLine extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(candidate.name, style: textTheme.bodyLarge),
-                      if (subtitle.isNotEmpty)
-                        Text(
-                          subtitle,
-                          style: textTheme.bodyMedium
-                              ?.copyWith(color: FreshColors.inkMuted),
-                          overflow: TextOverflow.ellipsis,
+                      Text(
+                        candidate.name,
+                        style: textTheme.bodyLarge,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (metadata.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 3,
+                          children: [
+                            for (final item in metadata)
+                              Text(
+                                item,
+                                style: textTheme.labelMedium?.copyWith(
+                                  color: FreshColors.inkMuted,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                          ],
                         ),
+                      ],
                     ],
                   ),
                 ),
-                Text(
-                  '${candidate.calories} Kcal',
-                  style: textTheme.labelLarge?.copyWith(
-                    fontFeatures: const [FontFeature.tabularFigures()],
+                const SizedBox(width: FreshSpacing.sm),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 74),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          '${candidate.calories} Kcal',
+                          textAlign: TextAlign.right,
+                          style: textTheme.labelLarge?.copyWith(
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
+                      if (candidate.confidence != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          '${(candidate.confidence! * 100).round()}%',
+                          style: textTheme.labelSmall?.copyWith(
+                            color: FreshColors.limeDeep,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ],
@@ -397,6 +550,21 @@ class _CandidateMealLine extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  List<String> _candidateMetadata(MealItem candidate) {
+    final parts = <String>[];
+    final source = candidate.externalSource ?? candidate.source;
+    if (source.isNotEmpty) parts.add(source);
+    final portion = candidate.portionDescription;
+    if (portion != null && portion.isNotEmpty) {
+      parts.add(portion);
+    } else if (candidate.resolvedGrams != null) {
+      parts.add('${_formatQuantity(candidate.resolvedGrams!)} g');
+    }
+    final license = candidate.license;
+    if (license != null && license.isNotEmpty) parts.add(license);
+    return parts;
   }
 }
 
@@ -921,8 +1089,9 @@ class _ProposalCard extends StatelessWidget {
                     Text(proposal.title, style: textTheme.titleLarge),
                     Text(
                       'Ready to log',
-                      style: textTheme.bodyMedium
-                          ?.copyWith(color: FreshColors.inkMuted),
+                      style: textTheme.bodyMedium?.copyWith(
+                        color: FreshColors.inkMuted,
+                      ),
                     ),
                   ],
                 ),
@@ -1115,8 +1284,9 @@ class _EditableIngredientRow extends StatelessWidget {
                 child: TextField(
                   key: ValueKey('proposal_item_quantity_$index'),
                   controller: item.quantityController,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   decoration: const InputDecoration(labelText: 'Quantity'),
                 ),
               ),
@@ -1147,8 +1317,9 @@ class _EditableIngredientRow extends StatelessWidget {
 class _EditableMealItem {
   _EditableMealItem(MealItem item) : original = item {
     nameController = TextEditingController(text: item.name);
-    quantityController =
-        TextEditingController(text: _formatQuantity(item.quantity));
+    quantityController = TextEditingController(
+      text: _formatQuantity(item.quantity),
+    );
     unitController = TextEditingController(text: item.unit);
   }
 
@@ -1282,8 +1453,9 @@ class _MealLine extends StatelessWidget {
                 if (subtitle.isNotEmpty)
                   Text(
                     subtitle,
-                    style: textTheme.bodyMedium
-                        ?.copyWith(color: FreshColors.inkMuted),
+                    style: textTheme.bodyMedium?.copyWith(
+                      color: FreshColors.inkMuted,
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
               ],
