@@ -1,17 +1,84 @@
-# cal_tracker_mobile
+# BetterCalories Mobile
 
-A new Flutter project.
+Flutter app for BetterCalories.
 
-## Getting Started
+## Android Local Builds
 
-This project is a starting point for a Flutter application.
+The Android app has two product flavors:
 
-A few resources to get you started if this is your first Flutter project:
+- `dev`: package `app.bettercalories.dev`, API `https://dev-api.bettercalories.app`
+- `prod`: package `app.bettercalories`, API `https://api.bettercalories.app`
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+Build distributable APKs locally from the repository root:
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+bun run mobile:build:dev
+bun run mobile:build:prod
+bun run mobile:build:all
+```
+
+The scripts write APKs and SHA-256 checksums to:
+
+```text
+dist/mobile/android/
+```
+
+To override API URLs for a local build:
+
+```bash
+DEV_API_BASE_URL=https://dev-api.bettercalories.app bun run mobile:build:dev
+PROD_API_BASE_URL=https://api.bettercalories.app bun run mobile:build:prod
+```
+
+## Android Release Signing
+
+Production release builds should be signed with a real upload key, not the
+debug key.
+
+Create a local keystore and keep it out of git:
+
+```bash
+cd apps/mobile/android
+keytool -genkeypair -v \
+  -keystore upload-keystore.jks \
+  -storetype JKS \
+  -keyalg RSA \
+  -keysize 2048 \
+  -validity 10000 \
+  -alias upload
+cp key.properties.example key.properties
+```
+
+Then edit `apps/mobile/android/key.properties` with the keystore passwords.
+`key.properties`, `*.jks`, and `*.keystore` are ignored by git.
+
+For a local-only production test APK without a release key:
+
+```bash
+ALLOW_DEBUG_SIGNING=1 bun run mobile:build:prod
+```
+
+## Publish APKs To GitHub
+
+Use GitHub Releases for downloadable APKs instead of committing binaries to
+the repository.
+
+Prerequisites:
+
+- `gh` installed and authenticated with `gh auth login`
+- current commit pushed to `origin`
+- clean working tree, unless publishing intentionally with `ALLOW_DIRTY=1`
+
+Publish locally-built APKs from the repository root:
+
+```bash
+bun run mobile:release:dev
+bun run mobile:release:prod
+```
+
+The release script builds the APK first, then creates or updates a GitHub
+Release and uploads the `.apk` plus `.sha256`.
+
+Mobile release tags intentionally use the prefix `mobile-...` and must not
+start with `v`, because this repository deploys the backend to production from
+`v*` tags.
