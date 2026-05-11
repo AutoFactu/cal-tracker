@@ -13,8 +13,20 @@ import type {
 } from "@cal-tracker/contracts";
 
 export type StoredUser = AuthUser & {
-  passwordHash: string;
+  passwordHash?: string;
   scopes: PermissionScope[];
+};
+
+export type AuthIdentityProvider = "google";
+
+export type AuthIdentityRecord = {
+  id: string;
+  userId: string;
+  provider: AuthIdentityProvider;
+  providerUserId: string;
+  email: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type StoredSession = {
@@ -168,10 +180,12 @@ export type AuditEventRecord = {
 };
 
 export interface AppRepository {
-  createUser(input: { email: string; displayName: string; passwordHash: string; scopes: PermissionScope[] }): Promise<StoredUser>;
+  createUser(input: { email: string; displayName: string; passwordHash?: string; scopes: PermissionScope[] }): Promise<StoredUser>;
   findUserByEmail(email: string): Promise<StoredUser | undefined>;
   findUserById(id: string): Promise<StoredUser | undefined>;
   updateTrustedMode(userId: string, enabled: boolean): Promise<StoredUser>;
+  findAuthIdentity(provider: AuthIdentityProvider, providerUserId: string): Promise<AuthIdentityRecord | undefined>;
+  linkAuthIdentity(input: { userId: string; provider: AuthIdentityProvider; providerUserId: string; email: string }): Promise<AuthIdentityRecord>;
 
   createSession(input: Omit<StoredSession, "createdAt">): Promise<StoredSession>;
   findSessionByRefreshTokenHash(hash: string): Promise<StoredSession | undefined>;

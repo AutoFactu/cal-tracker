@@ -20,6 +20,7 @@ void main() {
     await $(const ValueKey('password_field')).enterText('password123');
 
     expect($(const ValueKey('auth_submit_button')), findsOneWidget);
+    expect($(const ValueKey('google_sign_in_button')), findsOneWidget);
   });
 
   patrolTest('switches main tabs through the shell navigation', ($) async {

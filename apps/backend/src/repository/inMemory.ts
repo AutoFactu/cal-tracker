@@ -6,6 +6,8 @@ import type {
   ActionCallRecord,
   AppRepository,
   AuditEventRecord,
+  AuthIdentityProvider,
+  AuthIdentityRecord,
   EmbeddingModelRecord,
   FoodFeedbackRecord,
   FoodItemRecord,
@@ -35,6 +37,7 @@ const PREFERENCE_SCORE_NORMALIZER = 10;
 
 export class InMemoryRepository implements AppRepository {
   private users = new Map<string, StoredUser>();
+  private authIdentities = new Map<string, AuthIdentityRecord>();
   private sessions = new Map<string, StoredSession>();
   private passwordResetTokens = new Map<string, { userId: string; expiresAt: string; usedAt?: string }>();
   private foods = new Map<string, FoodItemRecord>();
@@ -57,7 +60,7 @@ export class InMemoryRepository implements AppRepository {
     return new InMemoryRepository();
   }
 
-  async createUser(input: { email: string; displayName: string; passwordHash: string; scopes?: typeof defaultUserScopes }): Promise<StoredUser> {
+  async createUser(input: { email: string; displayName: string; passwordHash?: string; scopes?: typeof defaultUserScopes }): Promise<StoredUser> {
     if (await this.findUserByEmail(input.email)) {
       throw new Error("email_already_registered");
     }
@@ -67,7 +70,7 @@ export class InMemoryRepository implements AppRepository {
       displayName: input.displayName,
       trustedModeEnabled: false,
       createdAt: new Date().toISOString(),
-      passwordHash: input.passwordHash,
+      ...(input.passwordHash ? { passwordHash: input.passwordHash } : {}),
       scopes: input.scopes ?? defaultUserScopes
     };
     this.users.set(user.id, user);
@@ -90,6 +93,28 @@ export class InMemoryRepository implements AppRepository {
     const user = this.requireUser(userId);
     user.trustedModeEnabled = false;
     return user;
+  }
+
+  async findAuthIdentity(provider: AuthIdentityProvider, providerUserId: string): Promise<AuthIdentityRecord | undefined> {
+    return this.authIdentities.get(`${provider}:${providerUserId}`);
+  }
+
+  async linkAuthIdentity(input: { userId: string; provider: AuthIdentityProvider; providerUserId: string; email: string }): Promise<AuthIdentityRecord> {
+    const key = `${input.provider}:${input.providerUserId}`;
+    const existing = this.authIdentities.get(key);
+    if (existing) return existing;
+    const now = new Date().toISOString();
+    const identity: AuthIdentityRecord = {
+      id: newId(),
+      userId: input.userId,
+      provider: input.provider,
+      providerUserId: input.providerUserId,
+      email: input.email.toLowerCase(),
+      createdAt: now,
+      updatedAt: now
+    };
+    this.authIdentities.set(key, identity);
+    return identity;
   }
 
   async createSession(input: Omit<StoredSession, "createdAt">): Promise<StoredSession> {

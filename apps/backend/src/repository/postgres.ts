@@ -7,6 +7,8 @@ import type {
   ActionCallRecord,
   AppRepository,
   AuditEventRecord,
+  AuthIdentityProvider,
+  AuthIdentityRecord,
   EmbeddingModelRecord,
   FoodFeedbackRecord,
   FoodItemRecord,
@@ -37,13 +39,15 @@ export class PostgresRepository implements AppRepository {
     this.sql = postgres(databaseUrl);
   }
 
-  async createUser(input: { email: string; displayName: string; passwordHash: string; scopes: PermissionScope[] }): Promise<StoredUser> {
+  async createUser(input: { email: string; displayName: string; passwordHash?: string; scopes: PermissionScope[] }): Promise<StoredUser> {
     const [row] = await this.sql`
       INSERT INTO users (email, display_name)
       VALUES (${input.email.toLowerCase()}, ${input.displayName})
       RETURNING id, email, display_name, trusted_mode_enabled, created_at
     `;
-    await this.sql`INSERT INTO user_credentials (user_id, password_hash) VALUES (${row.id}, ${input.passwordHash})`;
+    if (input.passwordHash) {
+      await this.sql`INSERT INTO user_credentials (user_id, password_hash) VALUES (${row.id}, ${input.passwordHash})`;
+    }
     await this.sql`
       INSERT INTO nutrition_targets (
         user_id, calories, protein_grams, carbs_grams, fat_grams, hydration_goal_glasses,
@@ -59,20 +63,20 @@ export class PostgresRepository implements AppRepository {
     const [row] = await this.sql`
       SELECT u.id, u.email, u.display_name, u.trusted_mode_enabled, u.created_at, c.password_hash
       FROM users u
-      JOIN user_credentials c ON c.user_id = u.id
+      LEFT JOIN user_credentials c ON c.user_id = u.id
       WHERE lower(u.email) = lower(${email}) AND u.deleted_at IS NULL
     `;
-    return row ? this.mapUser(row, row.password_hash, defaultUserScopes) : undefined;
+    return row ? this.mapUser(row, row.password_hash as string | undefined, defaultUserScopes) : undefined;
   }
 
   async findUserById(id: string): Promise<StoredUser | undefined> {
     const [row] = await this.sql`
       SELECT u.id, u.email, u.display_name, u.trusted_mode_enabled, u.created_at, c.password_hash
       FROM users u
-      JOIN user_credentials c ON c.user_id = u.id
+      LEFT JOIN user_credentials c ON c.user_id = u.id
       WHERE u.id = ${id} AND u.deleted_at IS NULL
     `;
-    return row ? this.mapUser(row, row.password_hash, defaultUserScopes) : undefined;
+    return row ? this.mapUser(row, row.password_hash as string | undefined, defaultUserScopes) : undefined;
   }
 
   async updateTrustedMode(userId: string, enabled: boolean): Promise<StoredUser> {
@@ -80,6 +84,27 @@ export class PostgresRepository implements AppRepository {
     const user = await this.findUserById(userId);
     if (!user) throw new Error("user_not_found");
     return user;
+  }
+
+  async findAuthIdentity(provider: AuthIdentityProvider, providerUserId: string): Promise<AuthIdentityRecord | undefined> {
+    const [row] = await this.sql`
+      SELECT id, user_id, provider, provider_user_id, email, created_at, updated_at
+      FROM auth_identities
+      WHERE provider = ${provider} AND provider_user_id = ${providerUserId}
+      LIMIT 1
+    `;
+    return row ? mapAuthIdentity(row) : undefined;
+  }
+
+  async linkAuthIdentity(input: { userId: string; provider: AuthIdentityProvider; providerUserId: string; email: string }): Promise<AuthIdentityRecord> {
+    const [row] = await this.sql`
+      INSERT INTO auth_identities (user_id, provider, provider_user_id, email)
+      VALUES (${input.userId}, ${input.provider}, ${input.providerUserId}, ${input.email.toLowerCase()})
+      ON CONFLICT (provider, provider_user_id)
+      DO UPDATE SET email = EXCLUDED.email, updated_at = now()
+      RETURNING id, user_id, provider, provider_user_id, email, created_at, updated_at
+    `;
+    return mapAuthIdentity(row);
   }
 
   async createSession(input: Omit<StoredSession, "createdAt">): Promise<StoredSession> {
@@ -833,17 +858,29 @@ export class PostgresRepository implements AppRepository {
     return new Map(rows.map((row) => [row.food_item_id as string, Number(row.affinity_score)]));
   }
 
-  private mapUser(row: Record<string, unknown>, passwordHash: string, scopes: PermissionScope[]): StoredUser {
+  private mapUser(row: Record<string, unknown>, passwordHash: string | undefined, scopes: PermissionScope[]): StoredUser {
     return {
       id: row.id as string,
       email: row.email as string,
       displayName: row.display_name as string,
       trustedModeEnabled: Boolean(row.trusted_mode_enabled),
       createdAt: toIso(row.created_at),
-      passwordHash,
+      ...(passwordHash ? { passwordHash } : {}),
       scopes
     };
   }
+}
+
+function mapAuthIdentity(row: Record<string, unknown>): AuthIdentityRecord {
+  return {
+    id: row.id as string,
+    userId: row.user_id as string,
+    provider: row.provider as AuthIdentityProvider,
+    providerUserId: row.provider_user_id as string,
+    email: row.email as string,
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at)
+  };
 }
 
 async function insertProposalItem(sql: Sql | any, proposalId: string, item: MealItem) {

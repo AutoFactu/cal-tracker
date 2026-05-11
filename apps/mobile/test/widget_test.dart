@@ -20,6 +20,7 @@ void main() {
         findsOneWidget);
     expect(find.text('Email'), findsOneWidget);
     expect(find.byKey(const ValueKey('email_field')), findsOneWidget);
+    expect(find.byKey(const ValueKey('google_sign_in_button')), findsOneWidget);
   });
 
   testWidgets('starts in Spanish when saved locale preference is Spanish',

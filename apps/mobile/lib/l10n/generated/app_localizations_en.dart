@@ -151,6 +151,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get authCreateAccountLink => 'Create an account';
 
   @override
+  String get authContinueWithGoogleButton => 'Continue with Google';
+
+  @override
   String get authSignInFailedTitle => 'Sign in failed';
 
   @override

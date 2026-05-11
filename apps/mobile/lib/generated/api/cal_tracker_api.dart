@@ -51,6 +51,11 @@ class CalTrackerApiClient {
         authenticated: false);
   }
 
+  Future<Map<String, Object?>> loginWithGoogle({required String idToken}) {
+    return _post('/v1/auth/google/login', {'idToken': idToken},
+        authenticated: false);
+  }
+
   Future<Map<String, Object?>> refresh(String refreshToken) {
     return _post('/v1/auth/refresh', {'refreshToken': refreshToken},
         authenticated: false);

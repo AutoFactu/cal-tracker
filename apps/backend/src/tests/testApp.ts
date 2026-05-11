@@ -1,4 +1,5 @@
 import { ActionExecutor } from "../actions/executor.js";
+import type { GoogleTokenVerifier } from "../auth/google.js";
 import { AuthService } from "../auth/service.js";
 import { loadConfig } from "../config/env.js";
 import { createApp } from "../http/app.js";
@@ -46,11 +47,12 @@ export function buildTestApp(options?: {
   sttProvider?: SpeechToTextProvider;
   runLogger?: LocalRunLogger;
   foodTextExtractor?: FoodTextExtractor;
+  googleTokenVerifier?: GoogleTokenVerifier;
 }) {
   const config = loadConfig({ NODE_ENV: "test" } as NodeJS.ProcessEnv);
   const repository = InMemoryRepository.seeded();
   seedTestFoods(repository);
-  const authService = new AuthService(config, repository);
+  const authService = new AuthService(config, repository, options?.googleTokenVerifier);
   const foodResolver = new FoodResolver(
     options?.foodTextExtractor ?? new DeterministicFoodTextExtractor(),
     [new LocalFoodDataProvider(repository, { allowSeededPortionFallback: true })],

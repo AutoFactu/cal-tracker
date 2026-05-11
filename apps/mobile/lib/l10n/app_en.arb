@@ -69,6 +69,7 @@
   "authGetStartedButton": "Get Started",
   "authUseExistingAccountButton": "Use existing account",
   "authCreateAccountLink": "Create an account",
+  "authContinueWithGoogleButton": "Continue with Google",
   "authSignInFailedTitle": "Sign in failed",
   "authHeroHeadline": "Track your\ncalories better.",
   "darkModeSwitchToLight": "Switch to light mode",

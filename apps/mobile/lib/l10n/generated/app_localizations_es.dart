@@ -151,6 +151,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get authCreateAccountLink => 'Crear una cuenta';
 
   @override
+  String get authContinueWithGoogleButton => 'Continuar con Google';
+
+  @override
   String get authSignInFailedTitle => 'No se pudo iniciar sesión';
 
   @override

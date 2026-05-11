@@ -12,6 +12,7 @@ import {
   executeActionResponseSchema,
   goalsResponseSchema,
   goalsUpdateSchema,
+  googleLoginRequestSchema,
   loginRequestSchema,
   passwordResetConfirmSchema,
   passwordResetRequestSchema,
@@ -65,6 +66,7 @@ const spec = {
       ErrorResponse: schema("ErrorResponse", errorResponseSchema),
       RegisterRequest: schema("RegisterRequest", registerRequestSchema),
       LoginRequest: schema("LoginRequest", loginRequestSchema),
+      GoogleLoginRequest: schema("GoogleLoginRequest", googleLoginRequestSchema),
       RefreshRequest: schema("RefreshRequest", refreshRequestSchema),
       PasswordResetRequest: schema("PasswordResetRequest", passwordResetRequestSchema),
       PasswordResetConfirm: schema("PasswordResetConfirm", passwordResetConfirmSchema),
@@ -112,6 +114,18 @@ const spec = {
         requestBody: {
           required: true,
           content: { "application/json": { schema: { $ref: "#/components/schemas/LoginRequest" } } }
+        },
+        responses: {
+          "200": { description: "Token pair", content: { "application/json": { schema: { $ref: "#/components/schemas/TokenPair" } } } }
+        }
+      }
+    },
+    "/v1/auth/google/login": {
+      post: {
+        operationId: "loginWithGoogle",
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/GoogleLoginRequest" } } }
         },
         responses: {
           "200": { description: "Token pair", content: { "application/json": { schema: { $ref: "#/components/schemas/TokenPair" } } } }
