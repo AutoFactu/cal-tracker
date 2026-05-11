@@ -677,6 +677,7 @@ def direct_load(ctx: Context, foods: pd.DataFrame, portions: pd.DataFrame) -> No
     with psycopg.connect(database_url) as conn:
         with conn.transaction():
             with conn.cursor() as cur:
+                cur.execute(search_path_sql())
                 cur.execute(stage_food_sql())
                 with cur.copy(f"COPY usda_food_stage ({','.join(FOOD_LOAD_COLUMNS)}) FROM STDIN") as copy:
                     for row in dataframe_rows(foods, FOOD_LOAD_COLUMNS):
@@ -686,6 +687,7 @@ def direct_load(ctx: Context, foods: pd.DataFrame, portions: pd.DataFrame) -> No
                     for row in dataframe_rows(portions, PORTION_LOAD_COLUMNS):
                         copy.write_row(row)
                 cur.execute(merge_stage_sql())
+                cur.execute(record_import_sql(ctx, len(foods), len(portions)))
     print(f"Loaded {len(foods):,} USDA foods and {len(portions):,} portions")
 
 
@@ -699,11 +701,15 @@ def docker_load(ctx: Context, foods: pd.DataFrame, portions: pd.DataFrame) -> No
     subprocess.run(["docker", "cp", str(portion_csv), f"{container}:/tmp/usda_food_portions.csv"], check=True)
     sql = "\n".join(
         [
+            search_path_sql(),
+            "BEGIN;",
             stage_food_sql(),
             f"\\copy usda_food_stage ({','.join(FOOD_LOAD_COLUMNS)}) FROM '/tmp/usda_foods.csv' WITH (FORMAT csv, HEADER true)",
             stage_portion_sql(),
             f"\\copy usda_portion_stage ({','.join(PORTION_LOAD_COLUMNS)}) FROM '/tmp/usda_food_portions.csv' WITH (FORMAT csv, HEADER true)",
             merge_stage_sql(),
+            record_import_sql(ctx, len(foods), len(portions)),
+            "COMMIT;",
         ]
     )
     docker_psql(sql, container)
@@ -723,6 +729,24 @@ def stage_food_sql() -> str:
 def stage_portion_sql() -> str:
     columns = ",\n  ".join(f"{column} text" for column in PORTION_LOAD_COLUMNS)
     return f"CREATE TEMP TABLE usda_portion_stage (\n  {columns}\n) ON COMMIT DROP;"
+
+
+def search_path_sql() -> str:
+    schema = database_schema()
+    if schema == "public":
+        return "SET search_path TO public;"
+    return f"SET search_path TO {quote_ident(schema)}, public;"
+
+
+def database_schema() -> str:
+    schema = os.environ.get("USDA_IMPORT_DATABASE_SCHEMA") or os.environ.get("DATABASE_SCHEMA") or "public"
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema):
+        raise SystemExit(f"Invalid database schema name: {schema}")
+    return schema
+
+
+def quote_ident(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
 
 
 def merge_stage_sql() -> str:
@@ -814,9 +838,45 @@ WHERE NULLIF(stage.gram_weight, '')::numeric > 0;
 """
 
 
+def record_import_sql(ctx: Context, food_count: int, portion_count: int) -> str:
+    manifest = import_manifest(ctx)
+    manifest_json = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
+    manifest_sha256 = hashlib.sha256(manifest_json.encode("utf-8")).hexdigest()
+    return f"""
+INSERT INTO reference_data_imports (
+  source, target_schema, manifest_sha256, manifest_json, food_count, portion_count
+)
+VALUES (
+  {sql_literal(SOURCE)},
+  {sql_literal(database_schema())},
+  {sql_literal(manifest_sha256)},
+  {sql_literal(manifest_json)}::jsonb,
+  {int(food_count)},
+  {int(portion_count)}
+)
+ON CONFLICT (source, target_schema, manifest_sha256)
+DO UPDATE SET
+  manifest_json = EXCLUDED.manifest_json,
+  food_count = EXCLUDED.food_count,
+  portion_count = EXCLUDED.portion_count,
+  imported_at = now();
+"""
+
+
+def import_manifest(ctx: Context) -> dict[str, object]:
+    manifest_path = ctx.manifest_dir / "manifest.json"
+    if not manifest_path.exists():
+        raise SystemExit(f"Manifest not found: {manifest_path}. Run build/validate before load.")
+    return json.loads(manifest_path.read_text(encoding="utf-8"))
+
+
+def sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
 def validate_db(ctx: Context) -> None:
     guard_production(ctx)
-    sql = """
+    sql = search_path_sql() + """
 SELECT 'usda_food_items', count(*)::text FROM food_items WHERE external_source = 'usda_fdc'
 UNION ALL
 SELECT 'usda_portions', count(*)::text FROM food_portions
@@ -833,6 +893,12 @@ UNION ALL
 SELECT 'foundation', count(*)::text FROM food_items WHERE external_source = 'usda_fdc' AND data_type = 'Foundation'
 UNION ALL
 SELECT 'branded', count(*)::text FROM food_items WHERE external_source = 'usda_fdc' AND data_type = 'Branded';
+
+SELECT source, target_schema, manifest_sha256, food_count, portion_count, imported_at
+FROM reference_data_imports
+WHERE source = 'usda_fdc'
+ORDER BY imported_at DESC
+LIMIT 5;
 
 EXPLAIN ANALYZE
 SELECT id, name
@@ -860,14 +926,19 @@ LIMIT 10;
 def docker_psql(sql: str, container: str) -> str:
     user = os.environ.get("USDA_IMPORT_POSTGRES_USER", "cal_tracker")
     database = os.environ.get("USDA_IMPORT_POSTGRES_DB", "cal_tracker")
-    completed = subprocess.run(
-        ["docker", "exec", "-i", container, "psql", "-v", "ON_ERROR_STOP=1", "-U", user, "-d", database],
-        input=sql,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=True,
-    )
+    try:
+        completed = subprocess.run(
+            ["docker", "exec", "-i", container, "psql", "-v", "ON_ERROR_STOP=1", "-U", user, "-d", database],
+            input=sql,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=True,
+        )
+    except subprocess.CalledProcessError as error:
+        if error.stdout:
+            print(error.stdout, file=sys.stderr)
+        raise
     return completed.stdout
 
 

@@ -10,6 +10,7 @@ export function buildSystemMessage(context: ActionContext): AgentMessage {
 Rules:
 - Select exactly one tool to fulfill the user's request.
 - For meal logging, use propose_meal_log. This includes Spanish and English requests such as "quiero añadir un desayuno", "he comido", "I ate", "I had", "log", "add", "registrar", or meals with quantities.
+- When using propose_meal_log, include the user's full text and structured mentions for every food you can identify. Preserve the exact food phrase in originalText, translate the food to a generic English USDA search term in canonicalEnglishName, include quantity/unit/unitKind, and set confidence. Do not include calories or macros.
 - Do not use query_food_memory or search_nutrition_database as the final action for a complete meal logging request. Those tools only answer lookup/search requests.
 - For questions about calories left, use get_remaining_targets.
 - For history lookup, use get_meal_history.

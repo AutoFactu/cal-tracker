@@ -39,6 +39,22 @@ class AgentRunResult {
   final List<FoodCandidateGroup>? candidateGroups;
 }
 
+class VoiceMealRunResult {
+  const VoiceMealRunResult({
+    required this.transcript,
+    required this.provider,
+    required this.model,
+    required this.traceId,
+    required this.result,
+  });
+
+  final String transcript;
+  final String provider;
+  final String model;
+  final String traceId;
+  final AgentRunResult result;
+}
+
 class NutritionRepository {
   NutritionRepository({required CalTrackerApiClient apiClient})
       : _apiClient = apiClient;
@@ -47,6 +63,21 @@ class NutritionRepository {
 
   Future<AgentRunResult> logText(String text) async {
     final json = await _apiClient.runAgent(text);
+    return _parseAgentRunResult(json);
+  }
+
+  Future<VoiceMealRunResult> logAudio(File audioFile) async {
+    final json = await _apiClient.runVoiceMeal(audioFile, source: 'flutter');
+    return VoiceMealRunResult(
+      transcript: json['transcript'] as String,
+      provider: json['provider'] as String,
+      model: json['model'] as String,
+      traceId: json['traceId'] as String,
+      result: _parseAgentRunResult(json['result'] as Map<String, Object?>),
+    );
+  }
+
+  AgentRunResult _parseAgentRunResult(Map<String, Object?> json) {
     final kind = json['kind'] as String;
     return AgentRunResult(
       kind: kind,

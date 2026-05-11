@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { FoodMention } from "@cal-tracker/contracts";
 import {
   buildTestApp,
   createTestUsualBreakfastTemplate,
@@ -8,7 +9,9 @@ import {
 
 describe("action loop", () => {
   it("creates a proposal from explicit selected meal items", async () => {
-    const { request } = buildTestApp();
+    const { request, repository } = buildTestApp();
+    const recordFoodFeedback = vi.fn(async () => undefined);
+    Object.assign(repository, { recordFoodFeedback });
     const auth = await registerAndAuth(request);
 
     const response = await request(
@@ -32,10 +35,24 @@ describe("action loop", () => {
     };
     expect(body.output.proposal.title).toBe("Bread");
     expect(body.output.proposal.items).toHaveLength(1);
+    expect(recordFoodFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: auth.user.id,
+        action: "selected",
+        query: "selected food matches",
+        metadata: expect.objectContaining({
+          eventType: "selected_for_proposal",
+          explicitSelection: true,
+          itemName: "Bread",
+        }),
+      }),
+    );
   });
 
   it("creates a chicken and rice proposal, commits it, and includes it in the daily summary", async () => {
     const { request, repository } = buildTestApp();
+    const recordFoodFeedback = vi.fn(async () => undefined);
+    Object.assign(repository, { recordFoodFeedback });
     const auth = await registerAndAuth(request);
 
     const proposalResponse = await request(
@@ -53,10 +70,29 @@ describe("action loop", () => {
     );
     expect(proposalResponse.status).toBe(200);
     const proposalEnvelope = (await proposalResponse.json()) as {
-      output: { proposal: { id: string; title: string; items: unknown[] } };
+      output: {
+        proposal: { id: string; title: string; items: unknown[] };
+        options: Array<{ mention: { canonicalEnglishName: string } }>;
+        candidateGroups: Array<{ mention: { canonicalEnglishName: string } }>;
+      };
     };
     expect(proposalEnvelope.output.proposal.title).toBe("Chicken and rice");
     expect(proposalEnvelope.output.proposal.items).toHaveLength(2);
+    expect(proposalEnvelope.output.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          mention: expect.objectContaining({
+            canonicalEnglishName: "chicken breast",
+          }),
+        }),
+        expect.objectContaining({
+          mention: expect.objectContaining({ canonicalEnglishName: "rice" }),
+        }),
+      ]),
+    );
+    expect(proposalEnvelope.output.candidateGroups).toEqual(
+      proposalEnvelope.output.options,
+    );
 
     const commitResponse = await request(
       `http://localhost/v1/meals/proposals/${proposalEnvelope.output.proposal.id}/commit`,
@@ -71,6 +107,17 @@ describe("action loop", () => {
       output: { meal: { id: string; nutrition: { calories: number } } };
     };
     expect(committed.output.meal.nutrition.calories).toBeGreaterThan(250);
+    expect(recordFoodFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: auth.user.id,
+        action: "logged",
+        metadata: expect.objectContaining({
+          eventType: "proposal_committed",
+          proposalId: proposalEnvelope.output.proposal.id,
+          mealId: committed.output.meal.id,
+        }),
+      }),
+    );
 
     const summary = await request(
       `http://localhost/v1/summary/daily?date=${new Date().toISOString().slice(0, 10)}`,
@@ -238,6 +285,78 @@ describe("action loop", () => {
     );
   });
 
+  it("uses model-provided food mentions without extracting text again", async () => {
+    const throwingExtractor = {
+      async extract(): Promise<FoodMention[]> {
+        throw new Error("text extractor should not be called");
+      },
+    };
+    const { request } = buildTestApp({ foodTextExtractor: throwingExtractor });
+    const auth = await registerAndAuth(request);
+
+    const proposalResponse = await request(
+      "http://localhost/v1/actions/propose_meal_log/execute",
+      {
+        method: "POST",
+        headers: auth.authHeader,
+        body: JSON.stringify({
+          input: {
+            text: "He comido 100 gramos de pollo y 100 gramos de arroz",
+            mentions: [
+              {
+                originalText: "100 gramos de pollo",
+                canonicalEnglishName: "chicken breast",
+                quantity: 100,
+                unit: "g",
+                rawUnitText: "gramos",
+                unitKind: "metric",
+                confidence: 0.95,
+                marketProduct: false,
+              },
+              {
+                originalText: "100 gramos de arroz",
+                canonicalEnglishName: "rice",
+                quantity: 100,
+                unit: "g",
+                rawUnitText: "gramos",
+                unitKind: "metric",
+                confidence: 0.95,
+                marketProduct: false,
+              },
+            ],
+          },
+          source: "flutter",
+        }),
+      },
+    );
+
+    expect(proposalResponse.status).toBe(200);
+    const body = (await proposalResponse.json()) as {
+      output: {
+        proposal: {
+          items: { name: string; quantity: number }[];
+        };
+        instrumentation: {
+          inputMode: string;
+          phasesMs: Record<string, number>;
+        };
+      };
+    };
+    expect(body.output.instrumentation.inputMode).toBe("model_mentions");
+    expect(body.output.instrumentation.phasesMs).toHaveProperty(
+      "resolve_provided_mentions",
+    );
+    expect(body.output.instrumentation.phasesMs).not.toHaveProperty(
+      "resolve_meal_text",
+    );
+    expect(body.output.proposal.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "Chicken breast", quantity: 100 }),
+        expect.objectContaining({ name: "Cooked rice", quantity: 100 }),
+      ]),
+    );
+  });
+
   it("requires clarification instead of creating a proposal for unsupported food units", async () => {
     const { request } = buildTestApp();
     const auth = await registerAndAuth(request);
@@ -273,8 +392,52 @@ describe("action loop", () => {
     );
   });
 
-  it("corrects a committed meal with an explicit item list", async () => {
+  it("returns grouped candidates for nutrition database search", async () => {
     const { request } = buildTestApp();
+    const auth = await registerAndAuth(request);
+
+    const response = await request(
+      "http://localhost/v1/actions/search_nutrition_database/execute",
+      {
+        method: "POST",
+        headers: auth.authHeader,
+        body: JSON.stringify({
+          input: { query: "bread" },
+          source: "flutter",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      output: {
+        items: Array<{ name: string }>;
+        candidates: Array<{
+          mention: { canonicalEnglishName: string };
+          candidates: Array<{ name: string; rank?: number }>;
+        }>;
+        candidateGroups: Array<{
+          mention: { canonicalEnglishName: string };
+          candidates: Array<{ name: string; rank?: number }>;
+        }>;
+      };
+    };
+    expect(body.output.items.some((item) => item.name === "Bread")).toBe(true);
+    expect(body.output.candidates[0]).toEqual(
+      expect.objectContaining({
+        mention: expect.objectContaining({ canonicalEnglishName: "bread" }),
+        candidates: expect.arrayContaining([
+          expect.objectContaining({ name: "Bread", rank: 1 }),
+        ]),
+      }),
+    );
+    expect(body.output.candidateGroups).toEqual(body.output.candidates);
+  });
+
+  it("corrects a committed meal with an explicit item list", async () => {
+    const { request, repository } = buildTestApp();
+    const recordFoodFeedback = vi.fn(async () => undefined);
+    Object.assign(repository, { recordFoodFeedback });
     const auth = await registerAndAuth(request);
     const proposal = await request(
       "http://localhost/v1/actions/propose_meal_log/execute",
@@ -347,6 +510,17 @@ describe("action loop", () => {
     ).toBe(200);
     expect(body.output.meal.nutrition.calories).toBeGreaterThan(
       meal.output.meal.nutrition.calories,
+    );
+    expect(recordFoodFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: auth.user.id,
+        action: "corrected",
+        metadata: expect.objectContaining({
+          eventType: "meal_corrected",
+          mealId: meal.output.meal.id,
+          itemName: "Chicken breast",
+        }),
+      }),
     );
   });
 

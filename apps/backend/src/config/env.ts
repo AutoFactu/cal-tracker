@@ -13,11 +13,19 @@ const envSchema = z.object({
   SESSION_TOKEN_PEPPER: z.string().min(32),
   OPENROUTER_API_KEY: z.string().min(1),
   OPENROUTER_MODEL: z.string().min(1),
+  OPENROUTER_PROVIDER_SORT: z.enum(["price", "throughput", "latency"]).default("latency"),
+  OPENROUTER_PROVIDER_MAX_LATENCY_P50: z.coerce.number().positive().default(0.6),
+  OPENROUTER_PROVIDER_MAX_LATENCY_P90: z.coerce.number().positive().default(1.5),
+  OPENROUTER_PROVIDER_MAX_LATENCY_P99: z.coerce.number().positive().default(3),
+  OPENROUTER_PROVIDER_MIN_THROUGHPUT_P50: z.coerce.number().positive().default(80),
+  OPENROUTER_PROVIDER_MIN_THROUGHPUT_P90: z.coerce.number().positive().default(40),
+  OPENROUTER_PROVIDER_REQUIRE_PARAMETERS: stringBooleanSchema.default(false),
+  OPENROUTER_PROVIDER_ALLOW_FALLBACKS: stringBooleanSchema.default(true),
   STT_API_KEY: z.string().min(1),
   STT_MODEL: z.string().min(1).default("whisper-large-v3-turbo"),
   STT_BASE_URL: z.string().url().default("https://api.groq.com/openai/v1"),
   USDA_FDC_API_KEY: z.string().optional(),
-  USDA_LIVE_FALLBACK_ENABLED: stringBooleanSchema.default(true),
+  USDA_LIVE_FALLBACK_ENABLED: stringBooleanSchema.default(false),
   OPENFOODFACTS_BASE_URL: z.string().url().default("https://world.openfoodfacts.org"),
   OPENFOODFACTS_USER_AGENT: z.string().min(1).default("CalTracker/0.1 (development)"),
   FOOD_RESOLVER_MIN_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.75),
@@ -29,12 +37,15 @@ const envSchema = z.object({
   APP_BASE_URL: z.string().url(),
   CORS_ALLOWED_ORIGINS: z.string().min(1),
   TRUSTED_AUTO_COMMIT_THRESHOLD: z.coerce.number().min(0).max(1).default(0.92),
+  AGENT_RUN_LOG_ENABLED: stringBooleanSchema.optional(),
+  AGENT_RUN_LOG_DIR: z.string().min(1).default("../../logs/agent-runs"),
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_SCHEMA: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).default("public"),
   NODE_ENV: z.string().default("development")
 });
 
-export type AppConfig = z.infer<typeof envSchema> & {
+export type AppConfig = Omit<z.infer<typeof envSchema>, "AGENT_RUN_LOG_ENABLED"> & {
+  AGENT_RUN_LOG_ENABLED: boolean;
   corsAllowedOrigins: string[];
 };
 
@@ -47,11 +58,19 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
         SESSION_TOKEN_PEPPER: "test-session-pepper-with-more-than-32-characters",
         OPENROUTER_API_KEY: "test-openrouter-key",
         OPENROUTER_MODEL: "test-model",
+        OPENROUTER_PROVIDER_SORT: "latency",
+        OPENROUTER_PROVIDER_MAX_LATENCY_P50: "0.6",
+        OPENROUTER_PROVIDER_MAX_LATENCY_P90: "1.5",
+        OPENROUTER_PROVIDER_MAX_LATENCY_P99: "3",
+        OPENROUTER_PROVIDER_MIN_THROUGHPUT_P50: "80",
+        OPENROUTER_PROVIDER_MIN_THROUGHPUT_P90: "40",
+        OPENROUTER_PROVIDER_REQUIRE_PARAMETERS: "false",
+        OPENROUTER_PROVIDER_ALLOW_FALLBACKS: "true",
         STT_API_KEY: "test-stt-key",
         STT_MODEL: "test-stt-model",
         STT_BASE_URL: "http://localhost:9999",
         USDA_FDC_API_KEY: "test-usda-key",
-        USDA_LIVE_FALLBACK_ENABLED: "true",
+        USDA_LIVE_FALLBACK_ENABLED: "false",
         OPENFOODFACTS_BASE_URL: "http://localhost:9998",
         OPENFOODFACTS_USER_AGENT: "CalTrackerTests/1.0",
         FOOD_RESOLVER_MIN_CONFIDENCE: "0.75",
@@ -63,6 +82,8 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
         APP_BASE_URL: "http://localhost:3000",
         CORS_ALLOWED_ORIGINS: "http://localhost:3000",
         TRUSTED_AUTO_COMMIT_THRESHOLD: "0.92",
+        AGENT_RUN_LOG_ENABLED: "false",
+        AGENT_RUN_LOG_DIR: "../../logs/agent-runs",
         PORT: "3000",
         DATABASE_SCHEMA: "public",
         NODE_ENV: "test"
@@ -74,6 +95,9 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     ...parsed,
     DATABASE_URL: databaseUrl,
+    AGENT_RUN_LOG_ENABLED:
+      parsed.AGENT_RUN_LOG_ENABLED ??
+      (parsed.NODE_ENV !== "test" && parsed.NODE_ENV !== "production"),
     corsAllowedOrigins: parsed.CORS_ALLOWED_ORIGINS.split(",").map((origin) => origin.trim())
   };
 }
