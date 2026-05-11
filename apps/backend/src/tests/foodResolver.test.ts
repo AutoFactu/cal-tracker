@@ -153,6 +153,81 @@ describe("FoodResolver candidate groups", () => {
     );
     expect(result.items[0]).toBe(result.candidateGroups[0]!.candidates[0]);
   });
+
+  it("orders alternatives by the visible recommendation probability", async () => {
+    const repository = testFoodRepository();
+    const provider: FoodDataProvider = {
+      id: "test-provider",
+      async resolve() {
+        return [
+          {
+            name: "Lexical favorite",
+            quantity: 100,
+            unit: "g",
+            calories: 110,
+            proteinGrams: 20,
+            carbsGrams: 0,
+            fatGrams: 3,
+            source: "test",
+            confidence: 0.64,
+            matchScore: 0.5,
+            lexicalScore: 0.9,
+            rank: 1,
+          },
+          {
+            name: "Best probability",
+            quantity: 100,
+            unit: "g",
+            calories: 120,
+            proteinGrams: 21,
+            carbsGrams: 0,
+            fatGrams: 4,
+            source: "test",
+            confidence: 0.95,
+            matchScore: 0.43,
+            lexicalScore: 0.45,
+            rank: 3,
+          },
+          {
+            name: "Middle probability",
+            quantity: 100,
+            unit: "g",
+            calories: 115,
+            proteinGrams: 20,
+            carbsGrams: 1,
+            fatGrams: 3,
+            source: "test",
+            confidence: 0.8,
+            matchScore: 0.47,
+            lexicalScore: 0.55,
+            rank: 2,
+          },
+        ];
+      },
+    };
+    const resolver = new FoodResolver(
+      {
+        async extract() {
+          return [mention("candidate")];
+        },
+      },
+      [provider],
+      repository,
+      0.75,
+    );
+
+    const result = await resolver.resolveMealText("user-1", "candidate");
+
+    expect(result.candidateGroups[0]!.candidates.map((item) => item.name)).toEqual(
+      ["Best probability", "Middle probability", "Lexical favorite"],
+    );
+    expect(result.candidateGroups[0]!.candidates.map((item) => item.rank)).toEqual([
+      1,
+      2,
+      3,
+    ]);
+    expect(result.items[0]?.name).toBe("Best probability");
+  });
 });
 
 describe("FoodResolver", () => {

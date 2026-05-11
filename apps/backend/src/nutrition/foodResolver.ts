@@ -201,9 +201,7 @@ export class FoodResolver {
       )
         break;
     }
-    candidates.sort((a, b) =>
-      (b.matchScore ?? b.confidence ?? 0) - (a.matchScore ?? a.confidence ?? 0),
-    );
+    candidates.sort(compareFoodCandidates);
     if (
       candidates.length === 0 &&
       !reason &&
@@ -1291,12 +1289,39 @@ function normalizeProviderResolution(
 
 function annotateCandidateMetadata(candidates: MealItem[]): MealItem[] {
   return candidates.slice(0, 10).map((candidate, index) => {
-    candidate.rank ??= index + 1;
+    candidate.rank = index + 1;
     candidate.matchScore ??= candidate.confidence;
     candidate.lexicalScore ??= candidate.confidence;
     candidate.matchReason ??= candidate.externalSource ?? candidate.source;
     return candidate;
   });
+}
+
+function compareFoodCandidates(a: MealItem, b: MealItem): number {
+  return (
+    recommendationScore(b) - recommendationScore(a) ||
+    (b.confidence ?? 0) - (a.confidence ?? 0) ||
+    (b.matchScore ?? 0) - (a.matchScore ?? 0) ||
+    (b.preferenceScore ?? 0) - (a.preferenceScore ?? 0) ||
+    (b.vectorScore ?? 0) - (a.vectorScore ?? 0) ||
+    (b.lexicalScore ?? 0) - (a.lexicalScore ?? 0) ||
+    a.name.localeCompare(b.name)
+  );
+}
+
+function recommendationScore(item: MealItem): number {
+  const confidence = item.confidence ?? item.matchScore ?? 0;
+  const matchScore = item.matchScore ?? confidence;
+  const preferenceScore = Math.max(-1, Math.min(1, item.preferenceScore ?? 0));
+  const vectorScore = item.vectorScore ?? 0;
+  const lexicalScore = item.lexicalScore ?? 0;
+  return (
+    confidence * 0.72 +
+    matchScore * 0.18 +
+    preferenceScore * 0.07 +
+    vectorScore * 0.02 +
+    lexicalScore * 0.01
+  );
 }
 
 function resolvedGrams(item: MealItem): number | undefined {

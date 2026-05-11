@@ -154,7 +154,8 @@ class _MealCreateScreenState extends State<MealCreateScreen> {
                 ),
                 const SizedBox(height: FreshSpacing.md),
               ],
-              if (viewModel.candidateGroups != null) ...[
+              if (viewModel.candidateGroups != null &&
+                  viewModel.proposal == null) ...[
                 _ResolverClarificationCard(
                   groups: viewModel.candidateGroups!,
                   isCandidateSelected: viewModel.isCandidateSelected,
@@ -215,7 +216,10 @@ class _MealCreateScreenState extends State<MealCreateScreen> {
     final items = await showModalBottomSheet<List<MealItem>>(
       context: context,
       isScrollControlled: true,
-      builder: (context) => _ProposalEditorSheet(proposal: proposal),
+      builder: (context) => _ProposalEditorSheet(
+        proposal: proposal,
+        candidateGroups: viewModel.candidateGroups ?? const [],
+      ),
     );
     if (items == null || !context.mounted) return;
     await viewModel.updateProposalItems(items);
@@ -1147,9 +1151,13 @@ class _ProposalCard extends StatelessWidget {
 }
 
 class _ProposalEditorSheet extends StatefulWidget {
-  const _ProposalEditorSheet({required this.proposal});
+  const _ProposalEditorSheet({
+    required this.proposal,
+    required this.candidateGroups,
+  });
 
   final MealProposal proposal;
+  final List<FoodCandidateGroup> candidateGroups;
 
   @override
   State<_ProposalEditorSheet> createState() => _ProposalEditorSheetState();
@@ -1204,6 +1212,13 @@ class _ProposalEditorSheetState extends State<_ProposalEditorSheet> {
                   key: ValueKey('proposal_item_editor_$index'),
                   item: _items[index],
                   index: index,
+                  candidates: _candidateOptionsFor(_items[index].original),
+                  onCandidateSelected: (candidate) {
+                    setState(() {
+                      _items[index].replaceWith(candidate);
+                    });
+                  },
+                  onNutritionEdit: () => _editNutrition(index),
                   onDelete: _items.length == 1
                       ? null
                       : () {
@@ -1251,6 +1266,27 @@ class _ProposalEditorSheetState extends State<_ProposalEditorSheet> {
     if (edited.isEmpty) return;
     Navigator.of(context).pop(edited);
   }
+
+  Future<void> _editNutrition(int index) async {
+    final edited = await showModalBottomSheet<_NutritionEdit>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _NutritionEditorSheet(item: _items[index]),
+    );
+    if (edited == null) return;
+    setState(() {
+      _items[index].setNutritionOverride(edited);
+    });
+  }
+
+  List<MealItem> _candidateOptionsFor(MealItem item) {
+    for (final group in widget.candidateGroups) {
+      if (_itemMatchesCandidateGroup(item, group)) {
+        return group.candidates.take(_candidateDisplayLimit).toList();
+      }
+    }
+    return const [];
+  }
 }
 
 class _EditableIngredientRow extends StatelessWidget {
@@ -1258,20 +1294,38 @@ class _EditableIngredientRow extends StatelessWidget {
     super.key,
     required this.item,
     required this.index,
+    required this.candidates,
+    required this.onCandidateSelected,
+    required this.onNutritionEdit,
     required this.onDelete,
   });
 
   final _EditableMealItem item;
   final int index;
+  final List<MealItem> candidates;
+  final ValueChanged<MealItem> onCandidateSelected;
+  final VoidCallback onNutritionEdit;
   final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final nutrition = item.currentNutrition();
     return FreshCard(
       padding: const EdgeInsets.all(12),
       shadow: false,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (candidates.isNotEmpty) ...[
+            _CandidateSwapStrip(
+              index: index,
+              candidates: candidates,
+              selectedItem: item.original,
+              onSelected: onCandidateSelected,
+            ),
+            const SizedBox(height: FreshSpacing.sm),
+          ],
           TextField(
             key: ValueKey('proposal_item_name_$index'),
             controller: item.nameController,
@@ -1308,10 +1362,303 @@ class _EditableIngredientRow extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: FreshSpacing.sm),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${nutrition.calories} Kcal · '
+                  '${_formatMacro(nutrition.proteinGrams)}P · '
+                  '${_formatMacro(nutrition.carbsGrams)}C · '
+                  '${_formatMacro(nutrition.fatGrams)}F',
+                  style: textTheme.labelMedium?.copyWith(
+                    color: FreshColors.inkMuted,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              TextButton.icon(
+                key: ValueKey('edit_proposal_item_nutrition_$index'),
+                onPressed: onNutritionEdit,
+                icon: const Icon(Icons.tune_rounded, size: 18),
+                label: const Text('Nutrition'),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
+}
+
+class _CandidateSwapStrip extends StatefulWidget {
+  const _CandidateSwapStrip({
+    required this.index,
+    required this.candidates,
+    required this.selectedItem,
+    required this.onSelected,
+  });
+
+  final int index;
+  final List<MealItem> candidates;
+  final MealItem selectedItem;
+  final ValueChanged<MealItem> onSelected;
+
+  @override
+  State<_CandidateSwapStrip> createState() => _CandidateSwapStripState();
+}
+
+class _CandidateSwapStripState extends State<_CandidateSwapStrip> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final candidates = widget.candidates.take(_candidateDisplayLimit).toList();
+    final visibleIndexes = _visibleCandidateIndexes(candidates);
+    final hiddenCount = candidates.length - visibleIndexes.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Food match',
+          style: textTheme.labelMedium?.copyWith(color: FreshColors.inkMuted),
+        ),
+        const SizedBox(height: FreshSpacing.xs),
+        for (final candidateIndex in visibleIndexes)
+          _CandidateMealLine(
+            key: ValueKey(
+              'proposal_item_${widget.index}_candidate_$candidateIndex',
+            ),
+            candidate: candidates[candidateIndex],
+            selected: _sameMealItem(
+              candidates[candidateIndex],
+              widget.selectedItem,
+            ),
+            onSelected: () => widget.onSelected(candidates[candidateIndex]),
+          ),
+        if (candidates.length > _candidatePreviewCount) ...[
+          const SizedBox(height: FreshSpacing.xs),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: ValueKey('proposal_item_${widget.index}_candidate_toggle'),
+              onPressed: () => setState(() => _expanded = !_expanded),
+              icon: Icon(
+                _expanded
+                    ? Icons.keyboard_arrow_up_rounded
+                    : Icons.keyboard_arrow_down_rounded,
+              ),
+              label: Text(
+                _expanded
+                    ? 'Show fewer'
+                    : 'Show ${hiddenCount.clamp(0, candidates.length)} more',
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  List<int> _visibleCandidateIndexes(List<MealItem> candidates) {
+    if (_expanded) {
+      return [for (var index = 0; index < candidates.length; index++) index];
+    }
+
+    final indexes = <int>{};
+    for (var index = 0;
+        index < candidates.length && index < _candidatePreviewCount;
+        index++) {
+      indexes.add(index);
+    }
+
+    for (var index = 0; index < candidates.length; index++) {
+      if (_sameMealItem(candidates[index], widget.selectedItem)) {
+        indexes.add(index);
+        break;
+      }
+    }
+
+    return indexes.toList()..sort();
+  }
+}
+
+class _NutritionEditorSheet extends StatefulWidget {
+  const _NutritionEditorSheet({required this.item});
+
+  final _EditableMealItem item;
+
+  @override
+  State<_NutritionEditorSheet> createState() => _NutritionEditorSheetState();
+}
+
+class _NutritionEditorSheetState extends State<_NutritionEditorSheet> {
+  late final TextEditingController _caloriesController;
+  late final TextEditingController _proteinController;
+  late final TextEditingController _carbsController;
+  late final TextEditingController _fatController;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final nutrition = widget.item.currentNutrition();
+    _caloriesController =
+        TextEditingController(text: nutrition.calories.toString());
+    _proteinController =
+        TextEditingController(text: _formatMacro(nutrition.proteinGrams));
+    _carbsController =
+        TextEditingController(text: _formatMacro(nutrition.carbsGrams));
+    _fatController =
+        TextEditingController(text: _formatMacro(nutrition.fatGrams));
+  }
+
+  @override
+  void dispose() {
+    _caloriesController.dispose();
+    _proteinController.dispose();
+    _carbsController.dispose();
+    _fatController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final textTheme = Theme.of(context).textTheme;
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(18, 12, 18, bottomInset + 18),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 44,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: FreshColors.rule,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+            const SizedBox(height: FreshSpacing.lg),
+            Text('Edit nutrition', style: textTheme.titleLarge),
+            const SizedBox(height: FreshSpacing.xs),
+            Text(
+              widget.item.nameController.text.trim().isEmpty
+                  ? 'Manual ingredient'
+                  : widget.item.nameController.text.trim(),
+              style: textTheme.bodyMedium?.copyWith(
+                color: FreshColors.inkMuted,
+              ),
+            ),
+            const SizedBox(height: FreshSpacing.md),
+            if (_error != null) ...[
+              FreshStatusBanner(
+                icon: Icons.error_outline_rounded,
+                title: 'Check nutrition',
+                message: _error!,
+                color: FreshColors.coral,
+              ),
+              const SizedBox(height: FreshSpacing.md),
+            ],
+            TextField(
+              key: const ValueKey('proposal_nutrition_calories'),
+              controller: _caloriesController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Calories'),
+            ),
+            const SizedBox(height: FreshSpacing.sm),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey('proposal_nutrition_protein'),
+                    controller: _proteinController,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: 'Protein'),
+                  ),
+                ),
+                const SizedBox(width: FreshSpacing.sm),
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey('proposal_nutrition_carbs'),
+                    controller: _carbsController,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: 'Carbs'),
+                  ),
+                ),
+                const SizedBox(width: FreshSpacing.sm),
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey('proposal_nutrition_fat'),
+                    controller: _fatController,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: 'Fat'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: FreshSpacing.md),
+            FilledButton.icon(
+              key: const ValueKey('save_proposal_nutrition_button'),
+              onPressed: _save,
+              icon: const Icon(Icons.check_rounded),
+              label: const Text('Save nutrition'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _save() {
+    final calories = int.tryParse(_caloriesController.text.trim());
+    final protein = double.tryParse(_proteinController.text.trim());
+    final carbs = double.tryParse(_carbsController.text.trim());
+    final fat = double.tryParse(_fatController.text.trim());
+    if (calories == null ||
+        calories < 0 ||
+        protein == null ||
+        protein < 0 ||
+        carbs == null ||
+        carbs < 0 ||
+        fat == null ||
+        fat < 0) {
+      setState(() {
+        _error = 'Use non-negative numbers for calories and macros.';
+      });
+      return;
+    }
+    Navigator.of(context).pop(
+      _NutritionEdit(
+        calories: calories,
+        proteinGrams: _roundMacro(protein),
+        carbsGrams: _roundMacro(carbs),
+        fatGrams: _roundMacro(fat),
+      ),
+    );
+  }
+}
+
+class _NutritionEdit {
+  const _NutritionEdit({
+    required this.calories,
+    required this.proteinGrams,
+    required this.carbsGrams,
+    required this.fatGrams,
+  });
+
+  final int calories;
+  final double proteinGrams;
+  final double carbsGrams;
+  final double fatGrams;
 }
 
 class _EditableMealItem {
@@ -1339,25 +1686,53 @@ class _EditableMealItem {
     unitController = TextEditingController(text: 'g');
   }
 
-  final MealItem original;
+  MealItem original;
+  _NutritionEdit? _nutritionOverride;
   late final TextEditingController nameController;
   late final TextEditingController quantityController;
   late final TextEditingController unitController;
+
+  void replaceWith(MealItem item) {
+    original = item;
+    _nutritionOverride = null;
+    nameController.text = item.name;
+    quantityController.text = _formatQuantity(item.quantity);
+    unitController.text = item.unit;
+  }
+
+  void setNutritionOverride(_NutritionEdit value) {
+    _nutritionOverride = value;
+  }
+
+  _NutritionEdit currentNutrition() {
+    final override = _nutritionOverride;
+    if (override != null) return override;
+    final quantity = double.tryParse(quantityController.text.trim());
+    final factor = original.quantity > 0 && quantity != null && quantity > 0
+        ? quantity / original.quantity
+        : 1.0;
+    return _NutritionEdit(
+      calories: (original.calories * factor).round(),
+      proteinGrams: _roundMacro(original.proteinGrams * factor),
+      carbsGrams: _roundMacro(original.carbsGrams * factor),
+      fatGrams: _roundMacro(original.fatGrams * factor),
+    );
+  }
 
   MealItem toMealItem({
     required String name,
     required double quantity,
     required String unit,
   }) {
-    final factor = original.quantity > 0 ? quantity / original.quantity : 1.0;
+    final nutrition = currentNutrition();
     return original.copyWith(
       name: name,
       quantity: quantity,
       unit: unit,
-      calories: (original.calories * factor).round(),
-      proteinGrams: _roundMacro(original.proteinGrams * factor),
-      carbsGrams: _roundMacro(original.carbsGrams * factor),
-      fatGrams: _roundMacro(original.fatGrams * factor),
+      calories: nutrition.calories,
+      proteinGrams: nutrition.proteinGrams,
+      carbsGrams: nutrition.carbsGrams,
+      fatGrams: nutrition.fatGrams,
       source: original.source == 'manual_edit'
           ? 'manual_edit'
           : '${original.source}:manual_edit',
@@ -1369,6 +1744,24 @@ class _EditableMealItem {
     quantityController.dispose();
     unitController.dispose();
   }
+}
+
+bool _itemMatchesCandidateGroup(MealItem item, FoodCandidateGroup group) {
+  if (group.candidates.any((candidate) => _sameMealItem(candidate, item))) {
+    return true;
+  }
+  return item.canonicalName == group.mention.canonicalEnglishName ||
+      item.originalText == group.mention.originalText;
+}
+
+bool _sameMealItem(MealItem a, MealItem b) {
+  if (a.externalId != null && b.externalId != null) {
+    return a.externalId == b.externalId && a.externalSource == b.externalSource;
+  }
+  return a.name == b.name &&
+      a.source == b.source &&
+      a.quantity == b.quantity &&
+      a.unit == b.unit;
 }
 
 class _MetricBlock extends StatelessWidget {
@@ -1474,6 +1867,11 @@ class _MealLine extends StatelessWidget {
 }
 
 String _formatQuantity(double value) {
+  if (value == value.roundToDouble()) return value.toInt().toString();
+  return value.toStringAsFixed(1);
+}
+
+String _formatMacro(double value) {
   if (value == value.roundToDouble()) return value.toInt().toString();
   return value.toStringAsFixed(1);
 }

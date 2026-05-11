@@ -506,9 +506,9 @@ class VoiceLogViewModel extends ChangeNotifier {
           proposal: proposal,
           message: 'Meal proposal created.',
           errorMessage: null,
-          candidateGroups: null,
           resolvedItems: null,
-          selectedCandidateItems: const {},
+          candidateGroups: groups,
+          selectedCandidateItems: selections,
         ),
       );
     } catch (error) {

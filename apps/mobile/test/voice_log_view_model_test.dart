@@ -468,6 +468,8 @@ void main() {
         expect(captured, [group.candidates[9]]);
         expect(viewModel.state, VoiceLogState.proposalReady);
         expect(viewModel.proposal, proposal);
+        expect(viewModel.candidateGroups, [group]);
+        expect(viewModel.selectedCandidateFor(group), group.candidates[9]);
       });
 
       test(

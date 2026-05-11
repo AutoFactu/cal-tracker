@@ -102,6 +102,114 @@ void main() {
       expect(candidateNineFinder, findsOneWidget);
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets('keeps candidate options in proposal editor', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final group = _candidateGroup(
+        canonicalEnglishName: 'chicken_breast',
+        candidates: [
+          for (var index = 0; index < 10; index++)
+            _mealItem(
+              name: 'Chicken candidate ${index + 1}',
+              calories: 100 + index,
+              externalId: 'chicken_${index + 1}',
+            ),
+        ],
+      );
+      final proposal = MealProposal(
+        id: 'prop_chicken',
+        title: 'Chicken',
+        confidence: 0.82,
+        requiresConfirmation: true,
+        trustedAutoCommitEligible: false,
+        nutrition: const NutritionSnapshot(
+          calories: 100,
+          proteinGrams: 7,
+          carbsGrams: 1,
+          fatGrams: 8,
+        ),
+        items: [group.candidates.first],
+      );
+      when(() => nutritionRepository.logText('chicken')).thenAnswer(
+        (_) async => AgentRunResult(
+          kind: 'clarification_required',
+          message: 'Choose a food match.',
+          candidateGroups: [group],
+        ),
+      );
+      when(
+        () => nutritionRepository.createProposalFromItems(
+          phrase: any(named: 'phrase'),
+          items: any(named: 'items'),
+        ),
+      ).thenAnswer((_) async => proposal);
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider<VoiceLogViewModel>.value(
+          value: viewModel,
+          child: MaterialApp(
+            theme: buildTheme(),
+            home: const MealCreateScreen(),
+          ),
+        ),
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey('meal_text_field')),
+        'chicken',
+      );
+      await tester.tap(find.byKey(const ValueKey('submit_meal_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('food_candidate_chicken_breast_0')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('edit_proposal_button')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('proposal_item_0_candidate_0')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('proposal_item_0_candidate_9')),
+        findsNothing,
+      );
+      final editorToggleFinder =
+          find.byKey(const ValueKey('proposal_item_0_candidate_toggle'));
+      await tester.ensureVisible(editorToggleFinder);
+      await tester.pumpAndSettle();
+      await tester.tap(editorToggleFinder);
+      await tester.pumpAndSettle();
+      final editorCandidateNineFinder =
+          find.byKey(const ValueKey('proposal_item_0_candidate_9'));
+      await tester.ensureVisible(editorCandidateNineFinder);
+      await tester.pumpAndSettle();
+      expect(
+        editorCandidateNineFinder,
+        findsOneWidget,
+      );
+      expect(
+          find.byKey(const ValueKey('proposal_item_calories_0')), findsNothing);
+      expect(
+          find.byKey(const ValueKey('proposal_item_protein_0')), findsNothing);
+
+      await tester.tap(
+        find.byKey(const ValueKey('edit_proposal_item_nutrition_0')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('proposal_nutrition_calories')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('proposal_nutrition_protein')),
+        findsOneWidget,
+      );
+    });
   });
 }
 
