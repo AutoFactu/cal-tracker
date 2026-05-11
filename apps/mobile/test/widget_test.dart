@@ -14,12 +14,33 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.text('Better Calories'), findsOneWidget);
-    expect(
-        find.textContaining('Track your', findRichText: true), findsOneWidget);
-    expect(find.textContaining('calories better', findRichText: true),
-        findsOneWidget);
+    expect(find.textContaining('Track your'), findsOneWidget);
+    expect(find.textContaining('calories better'), findsOneWidget);
+    expect(find.byKey(const ValueKey('auth_brand_icon')), findsOneWidget);
+    expect(find.byKey(const ValueKey('login_hero_carousel')), findsOneWidget);
+    expect(find.byKey(const ValueKey('login_hero_image_0')), findsOneWidget);
     expect(find.text('Email'), findsOneWidget);
     expect(find.byKey(const ValueKey('email_field')), findsOneWidget);
+    expect(find.text('Password'), findsOneWidget);
+    expect(find.byKey(const ValueKey('password_field')), findsOneWidget);
+    expect(find.text('Get Started'), findsOneWidget);
+    expect(find.byKey(const ValueKey('auth_submit_button')), findsOneWidget);
+  });
+
+  testWidgets('auth hero carousel advances to the next image', (tester) async {
+    await tester.pumpWidget(
+      CalTrackerBootstrap(preferencesRepository: _FakePreferencesRepository()),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('login_hero_image_0')), findsOneWidget);
+    expect(find.byKey(const ValueKey('login_hero_image_1')), findsNothing);
+
+    await tester.pump(const Duration(seconds: 11));
+    await tester.pump(const Duration(milliseconds: 900));
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('login_hero_image_1')), findsOneWidget);
   });
 
   testWidgets('starts in Spanish when saved locale preference is Spanish',
@@ -36,8 +57,13 @@ void main() {
     await tester.pump();
 
     expect(find.text('Correo'), findsOneWidget);
-    expect(find.textContaining('Controla mejor', findRichText: true),
-        findsOneWidget);
+    final headlineFinder = find.textContaining('Controla mejor');
+    expect(headlineFinder, findsOneWidget);
+    final headline = tester.widget<Text>(headlineFinder);
+    expect(
+      headline.data?.replaceAll('\n', ' '),
+      'Controla mejor tus calorías.',
+    );
   });
 
   testWidgets('keeps auth screen light when saved theme mode is dark',
