@@ -6,31 +6,31 @@ import { LocalBgeM3EmbeddingProvider } from "./embeddings/provider.js";
 import { createApp } from "./http/app.js";
 import { MemoryRetrievalService } from "./memory/retrieval.js";
 import {
-  CompositeFoodTextExtractor,
   DeterministicFoodTextExtractor,
   FoodResolver,
   LocalFoodDataProvider,
   OpenFoodFactsFoodDataProvider,
-  OpenRouterFoodTextExtractor,
   UsdaFoodDataProvider,
 } from "./nutrition/foodResolver.js";
 import { ResolverNutritionProvider } from "./nutrition/provider.js";
+import { createLocalRunLogger } from "./observability/localRunLogger.js";
 import { PostgresRepository } from "./repository/postgres.js";
 import { RemoteSpeechToTextProvider } from "./stt/speechToTextProvider.js";
 
 const config = loadConfig();
 const repository = new PostgresRepository(config.DATABASE_URL);
 const authService = new AuthService(config, repository);
+const embeddingProvider = config.EMBEDDING_BASE_URL
+  ? new LocalBgeM3EmbeddingProvider(
+      config.EMBEDDING_BASE_URL,
+      config.EMBEDDING_MODEL,
+      config.EMBEDDING_DIMENSIONS,
+    )
+  : undefined;
 const foodResolver = new FoodResolver(
-  new CompositeFoodTextExtractor([
-    new OpenRouterFoodTextExtractor(
-      config.OPENROUTER_API_KEY,
-      config.OPENROUTER_MODEL,
-    ),
-    new DeterministicFoodTextExtractor(),
-  ]),
+  new DeterministicFoodTextExtractor(),
   [
-    new LocalFoodDataProvider(repository),
+    new LocalFoodDataProvider(repository, { embeddingProvider }),
     new OpenFoodFactsFoodDataProvider(
       config.OPENFOODFACTS_BASE_URL,
       config.OPENFOODFACTS_USER_AGENT,
@@ -43,13 +43,6 @@ const foodResolver = new FoodResolver(
   config.FOOD_RESOLVER_MIN_CONFIDENCE,
 );
 const nutritionProvider = new ResolverNutritionProvider(foodResolver);
-const embeddingProvider = config.EMBEDDING_BASE_URL
-  ? new LocalBgeM3EmbeddingProvider(
-      config.EMBEDDING_BASE_URL,
-      config.EMBEDDING_MODEL,
-      config.EMBEDDING_DIMENSIONS,
-    )
-  : undefined;
 const memoryRetrievalService = new MemoryRetrievalService(
   repository,
   embeddingProvider,
@@ -65,12 +58,17 @@ const sttProvider = new RemoteSpeechToTextProvider(
   config.STT_MODEL,
   config.STT_BASE_URL,
 );
+const runLogger = createLocalRunLogger({
+  enabled: config.AGENT_RUN_LOG_ENABLED,
+  directory: config.AGENT_RUN_LOG_DIR,
+});
 const app = createApp({
   config,
   repository,
   authService,
   actionExecutor,
   sttProvider,
+  runLogger,
 });
 
 serve({ fetch: app.fetch, port: config.PORT });

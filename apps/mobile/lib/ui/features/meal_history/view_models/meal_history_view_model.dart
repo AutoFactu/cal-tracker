@@ -4,13 +4,23 @@ import '../../../../data/repositories/nutrition_repository.dart';
 import '../../../../domain/models/nutrition_models.dart';
 
 class MealHistoryViewModel extends ChangeNotifier {
-  MealHistoryViewModel({required NutritionRepository nutritionRepository})
-      : _nutritionRepository = nutritionRepository;
+  MealHistoryViewModel({
+    required NutritionRepository nutritionRepository,
+    Duration cacheTtl = const Duration(seconds: 60),
+    DateTime Function()? now,
+  })  : _nutritionRepository = nutritionRepository,
+        _cacheTtl = cacheTtl,
+        _now = now ?? DateTime.now;
 
   final NutritionRepository _nutritionRepository;
+  final Duration _cacheTtl;
+  final DateTime Function() _now;
   List<DailySummary> _weekSummaries = const [];
   String _selectedDate = _formatDateOnly(DateTime.now());
   bool _isLoading = false;
+  bool _hasLoaded = false;
+  DateTime? _lastLoadedAt;
+  Future<void>? _loadOperation;
   String? _error;
 
   List<DailySummary> get weekSummaries => _weekSummaries;
@@ -26,25 +36,42 @@ class MealHistoryViewModel extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
 
-  Future<void> load() async {
-    _isLoading = true;
-    notifyListeners();
+  Future<void> load({bool forceRefresh = false}) {
+    final isCacheFresh =
+        _lastLoadedAt != null && _now().difference(_lastLoadedAt!) < _cacheTtl;
+    if (!forceRefresh && _hasLoaded && isCacheFresh) {
+      return Future.value();
+    }
+    if (_loadOperation != null) return _loadOperation!;
+
+    final showLoading = forceRefresh || !_hasLoaded;
+    _loadOperation = _load(showLoading: showLoading).whenComplete(() {
+      _loadOperation = null;
+    });
+    return _loadOperation!;
+  }
+
+  Future<void> _load({required bool showLoading}) async {
+    if (showLoading) {
+      _isLoading = true;
+      notifyListeners();
+    }
     try {
-      _weekSummaries = await Future.wait(
-        _weekDates(DateTime.now()).map(
-          (date) => _nutritionRepository.getDailySummary(
-            date: _formatDateOnly(date),
-          ),
-        ),
-      );
+      await _loadWeekSummaries();
       if (!_weekSummaries.any((summary) => summary.date == _selectedDate)) {
-        _selectedDate = _formatDateOnly(DateTime.now());
+        _selectedDate = _formatDateOnly(_now());
       }
+      _hasLoaded = true;
+      _lastLoadedAt = _now();
       _error = null;
     } catch (error) {
-      _error = error.toString();
+      if (showLoading) {
+        _error = error.toString();
+      }
     } finally {
-      _isLoading = false;
+      if (showLoading) {
+        _isLoading = false;
+      }
       notifyListeners();
     }
   }
@@ -59,13 +86,9 @@ class MealHistoryViewModel extends ChangeNotifier {
     notifyListeners();
     try {
       await _nutritionRepository.correctMealItems(meal.id, items);
-      _weekSummaries = await Future.wait(
-        _weekDates(DateTime.now()).map(
-          (date) => _nutritionRepository.getDailySummary(
-            date: _formatDateOnly(date),
-          ),
-        ),
-      );
+      await _loadWeekSummaries();
+      _hasLoaded = true;
+      _lastLoadedAt = _now();
       _error = null;
     } catch (error) {
       _error = error.toString();
@@ -82,14 +105,10 @@ class MealHistoryViewModel extends ChangeNotifier {
       final deleted =
           await _nutritionRepository.deleteMeal(meal.id, confirmed: true);
       if (deleted) {
-        _weekSummaries = await Future.wait(
-          _weekDates(DateTime.now()).map(
-            (date) => _nutritionRepository.getDailySummary(
-              date: _formatDateOnly(date),
-            ),
-          ),
-        );
+        await _loadWeekSummaries();
       }
+      _hasLoaded = true;
+      _lastLoadedAt = _now();
       _error = null;
     } catch (error) {
       _error = error.toString();
@@ -97,6 +116,16 @@ class MealHistoryViewModel extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<void> _loadWeekSummaries() async {
+    _weekSummaries = await Future.wait(
+      _weekDates(_now()).map(
+        (date) => _nutritionRepository.getDailySummary(
+          date: _formatDateOnly(date),
+        ),
+      ),
+    );
   }
 }
 

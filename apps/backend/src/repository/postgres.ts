@@ -7,12 +7,28 @@ import type {
   ActionCallRecord,
   AppRepository,
   AuditEventRecord,
+  EmbeddingModelRecord,
+  FoodFeedbackRecord,
   FoodItemRecord,
+  FoodItemEmbeddingRecord,
+  FoodHybridSearchInput,
   FoodPortionRecord,
+  FoodSearchCandidate,
   MemoryMatch,
   StoredSession,
-  StoredUser
+  StoredUser,
+  UpsertFoodItemEmbeddingInput,
+  UserFoodPreference
 } from "./types.js";
+
+const ACTIVE_EMBEDDING_MODEL = { provider: "local", model: "bge-m3", dimensions: 1024 };
+const DEFAULT_FOOD_SEARCH_LIMIT = 50;
+const MAX_FOOD_SEARCH_LIMIT = 100;
+const LEXICAL_SCORE_WEIGHT = 0.7;
+const VECTOR_SCORE_WEIGHT = 0.25;
+const LEXICAL_ONLY_SCORE_WEIGHT = 0.95;
+const PREFERENCE_SCORE_WEIGHT = 0.05;
+const PREFERENCE_SCORE_NORMALIZER = 10;
 
 export class PostgresRepository implements AppRepository {
   private readonly sql: Sql;
@@ -129,10 +145,28 @@ export class PostgresRepository implements AppRepository {
   }
 
   async searchFoods(userId: string, query: string, barcode?: string): Promise<FoodItemRecord[]> {
-    const normalized = normalizeText(query);
-    const rows = barcode
-      ? await this.sql`SELECT * FROM food_items WHERE (user_id IS NULL OR user_id = ${userId}) AND barcode = ${barcode}`
-      : await this.sql`
+    const candidates = await this.searchFoodsHybrid(userId, { query, barcode });
+    return candidates.map(stripFoodSearchCandidate);
+  }
+
+  async searchFoodsHybrid(userId: string, input: FoodHybridSearchInput): Promise<FoodSearchCandidate[]> {
+    const limit = sanitizeLimit(input.limit);
+    const normalized = normalizeText(input.query);
+    const candidateRows = new Map<string, { row: Record<string, unknown>; lexicalScore: number; vectorScore?: number }>();
+    const includeBranded = !input.excludeBranded;
+
+    if (input.barcode) {
+      const rows = await this.sql`
+        SELECT *, 1::float AS search_score
+        FROM food_items
+        WHERE (user_id IS NULL OR user_id = ${userId}) AND barcode = ${input.barcode}
+        LIMIT ${limit}
+      `;
+      for (const row of rows) {
+        candidateRows.set(row.id as string, { row, lexicalScore: 1 });
+      }
+    } else if (normalized.length > 0) {
+      const rows = await this.sql`
           WITH food_query AS (SELECT ${normalized}::text AS q)
           SELECT food_items.*,
                  GREATEST(
@@ -142,6 +176,7 @@ export class PostgresRepository implements AppRepository {
                  ) AS search_score
           FROM food_items, food_query
           WHERE (food_items.user_id IS NULL OR food_items.user_id = ${userId})
+            AND (${includeBranded} OR food_items.data_type IS DISTINCT FROM 'Branded')
             AND (
               food_items.normalized_name % food_query.q
               OR COALESCE(food_items.canonical_name, '') % food_query.q
@@ -156,15 +191,71 @@ export class PostgresRepository implements AppRepository {
             CASE food_items.data_type
               WHEN 'SR Legacy' THEN 0
               WHEN 'Foundation' THEN 1
+              WHEN 'Survey (FNDDS)' THEN 2
               WHEN 'Branded' THEN 3
               ELSE 2
             END,
             search_score DESC,
             char_length(food_items.normalized_name),
             food_items.name
-          LIMIT 50
+          LIMIT ${Math.max(limit, DEFAULT_FOOD_SEARCH_LIMIT)}
         `;
-    return this.mapFoodsWithPortions(rows);
+      for (const row of rows) {
+        candidateRows.set(row.id as string, { row, lexicalScore: clampScore(Number(row.search_score ?? 0)) });
+      }
+    }
+
+    if (!input.barcode && input.embedding && input.embeddingModelId) {
+      const vectorLiteral = toVectorLiteral(input.embedding);
+      const rows = await this.sql`
+        SELECT food_items.*,
+               1 - (food_item_embeddings.embedding <=> ${vectorLiteral}::vector) AS vector_score
+        FROM food_item_embeddings
+        JOIN food_items ON food_items.id = food_item_embeddings.food_item_id
+        WHERE food_item_embeddings.embedding_model_id = ${input.embeddingModelId}
+          AND (food_items.user_id IS NULL OR food_items.user_id = ${userId})
+          AND (${includeBranded} OR food_items.data_type IS DISTINCT FROM 'Branded')
+        ORDER BY food_item_embeddings.embedding <=> ${vectorLiteral}::vector
+        LIMIT ${Math.max(limit, DEFAULT_FOOD_SEARCH_LIMIT)}
+      `;
+      for (const row of rows) {
+        const foodId = row.id as string;
+        const existing = candidateRows.get(foodId);
+        const vectorScore = clampScore(Number(row.vector_score ?? 0));
+        if (existing) {
+          existing.vectorScore = Math.max(existing.vectorScore ?? 0, vectorScore);
+        } else {
+          candidateRows.set(foodId, { row, lexicalScore: 0, vectorScore });
+        }
+      }
+    }
+
+    const merged = [...candidateRows.values()];
+    if (merged.length === 0) return [];
+
+    const foods = await this.mapFoodsWithPortions(merged.map((candidate) => candidate.row));
+    const scoresByFoodId = new Map(merged.map((candidate) => [candidate.row.id as string, candidate]));
+    const preferenceScores = await this.getPreferenceScoreMap(userId, foods.map((food) => food.id));
+
+    return foods
+      .map((food) => {
+        const scores = scoresByFoodId.get(food.id);
+        const lexicalScore = clampScore(scores?.lexicalScore ?? 0);
+        const vectorScore = scores?.vectorScore == null ? undefined : clampScore(scores.vectorScore);
+        const preferenceScore = clamp((preferenceScores.get(food.id) ?? 0) / PREFERENCE_SCORE_NORMALIZER, -1, 1);
+        const baseScore = vectorScore == null
+          ? lexicalScore * LEXICAL_ONLY_SCORE_WEIGHT
+          : lexicalScore * LEXICAL_SCORE_WEIGHT + vectorScore * VECTOR_SCORE_WEIGHT;
+        return {
+          ...food,
+          lexicalScore,
+          vectorScore,
+          preferenceScore,
+          finalScore: clampScore(baseScore + preferenceScore * PREFERENCE_SCORE_WEIGHT)
+        };
+      })
+      .sort((a, b) => b.finalScore - a.finalScore || b.lexicalScore - a.lexicalScore || (b.vectorScore ?? 0) - (a.vectorScore ?? 0))
+      .slice(0, limit);
   }
 
   async upsertFoodItem(input: Omit<FoodItemRecord, "id">): Promise<FoodItemRecord> {
@@ -239,6 +330,103 @@ export class PostgresRepository implements AppRepository {
       RETURNING *
     `;
     return mapFood(row);
+  }
+
+  async recordFoodFeedback(input: FoodFeedbackRecord): Promise<UserFoodPreference | undefined> {
+    const normalizedQuery = normalizeText(input.query);
+    const delta = foodFeedbackDelta(input.action);
+    const positiveDelta = delta > 0 ? 1 : 0;
+    const negativeDelta = delta < 0 ? 1 : 0;
+
+    const [preference] = await this.sql.begin(async (tx) => {
+      const foodItemId = input.foodItemId ?? (input.externalSource && input.externalId
+        ? (await tx`
+            SELECT id
+            FROM food_items
+            WHERE external_source = ${input.externalSource}
+              AND external_id = ${input.externalId}
+              AND (user_id IS NULL OR user_id = ${input.userId})
+            ORDER BY CASE WHEN user_id = ${input.userId} THEN 0 ELSE 1 END
+            LIMIT 1
+          `)[0]?.id as string | undefined
+        : undefined);
+      if (!foodItemId) return [];
+
+      await tx`
+        INSERT INTO user_food_feedback_events (user_id, food_item_id, query_text, normalized_query, action, metadata_json)
+        VALUES (
+          ${input.userId},
+          ${foodItemId},
+          ${input.query},
+          ${normalizedQuery},
+          ${input.action},
+          ${tx.json((input.metadata ?? {}) as never)}
+        )
+      `;
+      return tx`
+        INSERT INTO user_food_preferences (
+          user_id, food_item_id, affinity_score, positive_feedback_count, negative_feedback_count, last_feedback_at, updated_at
+        )
+        VALUES (${input.userId}, ${foodItemId}, ${delta}, ${positiveDelta}, ${negativeDelta}, now(), now())
+        ON CONFLICT (user_id, food_item_id)
+        DO UPDATE SET
+          affinity_score = user_food_preferences.affinity_score + EXCLUDED.affinity_score,
+          positive_feedback_count = user_food_preferences.positive_feedback_count + EXCLUDED.positive_feedback_count,
+          negative_feedback_count = user_food_preferences.negative_feedback_count + EXCLUDED.negative_feedback_count,
+          last_feedback_at = now(),
+          updated_at = now()
+        RETURNING *
+      `;
+    });
+    return preference ? mapUserFoodPreference(preference) : undefined;
+  }
+
+  async getUserFoodPreferences(userId: string): Promise<UserFoodPreference[]> {
+    const rows = await this.sql`
+      SELECT *
+      FROM user_food_preferences
+      WHERE user_id = ${userId}
+      ORDER BY affinity_score DESC, updated_at DESC
+    `;
+    return rows.map(mapUserFoodPreference);
+  }
+
+  async getActiveEmbeddingModel(): Promise<EmbeddingModelRecord | undefined> {
+    const [row] = await this.sql`
+      SELECT *
+      FROM embedding_models
+      WHERE provider = ${ACTIVE_EMBEDDING_MODEL.provider}
+        AND model = ${ACTIVE_EMBEDDING_MODEL.model}
+        AND dimensions = ${ACTIVE_EMBEDDING_MODEL.dimensions}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    return row ? mapEmbeddingModel(row) : undefined;
+  }
+
+  async upsertFoodItemEmbedding(input: UpsertFoodItemEmbeddingInput): Promise<FoodItemEmbeddingRecord> {
+    const embedding = toVectorLiteral(input.embedding);
+    const [row] = await this.sql`
+      INSERT INTO food_item_embeddings (
+        food_item_id, embedding_model_id, embedded_text, embedded_text_hash, embedding, updated_at
+      )
+      VALUES (
+        ${input.foodItemId},
+        ${input.embeddingModelId},
+        ${input.embeddedText},
+        ${input.embeddedTextHash},
+        ${embedding}::vector,
+        now()
+      )
+      ON CONFLICT (food_item_id, embedding_model_id)
+      DO UPDATE SET
+        embedded_text = EXCLUDED.embedded_text,
+        embedded_text_hash = EXCLUDED.embedded_text_hash,
+        embedding = EXCLUDED.embedding,
+        updated_at = now()
+      RETURNING *
+    `;
+    return mapFoodItemEmbedding(row);
   }
 
   async getNutritionTarget(userId: string): Promise<NutritionSnapshot> {
@@ -634,6 +822,17 @@ export class PostgresRepository implements AppRepository {
     return foods.map((food) => ({ ...food, portions: byFoodId.get(food.id) ?? [] }));
   }
 
+  private async getPreferenceScoreMap(userId: string, foodIds: string[]): Promise<Map<string, number>> {
+    if (foodIds.length === 0) return new Map();
+    const rows = await this.sql`
+      SELECT food_item_id, affinity_score
+      FROM user_food_preferences
+      WHERE user_id = ${userId}
+        AND food_item_id IN ${this.sql(foodIds)}
+    `;
+    return new Map(rows.map((row) => [row.food_item_id as string, Number(row.affinity_score)]));
+  }
+
   private mapUser(row: Record<string, unknown>, passwordHash: string, scopes: PermissionScope[]): StoredUser {
     return {
       id: row.id as string,
@@ -735,6 +934,39 @@ function mapFoodPortion(row: Record<string, unknown>): FoodPortionRecord {
     normalizedAliases: Array.isArray(row.normalized_aliases) ? row.normalized_aliases.map(String) : [],
     kind: (row.kind as string | undefined) ?? "serving",
     sourceDescription: row.source_description as string
+  };
+}
+
+function mapEmbeddingModel(row: Record<string, unknown>): EmbeddingModelRecord {
+  return {
+    id: row.id as string,
+    provider: row.provider as string,
+    model: row.model as string,
+    dimensions: Number(row.dimensions)
+  };
+}
+
+function mapFoodItemEmbedding(row: Record<string, unknown>): FoodItemEmbeddingRecord {
+  return {
+    id: row.id as string,
+    foodItemId: row.food_item_id as string,
+    embeddingModelId: row.embedding_model_id as string,
+    embeddedText: row.embedded_text as string,
+    embeddedTextHash: row.embedded_text_hash as string,
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at)
+  };
+}
+
+function mapUserFoodPreference(row: Record<string, unknown>): UserFoodPreference {
+  return {
+    userId: row.user_id as string,
+    foodItemId: row.food_item_id as string,
+    affinityScore: Number(row.affinity_score),
+    positiveFeedbackCount: Number(row.positive_feedback_count),
+    negativeFeedbackCount: Number(row.negative_feedback_count),
+    lastFeedbackAt: toIso(row.last_feedback_at),
+    updatedAt: toIso(row.updated_at)
   };
 }
 
@@ -853,4 +1085,54 @@ function previousDatesInWeek(date: string): string[] {
     dates.push(value.toISOString().slice(0, 10));
   }
   return dates;
+}
+
+function stripFoodSearchCandidate(candidate: FoodSearchCandidate): FoodItemRecord {
+  const {
+    lexicalScore: _lexicalScore,
+    vectorScore: _vectorScore,
+    preferenceScore: _preferenceScore,
+    finalScore: _finalScore,
+    ...food
+  } = candidate;
+  return food;
+}
+
+function sanitizeLimit(limit?: number): number {
+  if (!Number.isFinite(limit)) return DEFAULT_FOOD_SEARCH_LIMIT;
+  return Math.max(1, Math.min(MAX_FOOD_SEARCH_LIMIT, Math.floor(limit as number)));
+}
+
+function clampScore(score: number): number {
+  return clamp(score, 0, 1);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
+function toVectorLiteral(embedding: number[]): string {
+  if (embedding.length !== ACTIVE_EMBEDDING_MODEL.dimensions) {
+    throw new Error("invalid_embedding_dimensions");
+  }
+  return `[${embedding.map((value) => {
+    if (!Number.isFinite(value)) throw new Error("invalid_embedding_value");
+    return String(value);
+  }).join(",")}]`;
+}
+
+function foodFeedbackDelta(action: FoodFeedbackRecord["action"]): number {
+  switch (action) {
+    case "selected":
+      return 1;
+    case "logged":
+      return 0.75;
+    case "corrected":
+      return 0.5;
+    case "dismissed":
+      return -0.5;
+    case "rejected":
+      return -1;
+  }
 }

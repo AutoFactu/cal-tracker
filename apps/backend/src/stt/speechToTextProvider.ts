@@ -30,6 +30,7 @@ export class RemoteSpeechToTextProvider implements SpeechToTextProvider {
     userId: string;
     traceId: string;
   }): Promise<TranscriptionResult> {
+    const startedAt = Date.now();
     const form = new FormData();
     const arrayBuffer = input.audio.buffer.slice(
       input.audio.byteOffset,
@@ -49,10 +50,26 @@ export class RemoteSpeechToTextProvider implements SpeechToTextProvider {
 
     if (!res.ok) {
       const err = await res.text();
+      console.error("stt.provider.failed", {
+        traceId: input.traceId,
+        provider: "groq",
+        model: this.model,
+        status: res.status,
+        durationMs: Date.now() - startedAt,
+        response: err.slice(0, 500),
+      });
       throw new Error(`STT failed: ${res.status} ${err}`);
     }
 
     const json = (await res.json()) as { text: string };
+    console.info("stt.provider.completed", {
+      traceId: input.traceId,
+      provider: "groq",
+      model: this.model,
+      durationMs: Date.now() - startedAt,
+      transcriptLength: json.text.length,
+    });
+
     return {
       text: json.text,
       provider: "groq",

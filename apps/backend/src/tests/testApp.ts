@@ -3,16 +3,23 @@ import { AuthService } from "../auth/service.js";
 import { loadConfig } from "../config/env.js";
 import { createApp } from "../http/app.js";
 import type { MealItem } from "@cal-tracker/contracts";
-import { DeterministicFoodTextExtractor, FoodResolver, LocalFoodDataProvider } from "../nutrition/foodResolver.js";
+import {
+  DeterministicFoodTextExtractor,
+  FoodResolver,
+  LocalFoodDataProvider,
+  type FoodTextExtractor,
+} from "../nutrition/foodResolver.js";
 import { ResolverNutritionProvider } from "../nutrition/provider.js";
 import { InMemoryRepository } from "../repository/inMemory.js";
 import type { SpeechToTextProvider, TranscriptionResult } from "../stt/speechToTextProvider.js";
 import type { ChatAgentProvider, AgentToolDecision } from "../agent/chatAgentProvider.js";
+import type { LocalRunLogger } from "../observability/localRunLogger.js";
 import { seedTestFoods } from "./foodFixtures.js";
 
-class FakeSpeechToTextProvider implements SpeechToTextProvider {
+export class FakeSpeechToTextProvider implements SpeechToTextProvider {
+  constructor(private readonly transcript = "fake transcript from test") {}
   async transcribe(): Promise<TranscriptionResult> {
-    return { text: "fake transcript from test", provider: "test", model: "test-model" };
+    return { text: this.transcript, provider: "test", model: "test-model" };
   }
 }
 
@@ -34,20 +41,25 @@ export const testBreadItem: MealItem = {
   source: "test_fixture",
 };
 
-export function buildTestApp(options?: { agentProvider?: ChatAgentProvider }) {
+export function buildTestApp(options?: {
+  agentProvider?: ChatAgentProvider;
+  sttProvider?: SpeechToTextProvider;
+  runLogger?: LocalRunLogger;
+  foodTextExtractor?: FoodTextExtractor;
+}) {
   const config = loadConfig({ NODE_ENV: "test" } as NodeJS.ProcessEnv);
   const repository = InMemoryRepository.seeded();
   seedTestFoods(repository);
   const authService = new AuthService(config, repository);
   const foodResolver = new FoodResolver(
-    new DeterministicFoodTextExtractor(),
+    options?.foodTextExtractor ?? new DeterministicFoodTextExtractor(),
     [new LocalFoodDataProvider(repository, { allowSeededPortionFallback: true })],
     repository,
     config.FOOD_RESOLVER_MIN_CONFIDENCE
   );
   const nutritionProvider = new ResolverNutritionProvider(foodResolver);
   const actionExecutor = new ActionExecutor(config, repository, nutritionProvider);
-  const sttProvider = new FakeSpeechToTextProvider();
+  const sttProvider = options?.sttProvider ?? new FakeSpeechToTextProvider();
   const defaultAgentProvider = new FakeChatAgentProvider({
     toolCalls: [
       {
@@ -61,7 +73,7 @@ export function buildTestApp(options?: { agentProvider?: ChatAgentProvider }) {
     ],
     rawResponse: {},
   });
-  const app = createApp({ config, repository, authService, actionExecutor, sttProvider, agentProvider: options?.agentProvider ?? defaultAgentProvider });
+  const app = createApp({ config, repository, authService, actionExecutor, sttProvider, agentProvider: options?.agentProvider ?? defaultAgentProvider, runLogger: options?.runLogger });
   const request = (input: string, init?: RequestInit) => Promise.resolve(app.request(input, init));
   return { app, request, config, repository, authService, actionExecutor, sttProvider };
 }

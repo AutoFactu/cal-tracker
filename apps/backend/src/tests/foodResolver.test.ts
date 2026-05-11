@@ -106,6 +106,141 @@ describe("scoreUsdaCandidate", () => {
       ),
     ).toBeNull();
   });
+
+  it("does not penalize USDA poultry taxonomy for grilled chicken breast", () => {
+    const score = scoreUsdaCandidate(
+      {
+        description:
+          "Chicken, broiler or fryers, breast, skinless, boneless, meat only, cooked, grilled",
+        dataType: "SR Legacy",
+      },
+      mention("grilled chicken breast", "pechuga de pollo a la plancha"),
+    );
+
+    expect(score?.confidence).toBeGreaterThan(0.75);
+  });
+});
+
+describe("FoodResolver candidate groups", () => {
+  it("keeps up to ten ranked alternatives for every detected mention", async () => {
+    const repository = testFoodRepository();
+    const provider: FoodDataProvider = {
+      id: "test-provider",
+      async resolve() {
+        return Array.from({ length: 12 }, (_, index) => ({
+          name: `Candidate ${index + 1}`,
+          quantity: 100,
+          unit: "g",
+          calories: 100 + index,
+          proteinGrams: 10,
+          carbsGrams: 10,
+          fatGrams: 2,
+          source: "test",
+          confidence: 0.99 - index * 0.01,
+        }));
+      },
+    };
+    const resolver = new FoodResolver(
+      {
+        async extract() {
+          return [mention("candidate")];
+        },
+      },
+      [provider],
+      repository,
+      0.75,
+    );
+
+    const result = await resolver.resolveMealText("user-1", "candidate");
+
+    expect(result.candidateGroups).toHaveLength(1);
+    expect(result.candidateGroups[0]!.candidates).toHaveLength(10);
+    expect(result.candidateGroups[0]!.candidates[0]).toEqual(
+      expect.objectContaining({
+        name: "Candidate 1",
+        rank: 1,
+        matchScore: 0.99,
+        lexicalScore: 0.99,
+        matchReason: "test",
+      }),
+    );
+    expect(result.items[0]).toBe(result.candidateGroups[0]!.candidates[0]);
+  });
+
+  it("orders alternatives by the visible recommendation probability", async () => {
+    const repository = testFoodRepository();
+    const provider: FoodDataProvider = {
+      id: "test-provider",
+      async resolve() {
+        return [
+          {
+            name: "Lexical favorite",
+            quantity: 100,
+            unit: "g",
+            calories: 110,
+            proteinGrams: 20,
+            carbsGrams: 0,
+            fatGrams: 3,
+            source: "test",
+            confidence: 0.64,
+            matchScore: 0.5,
+            lexicalScore: 0.9,
+            rank: 1,
+          },
+          {
+            name: "Best probability",
+            quantity: 100,
+            unit: "g",
+            calories: 120,
+            proteinGrams: 21,
+            carbsGrams: 0,
+            fatGrams: 4,
+            source: "test",
+            confidence: 0.95,
+            matchScore: 0.43,
+            lexicalScore: 0.45,
+            rank: 3,
+          },
+          {
+            name: "Middle probability",
+            quantity: 100,
+            unit: "g",
+            calories: 115,
+            proteinGrams: 20,
+            carbsGrams: 1,
+            fatGrams: 3,
+            source: "test",
+            confidence: 0.8,
+            matchScore: 0.47,
+            lexicalScore: 0.55,
+            rank: 2,
+          },
+        ];
+      },
+    };
+    const resolver = new FoodResolver(
+      {
+        async extract() {
+          return [mention("candidate")];
+        },
+      },
+      [provider],
+      repository,
+      0.75,
+    );
+
+    const result = await resolver.resolveMealText("user-1", "candidate");
+
+    expect(result.candidateGroups[0]!.candidates.map((item) => item.name)).toEqual(
+      ["Best probability", "Middle probability", "Lexical favorite"],
+    );
+    expect(result.candidateGroups[0]!.candidates.map((item) => item.rank)).toEqual([
+      1,
+      2,
+      3,
+    ]);
+    expect(result.items[0]?.name).toBe("Best probability");
+  });
 });
 
 describe("FoodResolver", () => {
@@ -703,6 +838,48 @@ describe("FoodResolver", () => {
     );
   });
 
+  it("resolves local SR Legacy grilled chicken breast from a Spanish mention", async () => {
+    const repository = InMemoryRepository.seeded();
+    await repository.upsertFoodItem({
+      name: "Chicken, broiler or fryers, breast, skinless, boneless, meat only, cooked, grilled",
+      normalizedName:
+        "chicken broiler or fryers breast skinless boneless meat only cooked grilled",
+      canonicalName:
+        "chicken broiler or fryers breast skinless boneless meat only cooked grilled",
+      source: "usda_fdc",
+      externalSource: "usda_fdc",
+      externalId: "171534",
+      dataType: "SR Legacy",
+      servingGrams: 100,
+      calories: 151,
+      proteinGrams: 30.5,
+      carbsGrams: 0,
+      fatGrams: 3.2,
+    });
+    const resolver = new FoodResolver(
+      new DeterministicFoodTextExtractor(),
+      [new LocalFoodDataProvider(repository)],
+      repository,
+      0.75,
+    );
+
+    const result = await resolver.resolveMealMentions("user-1", [
+      {
+        ...mention("grilled chicken breast", "pechuga de pollo a la plancha"),
+        quantity: 300,
+      },
+    ]);
+
+    expect(result.clarificationRequired).toBe(false);
+    expect(result.items[0]).toEqual(
+      expect.objectContaining({
+        externalId: "171534",
+        quantity: 300,
+        unit: "g",
+      }),
+    );
+  });
+
   it("does not use branded USDA rows for generic searches but allows barcode intent", async () => {
     const repository = InMemoryRepository.seeded();
     await repository.upsertFoodItem({
@@ -733,12 +910,13 @@ describe("FoodResolver", () => {
     expect(generic.items).toHaveLength(0);
 
     const barcode = await resolver.search("user-1", "cheese", "000111222333");
-    expect(barcode[0]).toEqual(
+    expect(barcode.items[0]).toEqual(
       expect.objectContaining({
         name: "Cheese Crackers",
         externalId: "4001",
       }),
     );
+    expect(barcode.candidateGroups[0]?.candidates[0]).toBe(barcode.items[0]);
   });
 
   it("resolves explicit USDA count sizes for bananas and apples", async () => {

@@ -11,6 +11,7 @@ void main() {
       CalTrackerBootstrap(preferencesRepository: _FakePreferencesRepository()),
     );
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.text('Better Calories'), findsOneWidget);
     expect(

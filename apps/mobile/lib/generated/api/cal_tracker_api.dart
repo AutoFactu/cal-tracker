@@ -188,6 +188,47 @@ class CalTrackerApiClient {
     }
   }
 
+  Future<Map<String, Object?>> runVoiceMeal(File audioFile,
+      {String? source}) async {
+    final request = http.MultipartRequest('POST', _uri('/v1/voice/meal-runs'));
+    request.headers.addAll(await _headers(includeContentType: false));
+    request.files.add(await http.MultipartFile.fromPath(
+      'audio',
+      audioFile.path,
+      contentType: _detectContentType(audioFile.path),
+    ));
+    if (source != null) {
+      request.fields['source'] = source;
+    }
+
+    // Use a dedicated client with longer timeouts for file uploads.
+    final ioClient = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 30)
+      ..idleTimeout = const Duration(seconds: 120);
+    final uploadClient = IOClient(ioClient);
+
+    try {
+      final streamedResponse = await uploadClient.send(request);
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 401) {
+        final tokens = await tokenStorage.read();
+        if (tokens != null) {
+          final refreshed = await refresh(tokens.refreshToken);
+          await tokenStorage.write(StoredTokens(
+            accessToken: refreshed['accessToken'] as String,
+            refreshToken: refreshed['refreshToken'] as String,
+          ));
+          return runVoiceMeal(audioFile, source: source);
+        }
+      }
+
+      return _decode(response);
+    } finally {
+      uploadClient.close();
+    }
+  }
+
   Future<Map<String, Object?>> _get(String path) async {
     final response = await _sendWithRefresh(
         () async => _httpClient.get(_uri(path), headers: await _headers()));

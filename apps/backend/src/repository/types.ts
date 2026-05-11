@@ -72,6 +72,69 @@ export type FoodPortionRecord = {
   sourceDescription: string;
 };
 
+export type EmbeddingModelRecord = {
+  id: string;
+  provider: string;
+  model: string;
+  dimensions: number;
+};
+
+export type FoodItemEmbeddingRecord = {
+  id: string;
+  foodItemId: string;
+  embeddingModelId: string;
+  embeddedText: string;
+  embeddedTextHash: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type FoodSearchCandidate = FoodItemRecord & {
+  lexicalScore: number;
+  vectorScore?: number;
+  preferenceScore: number;
+  finalScore: number;
+};
+
+export type FoodFeedbackAction = "selected" | "logged" | "corrected" | "dismissed" | "rejected";
+
+export type FoodFeedbackRecord = {
+  userId: string;
+  foodItemId?: string;
+  externalSource?: string;
+  externalId?: string;
+  query: string;
+  action: FoodFeedbackAction;
+  metadata?: Record<string, unknown>;
+};
+
+export type UserFoodPreference = {
+  userId: string;
+  foodItemId: string;
+  affinityScore: number;
+  positiveFeedbackCount: number;
+  negativeFeedbackCount: number;
+  lastFeedbackAt: string;
+  updatedAt: string;
+};
+
+export type FoodHybridSearchInput = {
+  query: string;
+  barcode?: string;
+  embedding?: number[];
+  embeddingModelId?: string;
+  limit?: number;
+  excludeBranded?: boolean;
+};
+
+export type UpsertFoodItemEmbeddingInput = {
+  foodItemId: string;
+  embeddingModelId: string;
+  embeddedText: string;
+  embeddedTextHash: string;
+  embedding: number[];
+};
+
 export type MemoryMatch = {
   id: string;
   userId: string;
@@ -121,7 +184,12 @@ export interface AppRepository {
 
   listFoods(userId: string): Promise<FoodItemRecord[]>;
   searchFoods(userId: string, query: string, barcode?: string): Promise<FoodItemRecord[]>;
+  searchFoodsHybrid(userId: string, input: FoodHybridSearchInput): Promise<FoodSearchCandidate[]>;
   upsertFoodItem(input: Omit<FoodItemRecord, "id">): Promise<FoodItemRecord>;
+  recordFoodFeedback(input: FoodFeedbackRecord): Promise<UserFoodPreference | undefined>;
+  getUserFoodPreferences(userId: string): Promise<UserFoodPreference[]>;
+  getActiveEmbeddingModel(): Promise<EmbeddingModelRecord | undefined>;
+  upsertFoodItemEmbedding(input: UpsertFoodItemEmbeddingInput): Promise<FoodItemEmbeddingRecord>;
 
   getNutritionTarget(userId: string): Promise<NutritionSnapshot>;
   getDailyGoals(userId: string, date: string): Promise<DailyGoals>;

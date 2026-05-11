@@ -16,7 +16,7 @@ import 'theme.dart';
 
 GoRouter buildRouter(AuthViewModel authViewModel) {
   return GoRouter(
-    initialLocation: '/log',
+    initialLocation: '/dashboard',
     refreshListenable: authViewModel,
     redirect: (context, state) {
       final isAuthRoute = state.matchedLocation == '/auth';
@@ -24,7 +24,7 @@ GoRouter buildRouter(AuthViewModel authViewModel) {
         return '/auth';
       }
       if (authViewModel.hasSession && isAuthRoute) {
-        return '/log';
+        return '/dashboard';
       }
       return null;
     },
@@ -33,24 +33,56 @@ GoRouter buildRouter(AuthViewModel authViewModel) {
         path: '/auth',
         builder: (context, state) => const _LightOnlyAuthRoute(),
       ),
-      ShellRoute(
-        builder: (context, state, child) => AppShell(child: child),
-        routes: [
-          GoRoute(
-              path: '/log',
-              builder: (context, state) => const VoiceLogScreen()),
-          GoRoute(
-              path: '/dashboard',
-              builder: (context, state) => const DashboardScreen()),
-          GoRoute(
-              path: '/history',
-              builder: (context, state) => const MealHistoryScreen()),
-          GoRoute(
-              path: '/templates',
-              builder: (context, state) => const MealTemplatesScreen()),
-          GoRoute(
-              path: '/settings',
-              builder: (context, state) => const SettingsScreen()),
+      GoRoute(
+        path: '/meal/create',
+        builder: (context, state) => const MealCreateScreen(),
+      ),
+      StatefulShellRoute(
+        builder: (context, state, navigationShell) =>
+            AppShell(navigationShell: navigationShell),
+        navigatorContainerBuilder: (context, navigationShell, children) {
+          return SlidingBranchContainer(
+            currentIndex: navigationShell.currentIndex,
+            children: children,
+          );
+        },
+        branches: [
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/dashboard',
+                pageBuilder: (context, state) =>
+                    _tabPage(state, const DashboardScreen()),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/history',
+                pageBuilder: (context, state) =>
+                    _tabPage(state, const MealHistoryScreen()),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/templates',
+                pageBuilder: (context, state) =>
+                    _tabPage(state, const MealTemplatesScreen()),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/settings',
+                pageBuilder: (context, state) =>
+                    _tabPage(state, const SettingsScreen()),
+              ),
+            ],
+          ),
         ],
       ),
     ],
@@ -58,6 +90,13 @@ GoRouter buildRouter(AuthViewModel authViewModel) {
       body: Center(
           child: Text(state.error?.message ?? context.l10n.routeNotFound)),
     ),
+  );
+}
+
+Page<void> _tabPage(GoRouterState state, Widget child) {
+  return NoTransitionPage<void>(
+    key: state.pageKey,
+    child: child,
   );
 }
 

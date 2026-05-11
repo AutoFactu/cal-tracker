@@ -16,6 +16,7 @@ import {
   updateMealTemplateInputSchema,
   type ActionContext,
   type FoodCandidateGroup,
+  type FoodMention,
   type Meal,
   type MealItem,
   type MealLabel,
@@ -25,8 +26,9 @@ import type { AppConfig } from "../config/env.js";
 import type {
   MealTextResolutionProvider,
   NutritionProvider,
+  NutritionSearchResult,
 } from "../nutrition/provider.js";
-import type { AppRepository } from "../repository/types.js";
+import type { AppRepository, FoodFeedbackAction, FoodFeedbackRecord } from "../repository/types.js";
 import type { MemoryRetrievalService } from "../memory/retrieval.js";
 import { newId } from "../utils/ids.js";
 import { normalizeText } from "../utils/normalize.js";
@@ -36,6 +38,7 @@ export type ExecuteActionResult = {
   actionCallId: string;
   confirmationRequired: boolean;
   output: unknown;
+  instrumentation?: Record<string, unknown>;
 };
 
 export class ActionExecutionError extends Error {
@@ -46,6 +49,38 @@ export class ActionExecutionError extends Error {
     super(message);
   }
 }
+
+function actionInstrumentation(output: unknown): Record<string, unknown> | undefined {
+  if (
+    typeof output !== "object" ||
+    output === null ||
+    Array.isArray(output) ||
+    !("instrumentation" in output)
+  ) {
+    return undefined;
+  }
+  return (output as { instrumentation?: Record<string, unknown> })
+    .instrumentation;
+}
+
+type FoodFeedbackEventType =
+  | "selected_for_proposal"
+  | "proposal_committed"
+  | "proposal_corrected"
+  | "meal_corrected";
+
+type FoodFeedbackInput = {
+  userId: string;
+  eventType: FoodFeedbackEventType;
+  traceId: string;
+  source: string;
+  phrase?: string;
+  proposalId?: string;
+  mealId?: string;
+  items: MealItem[];
+  previousItems?: MealItem[];
+  metadata?: Record<string, unknown>;
+};
 
 export class ActionExecutor {
   constructor(
@@ -112,6 +147,7 @@ export class ActionExecutor {
         actionCallId,
         confirmationRequired: definition.confirmationPolicy === "required",
         output,
+        instrumentation: actionInstrumentation(output),
       };
     } catch (error) {
       const call = await this.repository.recordActionCall({
@@ -149,12 +185,17 @@ export class ActionExecutor {
       }
       case "search_nutrition_database": {
         const parsed = searchNutritionDatabaseInputSchema.parse(input);
-        return {
-          items: await this.nutritionProvider.search(
+        const searchResult = normalizeNutritionSearchResult(
+          await this.nutritionProvider.search(
             context.actorUserId,
             parsed.query,
             parsed.barcode,
           ),
+        );
+        return {
+          items: searchResult.items,
+          candidates: searchResult.candidateGroups,
+          candidateGroups: searchResult.candidateGroups,
         };
       }
       case "propose_meal_log":
@@ -175,6 +216,18 @@ export class ActionExecutor {
           parsed.items,
           mealLabel,
         );
+        await recordFoodFeedback(this.repository, {
+          userId: context.actorUserId,
+          eventType: "proposal_committed",
+          traceId: context.traceId,
+          source: context.source,
+          phrase: proposal.phrase,
+          proposalId: proposal.id,
+          mealId: meal.id,
+          items: meal.items,
+          previousItems: proposal.items,
+          metadata: { overriddenItems: Boolean(parsed.items?.length) },
+        });
         return { meal };
       }
       case "correct_meal":
@@ -275,22 +328,52 @@ export class ActionExecutor {
     input: unknown,
     context: ActionContext,
   ): Promise<Record<string, unknown>> {
+    const started = Date.now();
+    const phases: Record<string, number> = {};
+    const markPhase = (name: string, phaseStarted: number) => {
+      phases[name] = Date.now() - phaseStarted;
+    };
+
+    const parseStarted = Date.now();
     const parsed = proposeMealLogInputSchema.parse(input);
     const normalized = normalizeText(parsed.text);
+    const providedMentions =
+      parsed.mentions && parsed.mentions.length > 0 ? parsed.mentions : null;
+    const inputMode = providedMentions
+      ? "model_mentions"
+      : "deterministic_fallback";
+    markPhase("parse_and_normalize", parseStarted);
+
+    const memoryStarted = Date.now();
     const memories = (await this.queryMemory(context.actorUserId, normalized))
       .matches;
+    markPhase("query_memory", memoryStarted);
     const memory = memories[0];
     const template = memory?.template ?? null;
     const fromTemplate = Boolean(
       template && memory && memory.confidence >= 0.75,
     );
+
+    const resolutionStarted = Date.now();
     const resolution = template
       ? null
-      : await this.resolveMealText(context.actorUserId, parsed.text);
+      : providedMentions
+        ? await this.resolveMealMentions(context.actorUserId, providedMentions)
+        : await this.resolveMealText(context.actorUserId, parsed.text);
+    markPhase(
+      template
+        ? "resolve_meal_text_skipped_template"
+        : providedMentions
+          ? "resolve_provided_mentions"
+          : "resolve_meal_text",
+      resolutionStarted,
+    );
     if (resolution?.clarificationRequired) {
+      const clarificationStarted = Date.now();
       const unsupportedUnitMessage = unsupportedUnitClarification(
         resolution.candidateGroups,
       );
+      markPhase("build_clarification", clarificationStarted);
       return {
         clarificationRequired: true,
         resolvedItems: resolution.items,
@@ -301,8 +384,21 @@ export class ActionExecutor {
           (resolution.unresolvedMentions.length > 0
             ? "I could not confidently match every ingredient. Please choose a food match or rephrase the meal."
             : "I could not identify the ingredients in that meal. Please add quantities and food names."),
+        instrumentation: {
+          action: "propose_meal_log",
+          path: "clarification_required",
+          inputMode,
+          usedTemplate: false,
+          memoryMatches: memories.length,
+          resolvedItems: resolution.items.length,
+          unresolvedMentions: resolution.unresolvedMentions.length,
+          candidateGroups: resolution.candidateGroups.length,
+          phasesMs: phases,
+          totalMs: Date.now() - started,
+        },
       };
     }
+    const itemStarted = Date.now();
     const items: MealItem[] = template
       ? template.items
       : (resolution?.items ??
@@ -310,8 +406,26 @@ export class ActionExecutor {
           context.actorUserId,
           parsed.text,
         )));
+    markPhase(
+      template
+        ? "select_template_items"
+        : resolution?.items
+          ? "select_resolved_items"
+          : "estimate_meal",
+      itemStarted,
+    );
+    const nutritionStarted = Date.now();
     const nutrition = sumNutrition(items);
-    const trustedAutoCommitEligible = false;
+    markPhase("sum_nutrition", nutritionStarted);
+    const trustedAutoCommitEligible = Boolean(
+      template &&
+      memory &&
+      context.trustedModeEnabled &&
+      template.trustedAutoCommitEnabled &&
+      memory.confidence >= this.config.TRUSTED_AUTO_COMMIT_THRESHOLD &&
+      items.every((item) => item.source !== "llm_estimate"),
+    );
+    const proposalStarted = Date.now();
     const proposal = await this.repository.createProposal(context.actorUserId, {
       phrase: parsed.text,
       title: template?.title ?? inferTitle(parsed.text, items),
@@ -323,8 +437,69 @@ export class ActionExecutor {
       nutrition,
       items,
     });
+    markPhase("create_proposal", proposalStarted);
 
-    return { proposal, autoCommittedMeal: null };
+    let autoCommittedMeal: Meal | null = null;
+    if (trustedAutoCommitEligible) {
+      const autoCommitStarted = Date.now();
+      autoCommittedMeal = await this.repository.createMealFromProposal(
+        context.actorUserId,
+        proposal,
+        parsed.occurredAt ?? new Date().toISOString(),
+      );
+      markPhase("trusted_auto_commit_create_meal", autoCommitStarted);
+      const auditStarted = Date.now();
+      await this.repository.recordAuditEvent({
+        userId: context.actorUserId,
+        eventType: "trusted_auto_commit.meal_committed",
+        metadata: {
+          proposalId: proposal.id,
+          mealId: autoCommittedMeal.id,
+          phrase: parsed.text,
+          confidence: memory!.confidence,
+        },
+        traceId: context.traceId,
+      });
+      markPhase("trusted_auto_commit_audit", auditStarted);
+      const feedbackStarted = Date.now();
+      await recordFoodFeedback(this.repository, {
+        userId: context.actorUserId,
+        eventType: "proposal_committed",
+        traceId: context.traceId,
+        source: context.source,
+        phrase: parsed.text,
+        proposalId: proposal.id,
+        mealId: autoCommittedMeal.id,
+        items: autoCommittedMeal.items,
+        previousItems: proposal.items,
+        metadata: { trustedAutoCommit: true },
+      });
+      markPhase("trusted_auto_commit_feedback", feedbackStarted);
+    }
+
+    return {
+      proposal,
+      autoCommittedMeal,
+      options: resolution?.candidateGroups ?? [],
+      candidateGroups: resolution?.candidateGroups ?? [],
+      instrumentation: {
+        action: "propose_meal_log",
+        path: autoCommittedMeal
+          ? "trusted_auto_committed"
+          : fromTemplate
+            ? "template_proposal"
+            : "resolved_proposal",
+        inputMode,
+        usedTemplate: Boolean(template),
+        fromTemplate,
+        memoryMatches: memories.length,
+        topMemoryConfidence: memory?.confidence,
+        itemCount: items.length,
+        candidateGroups: resolution?.candidateGroups.length ?? 0,
+        phasesMs: phases,
+        totalMs: Date.now() - started,
+      },
+    };
   }
 
   private async createMealProposalFromItems(
@@ -346,6 +521,16 @@ export class ActionExecutor {
       nutrition: sumNutrition(parsed.items),
       items: parsed.items,
     });
+    await recordFoodFeedback(this.repository, {
+      userId: context.actorUserId,
+      eventType: "selected_for_proposal",
+      traceId: context.traceId,
+      source: context.source,
+      phrase: parsed.phrase,
+      proposalId: proposal.id,
+      items: parsed.items,
+      metadata: { explicitSelection: true },
+    });
     return { proposal };
   }
 
@@ -358,6 +543,22 @@ export class ActionExecutor {
       unresolvedMentions: [],
       candidateGroups: [],
       clarificationRequired: false,
+    };
+  }
+
+  private async resolveMealMentions(userId: string, mentions: FoodMention[]) {
+    if (hasMealTextResolution(this.nutritionProvider)) {
+      return this.nutritionProvider.resolveMealMentions(userId, mentions);
+    }
+    return {
+      items: [],
+      unresolvedMentions: mentions,
+      candidateGroups: mentions.map((mention) => ({
+        mention,
+        candidates: [],
+        reason: "no_resolution_provider",
+      })),
+      clarificationRequired: true,
     };
   }
 
@@ -377,6 +578,16 @@ export class ActionExecutor {
           nutrition: sumNutrition(parsed.items),
         },
       );
+      await recordFoodFeedback(this.repository, {
+        userId: context.actorUserId,
+        eventType: "proposal_corrected",
+        traceId: context.traceId,
+        source: context.source,
+        phrase: proposal.phrase,
+        proposalId: corrected.id,
+        items: corrected.items,
+        previousItems: proposal.items,
+      });
       return { proposal: corrected };
     }
 
@@ -389,6 +600,15 @@ export class ActionExecutor {
       ...meal,
       items: parsed.items,
       nutrition: sumNutrition(parsed.items),
+    });
+    await recordFoodFeedback(this.repository, {
+      userId: context.actorUserId,
+      eventType: "meal_corrected",
+      traceId: context.traceId,
+      source: context.source,
+      mealId: corrected.id,
+      items: corrected.items,
+      previousItems: meal.items,
     });
     return { meal: corrected };
   }
@@ -420,6 +640,72 @@ function hasMealTextResolution(
     typeof (provider as Partial<MealTextResolutionProvider>).resolveMealText ===
     "function"
   );
+}
+
+function normalizeNutritionSearchResult(
+  result: MealItem[] | NutritionSearchResult,
+): { items: MealItem[]; candidateGroups: FoodCandidateGroup[] } {
+  if (Array.isArray(result)) {
+    return {
+      items: result,
+      candidateGroups: [],
+    };
+  }
+  return {
+    items: result.items,
+    candidateGroups: result.candidateGroups ?? result.candidates ?? [],
+  };
+}
+
+async function recordFoodFeedback(
+  repository: AppRepository,
+  input: FoodFeedbackInput,
+): Promise<void> {
+  const action = foodFeedbackActionForEvent(input.eventType);
+  await Promise.all(
+    input.items.map((item) => {
+      const record = foodFeedbackRecordForItem(input, item, action);
+      return record ? repository.recordFoodFeedback(record) : Promise.resolve();
+    }),
+  );
+}
+
+function foodFeedbackActionForEvent(
+  eventType: FoodFeedbackEventType,
+): FoodFeedbackAction {
+  switch (eventType) {
+    case "selected_for_proposal":
+      return "selected";
+    case "proposal_committed":
+      return "logged";
+    case "proposal_corrected":
+    case "meal_corrected":
+      return "corrected";
+  }
+}
+
+function foodFeedbackRecordForItem(
+  input: FoodFeedbackInput,
+  item: MealItem,
+  action: FoodFeedbackAction,
+): FoodFeedbackRecord | undefined {
+  return {
+    userId: input.userId,
+    externalSource: item.externalSource,
+    externalId: item.externalId,
+    query: item.originalText ?? item.canonicalName ?? input.phrase ?? item.name,
+    action,
+    metadata: {
+      ...input.metadata,
+      eventType: input.eventType,
+      traceId: input.traceId,
+      source: input.source,
+      proposalId: input.proposalId,
+      mealId: input.mealId,
+      itemName: item.name,
+      confidence: item.confidence,
+    },
+  };
 }
 
 function unsupportedUnitClarification(

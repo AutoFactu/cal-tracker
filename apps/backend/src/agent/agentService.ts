@@ -21,10 +21,21 @@ import type {
 import { buildSystemMessage } from "./agentMessages.js";
 import { buildToolSchemas } from "./toolSchemas.js";
 import { filterToolsByPolicy } from "./agentPolicy.js";
+import {
+  extractReasoningTokens,
+  extractTokenUsage,
+  summarizeError,
+  type LocalRunLogger,
+} from "../observability/localRunLogger.js";
 
 export type AgentRunResult =
-  | { kind: "proposal"; proposal: MealProposal; message: string }
-  | { kind: "meal_committed"; meal: Meal; message: string }
+  | {
+      kind: "proposal";
+      proposal: MealProposal;
+      message: string;
+      options?: unknown[];
+    }
+  | { kind: "meal_committed"; meal: Meal; message: string; options?: unknown[] }
   | {
       kind: "meal_corrected";
       meal?: Meal;
@@ -68,105 +79,291 @@ export class AgentService {
     private readonly agentProvider: ChatAgentProvider,
     private readonly actionExecutor: ActionExecutor,
     private readonly model: string,
+    private readonly runLogger?: LocalRunLogger,
   ) {}
 
   async run(text: string, context: ActionContext): Promise<AgentRunResult> {
+    const runStarted = Date.now();
     const messages: AgentMessage[] = [
       buildSystemMessage(context),
       { role: "user", content: text },
     ];
 
     const allowedActions = filterToolsByPolicy(actionDefinitions, context);
+    const toolSchemas = buildToolSchemas();
     const tools = allowedActions.map((action) => ({
       type: "function" as const,
       function: {
         name: action.id,
         description: `${action.title}. ${action.description}`,
         parameters:
-          buildToolSchemas().find((t) => t.function.name === action.id)
-            ?.function.parameters ?? {},
+          toolSchemas.find((t) => t.function.name === action.id)?.function
+            .parameters ?? {},
       },
     }));
+    const baseLog = {
+      type: "agent.run",
+      traceId: context.traceId,
+      userId: context.actorUserId,
+      source: context.source,
+      locale: context.locale,
+      timezone: context.timezone,
+      model: this.model,
+      inputText: text,
+      systemPrompt: messages[0]!.content,
+      messages,
+      availableTools: allowedActions.map((action) => action.id),
+    };
 
     let decision: AgentToolDecision;
+    let llmMs: number | undefined;
     try {
+      const llmStarted = Date.now();
       decision = await this.agentProvider.runWithTools({
         messages,
         tools,
         model: this.model,
         traceId: context.traceId,
       });
-    } catch {
+      llmMs = Date.now() - llmStarted;
+    } catch (error) {
       const fallbackToolCall = fallbackToolCallForText(text);
       if (fallbackToolCall) {
-        const result = await this.actionExecutor.execute(
-          fallbackToolCall.function.name,
-          JSON.parse(fallbackToolCall.function.arguments),
-          {
-            ...context,
-            source: "internal_agent",
-          },
-        );
-        return this.mapResult(fallbackToolCall.function.name, result, text);
+        return this.executeFallbackTool({
+          text,
+          context,
+          runStarted,
+          baseLog,
+          fallbackToolCall,
+          decisionSource: "provider_error_fallback",
+          providerError: summarizeError(error),
+        });
       }
-      return {
+      const mapped = {
         kind: "clarification_required",
         message:
           "The agent provider is unavailable. Please rephrase or try again.",
-      };
+      } satisfies AgentRunResult;
+      await this.logRun({
+        ...baseLog,
+        decisionSource: "provider_error_no_fallback",
+        providerError: summarizeError(error),
+        resultKind: mapped.kind,
+        timingsMs: { total: Date.now() - runStarted },
+      });
+      return mapped;
     }
 
     if (decision.toolCalls.length === 0) {
       const fallbackToolCall = fallbackToolCallForText(text);
       if (fallbackToolCall) {
-        const result = await this.actionExecutor.execute(
-          fallbackToolCall.function.name,
-          JSON.parse(fallbackToolCall.function.arguments),
-          {
-            ...context,
-            source: "internal_agent",
-          },
-        );
-        return this.mapResult(fallbackToolCall.function.name, result, text);
+        return this.executeFallbackTool({
+          text,
+          context,
+          runStarted,
+          baseLog,
+          fallbackToolCall,
+          decisionSource: "empty_tool_call_fallback",
+          decision,
+          llmMs,
+        });
       }
-      return {
+      const mapped = {
         kind: "clarification_required",
         message: "I'm not sure what you'd like to do. Could you rephrase?",
-      };
+      } satisfies AgentRunResult;
+      await this.logRun({
+        ...baseLog,
+        decisionSource: "empty_tool_call",
+        usage: extractTokenUsage(decision.rawResponse),
+        reasoningTokens: extractReasoningTokens(decision.rawResponse),
+        providerTimingsMs: decision.timingsMs,
+        providerRouting: decision.providerRouting,
+        modelInteraction: decision.interaction,
+        resultKind: mapped.kind,
+        timingsMs: {
+          llm: decision.timingsMs?.totalMs ?? llmMs,
+          total: Date.now() - runStarted,
+        },
+      });
+      return mapped;
     }
 
     const toolCall = decision.toolCalls[0]!;
     let actionId = toolCall.function.name;
 
     if (!allowedActions.some((a) => a.id === actionId)) {
-      return {
+      const mapped = {
         kind: "clarification_required",
         message: `I'm not able to perform that action (${actionId}).`,
-      };
+      } satisfies AgentRunResult;
+      await this.logRun({
+        ...baseLog,
+        decisionSource: "model",
+        selectedTool: actionId,
+        selectedArgumentsRaw: toolCall.function.arguments,
+        usage: extractTokenUsage(decision.rawResponse),
+        reasoningTokens: extractReasoningTokens(decision.rawResponse),
+        providerTimingsMs: decision.timingsMs,
+        providerRouting: decision.providerRouting,
+        modelInteraction: decision.interaction,
+        resultKind: mapped.kind,
+        timingsMs: {
+          llm: decision.timingsMs?.totalMs ?? llmMs,
+          total: Date.now() - runStarted,
+        },
+      });
+      return mapped;
     }
 
     let parsedInput: unknown;
     try {
       parsedInput = JSON.parse(toolCall.function.arguments);
     } catch {
-      return {
+      const mapped = {
         kind: "clarification_required",
         message:
           "I didn't understand the parameters for that action. Could you rephrase?",
-      };
+      } satisfies AgentRunResult;
+      await this.logRun({
+        ...baseLog,
+        decisionSource: "model",
+        selectedTool: actionId,
+        selectedArgumentsRaw: toolCall.function.arguments,
+        usage: extractTokenUsage(decision.rawResponse),
+        reasoningTokens: extractReasoningTokens(decision.rawResponse),
+        providerTimingsMs: decision.timingsMs,
+        providerRouting: decision.providerRouting,
+        modelInteraction: decision.interaction,
+        resultKind: mapped.kind,
+        timingsMs: {
+          llm: decision.timingsMs?.totalMs ?? llmMs,
+          total: Date.now() - runStarted,
+        },
+      });
+      return mapped;
     }
 
+    const originalActionId = actionId;
     if (isMealLoggingIntent(text) && actionId !== "propose_meal_log") {
       actionId = "propose_meal_log";
       parsedInput = { text };
     }
 
-    const result = await this.actionExecutor.execute(actionId, parsedInput, {
-      ...context,
-      source: "internal_agent",
-    });
+    const actionStarted = Date.now();
+    try {
+      const result = await this.actionExecutor.execute(actionId, parsedInput, {
+        ...context,
+        source: "internal_agent",
+      });
+      const mapped = this.mapResult(actionId, result, text);
+      await this.logRun({
+        ...baseLog,
+        decisionSource: "model",
+        selectedTool: originalActionId,
+        executedTool: actionId,
+        forcedToolOverride:
+          originalActionId !== actionId
+            ? { from: originalActionId, to: actionId }
+            : undefined,
+        selectedArguments: parsedInput,
+        usage: extractTokenUsage(decision.rawResponse),
+        reasoningTokens: extractReasoningTokens(decision.rawResponse),
+        providerTimingsMs: decision.timingsMs,
+        providerRouting: decision.providerRouting,
+        modelInteraction: decision.interaction,
+        actionInstrumentation: result.instrumentation,
+        actionCallId: result.actionCallId,
+        resultKind: mapped.kind,
+        timingsMs: {
+          llm: decision.timingsMs?.totalMs ?? llmMs,
+          action: Date.now() - actionStarted,
+          total: Date.now() - runStarted,
+        },
+      });
+      return mapped;
+    } catch (error) {
+      await this.logRun({
+        ...baseLog,
+        decisionSource: "model",
+        selectedTool: originalActionId,
+        executedTool: actionId,
+        selectedArguments: parsedInput,
+        usage: extractTokenUsage(decision.rawResponse),
+        reasoningTokens: extractReasoningTokens(decision.rawResponse),
+        providerTimingsMs: decision.timingsMs,
+        providerRouting: decision.providerRouting,
+        modelInteraction: decision.interaction,
+        error: summarizeError(error),
+        timingsMs: {
+          llm: decision.timingsMs?.totalMs ?? llmMs,
+          action: Date.now() - actionStarted,
+          total: Date.now() - runStarted,
+        },
+      });
+      throw error;
+    }
+  }
 
-    return this.mapResult(actionId, result, text);
+  private async executeFallbackTool(input: {
+    text: string;
+    context: ActionContext;
+    runStarted: number;
+    baseLog: Record<string, unknown>;
+    fallbackToolCall: AgentToolCall;
+    decisionSource: string;
+    decision?: AgentToolDecision;
+    llmMs?: number;
+    providerError?: Record<string, unknown>;
+  }): Promise<AgentRunResult> {
+    const parsedArguments = JSON.parse(input.fallbackToolCall.function.arguments);
+    const actionStarted = Date.now();
+    const result = await this.actionExecutor.execute(
+      input.fallbackToolCall.function.name,
+      parsedArguments,
+      {
+        ...input.context,
+        source: "internal_agent",
+      },
+    );
+    const mapped = this.mapResult(
+      input.fallbackToolCall.function.name,
+      result,
+      input.text,
+    );
+    await this.logRun({
+      ...input.baseLog,
+      decisionSource: input.decisionSource,
+      selectedTool: input.fallbackToolCall.function.name,
+      selectedArguments: parsedArguments,
+      providerError: input.providerError,
+      usage: input.decision
+        ? extractTokenUsage(input.decision.rawResponse)
+        : undefined,
+      reasoningTokens: input.decision
+        ? extractReasoningTokens(input.decision.rawResponse)
+        : undefined,
+      providerTimingsMs: input.decision?.timingsMs,
+      providerRouting: input.decision?.providerRouting,
+      modelInteraction: input.decision?.interaction,
+      actionInstrumentation: result.instrumentation,
+      actionCallId: result.actionCallId,
+      resultKind: mapped.kind,
+      timingsMs: {
+        llm: input.decision?.timingsMs?.totalMs ?? input.llmMs,
+        action: Date.now() - actionStarted,
+        total: Date.now() - input.runStarted,
+      },
+    });
+    return mapped;
+  }
+
+  private async logRun(event: Record<string, unknown>): Promise<void> {
+    try {
+      await this.runLogger?.log(event);
+    } catch (error) {
+      console.warn("agent.run_log.failed", summarizeError(error));
+    }
   }
 
   private mapResult(
@@ -191,10 +388,14 @@ export class AgentService {
       }
       case "search_nutrition_database": {
         const items = (output.items as MealItem[]) ?? [];
+        const options =
+          (output.candidateGroups as unknown[] | undefined) ??
+          (output.candidates as unknown[] | undefined) ??
+          [];
         return {
           kind: "nutrition_search",
           items,
-          options: items,
+          options,
           message:
             items.length > 0
               ? "I found matching nutrition items."
@@ -217,16 +418,22 @@ export class AgentService {
         }
         const proposal = output.proposal as MealProposal;
         const meal = output.autoCommittedMeal as Meal | undefined;
+        const options =
+          (output.options as unknown[] | undefined) ??
+          (output.candidateGroups as unknown[] | undefined) ??
+          [];
         if (meal) {
           return {
             kind: "meal_committed",
             meal,
+            options,
             message: "Meal logged from trusted template.",
           };
         }
         return {
           kind: "proposal",
           proposal,
+          options,
           message: "Meal proposal created.",
         };
       }

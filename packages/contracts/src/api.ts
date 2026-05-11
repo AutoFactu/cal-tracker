@@ -77,6 +77,14 @@ export const transcriptionResponseSchema = z.object({
   traceId: z.string()
 });
 
+export const voiceMealRunResponseSchema = z.object({
+  transcript: z.string(),
+  provider: z.string(),
+  model: z.string(),
+  traceId: z.string(),
+  result: agentRunResponseSchema
+});
+
 export const settingsUpdateSchema = z.object({
   trustedModeEnabled: z.boolean().optional()
 });

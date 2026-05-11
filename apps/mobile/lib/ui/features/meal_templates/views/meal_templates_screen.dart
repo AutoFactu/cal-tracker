@@ -33,7 +33,7 @@ class _MealTemplatesScreenState extends State<MealTemplatesScreen> {
       subtitle: l10n.templatesSubtitle,
       actions: [
         FreshIconButton(
-          onPressed: viewModel.load,
+          onPressed: () => viewModel.load(forceRefresh: true),
           icon: Icons.refresh_rounded,
           tooltip: l10n.commonRefresh,
         ),

@@ -65,7 +65,13 @@ export const mealItemSchema = z.object({
   confidence: foodResolutionProvenanceSchema.shape.confidence,
   needsReview: foodResolutionProvenanceSchema.shape.needsReview,
   resolvedGrams: z.number().positive().optional(),
-  portionDescription: z.string().optional()
+  portionDescription: z.string().optional(),
+  rank: z.number().int().positive().optional(),
+  matchScore: z.number().min(0).max(1).optional(),
+  lexicalScore: z.number().min(0).max(1).optional(),
+  vectorScore: z.number().min(0).max(1).optional(),
+  preferenceScore: z.number().min(0).max(1).optional(),
+  matchReason: z.string().optional()
 });
 
 export const foodMentionSchema = z.object({

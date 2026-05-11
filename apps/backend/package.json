@@ -13,6 +13,7 @@
     "db:migrate:dist": "bun dist/scripts/migrate.js",
     "db:seed": "tsx scripts/seed.ts",
     "db:seed:dist": "bun dist/scripts/seed.js",
+    "embed:foods": "tsx scripts/embed-food-items.ts",
     "generate:flutter-client": "tsx scripts/generate-flutter-client.ts"
   },
   "dependencies": {

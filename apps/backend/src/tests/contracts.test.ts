@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { actionDefinitions, actionById } from "@cal-tracker/contracts";
+import {
+  actionDefinitions,
+  actionById,
+  mealItemSchema,
+  searchNutritionDatabaseOutputSchema,
+} from "@cal-tracker/contracts";
 
 describe("contracts", () => {
   it("defines all MVP actions with schemas and permissions", () => {
@@ -26,5 +31,57 @@ describe("contracts", () => {
       expect(action.outputSchema).toBeTruthy();
       expect(action.permissionScope).toBeTruthy();
     }
+  });
+
+  it("accepts optional candidate metadata and grouped nutrition search candidates", () => {
+    const item = mealItemSchema.parse({
+      name: "Bread",
+      quantity: 100,
+      unit: "g",
+      calories: 265,
+      proteinGrams: 9,
+      carbsGrams: 49,
+      fatGrams: 3.2,
+      source: "test_fixture",
+      rank: 1,
+      matchScore: 0.95,
+      lexicalScore: 0.9,
+      vectorScore: 0.8,
+      preferenceScore: 0.7,
+      matchReason: "local_match",
+    });
+
+    expect(item.rank).toBe(1);
+    expect(
+      searchNutritionDatabaseOutputSchema.parse({
+        items: [item],
+        candidates: [
+          {
+            mention: {
+              originalText: "bread",
+              canonicalEnglishName: "bread",
+              quantity: 100,
+              unit: "g",
+              confidence: 0.95,
+              marketProduct: false,
+            },
+            candidates: [item],
+          },
+        ],
+        candidateGroups: [
+          {
+            mention: {
+              originalText: "bread",
+              canonicalEnglishName: "bread",
+              quantity: 100,
+              unit: "g",
+              confidence: 0.95,
+              marketProduct: false,
+            },
+            candidates: [item],
+          },
+        ],
+      }).candidateGroups,
+    ).toHaveLength(1);
   });
 });

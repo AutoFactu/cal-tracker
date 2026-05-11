@@ -4,28 +4,61 @@ import '../../../../data/repositories/nutrition_repository.dart';
 import '../../../../domain/models/nutrition_models.dart';
 
 class MealTemplatesViewModel extends ChangeNotifier {
-  MealTemplatesViewModel({required NutritionRepository nutritionRepository})
-      : _nutritionRepository = nutritionRepository;
+  MealTemplatesViewModel({
+    required NutritionRepository nutritionRepository,
+    Duration cacheTtl = const Duration(seconds: 60),
+    DateTime Function()? now,
+  })  : _nutritionRepository = nutritionRepository,
+        _cacheTtl = cacheTtl,
+        _now = now ?? DateTime.now;
 
   final NutritionRepository _nutritionRepository;
+  final Duration _cacheTtl;
+  final DateTime Function() _now;
   List<MealTemplate> _templates = const [];
   bool _isLoading = false;
+  bool _hasLoaded = false;
+  DateTime? _lastLoadedAt;
+  Future<void>? _loadOperation;
   String? _error;
 
   List<MealTemplate> get templates => _templates;
   bool get isLoading => _isLoading;
   String? get error => _error;
 
-  Future<void> load() async {
-    _isLoading = true;
-    notifyListeners();
+  Future<void> load({bool forceRefresh = false}) {
+    final isCacheFresh =
+        _lastLoadedAt != null && _now().difference(_lastLoadedAt!) < _cacheTtl;
+    if (!forceRefresh && _hasLoaded && isCacheFresh) {
+      return Future.value();
+    }
+    if (_loadOperation != null) return _loadOperation!;
+
+    final showLoading = forceRefresh || !_hasLoaded;
+    _loadOperation = _load(showLoading: showLoading).whenComplete(() {
+      _loadOperation = null;
+    });
+    return _loadOperation!;
+  }
+
+  Future<void> _load({required bool showLoading}) async {
+    if (showLoading) {
+      _isLoading = true;
+      notifyListeners();
+    }
     try {
       _templates = await _nutritionRepository.getTemplates();
+      _hasLoaded = true;
+      _lastLoadedAt = _now();
       _error = null;
     } catch (error) {
-      _error = error.toString();
+      if (showLoading) {
+        _error = error.toString();
+      }
     } finally {
-      _isLoading = false;
+      if (showLoading) {
+        _isLoading = false;
+      }
       notifyListeners();
     }
   }
@@ -36,6 +69,8 @@ class MealTemplatesViewModel extends ChangeNotifier {
     _templates = _templates
         .map((item) => item.id == updated.id ? updated : item)
         .toList();
+    _hasLoaded = true;
+    _lastLoadedAt = _now();
     notifyListeners();
   }
 
@@ -71,6 +106,8 @@ class MealTemplatesViewModel extends ChangeNotifier {
         ],
       );
       _templates = [..._templates, template];
+      _hasLoaded = true;
+      _lastLoadedAt = _now();
       _error = null;
     } catch (error) {
       _error = error.toString();
@@ -89,6 +126,8 @@ class MealTemplatesViewModel extends ChangeNotifier {
         _templates =
             _templates.where((item) => item.id != template.id).toList();
       }
+      _hasLoaded = true;
+      _lastLoadedAt = _now();
       _error = null;
     } catch (error) {
       _error = error.toString();

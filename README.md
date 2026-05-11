@@ -54,4 +54,4 @@ BACKEND_IMAGE=ghcr.io/autofactu/cal-tracker-backend:bootstrap
 ```
 
 Dev usa el schema Postgres `cal_tracker_dev` y produccion usa `cal_tracker_pro`.
-El despliegue a dev se ejecuta con push a `main`; produccion se ejecuta con tags `v*`.
+El despliegue a dev se ejecuta con push a `develop`; produccion se ejecuta con tags `v*`.

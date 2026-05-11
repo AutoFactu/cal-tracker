@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { FoodMention } from "@cal-tracker/contracts";
 import type {
   AgentToolDecision,
   ChatAgentProvider,
@@ -34,6 +35,11 @@ class ThrowingChatAgentProvider implements ChatAgentProvider {
 describe("AgentService", () => {
   it("maps chicken and rice with quantities to propose_meal_log", async () => {
     const { request } = buildTestApp({
+      foodTextExtractor: {
+        async extract(): Promise<FoodMention[]> {
+          throw new Error("text extractor should not be called");
+        },
+      },
       agentProvider: new FakeChatAgentProvider({
         toolCalls: [
           {
@@ -43,6 +49,28 @@ describe("AgentService", () => {
               name: "propose_meal_log",
               arguments: JSON.stringify({
                 text: "Add 100 grams of chicken breast and 100 grams of rice",
+                mentions: [
+                  {
+                    originalText: "100 grams of chicken breast",
+                    canonicalEnglishName: "chicken breast",
+                    quantity: 100,
+                    unit: "g",
+                    rawUnitText: "grams",
+                    unitKind: "metric",
+                    confidence: 0.95,
+                    marketProduct: false,
+                  },
+                  {
+                    originalText: "100 grams of rice",
+                    canonicalEnglishName: "rice",
+                    quantity: 100,
+                    unit: "g",
+                    rawUnitText: "grams",
+                    unitKind: "metric",
+                    confidence: 0.95,
+                    marketProduct: false,
+                  },
+                ],
               }),
             },
           },
@@ -61,10 +89,27 @@ describe("AgentService", () => {
       }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as {
+      kind: string;
+      proposal?: unknown;
+      message: string;
+      options: Array<{ mention: { canonicalEnglishName: string } }>;
+    };
     expect(body.kind).toBe("proposal");
     expect(body.proposal).toBeDefined();
     expect(body.message).toBe("Meal proposal created.");
+    expect(body.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          mention: expect.objectContaining({
+            canonicalEnglishName: "chicken breast",
+          }),
+        }),
+        expect.objectContaining({
+          mention: expect.objectContaining({ canonicalEnglishName: "rice" }),
+        }),
+      ]),
+    );
   });
 
   it("forces a meal logging request to a meal proposal when the model chooses lookup", async () => {
@@ -355,9 +400,21 @@ describe("AgentService", () => {
     const body = (await res.json()) as {
       kind: string;
       items: { name: string }[];
+      options: Array<{
+        mention: { canonicalEnglishName: string };
+        candidates: Array<{ name: string }>;
+      }>;
     };
     expect(body.kind).toBe("nutrition_search");
     expect(body.items.some((item) => item.name === "Bread")).toBe(true);
+    expect(body.options[0]).toEqual(
+      expect.objectContaining({
+        mention: expect.objectContaining({ canonicalEnglishName: "bread" }),
+        candidates: expect.arrayContaining([
+          expect.objectContaining({ name: "Bread" }),
+        ]),
+      }),
+    );
   });
 
   it("maps usual meal listing to templates", async () => {

@@ -37,7 +37,7 @@ class _MealHistoryScreenState extends State<MealHistoryScreen> {
         FreshIconButton(
           icon: Icons.refresh_rounded,
           tooltip: l10n.commonRefresh,
-          onPressed: viewModel.load,
+          onPressed: () => viewModel.load(forceRefresh: true),
         ),
       ],
       child: Column(

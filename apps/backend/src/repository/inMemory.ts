@@ -6,11 +6,32 @@ import type {
   ActionCallRecord,
   AppRepository,
   AuditEventRecord,
+  EmbeddingModelRecord,
+  FoodFeedbackRecord,
   FoodItemRecord,
+  FoodItemEmbeddingRecord,
+  FoodHybridSearchInput,
+  FoodSearchCandidate,
   MemoryMatch,
   StoredSession,
-  StoredUser
+  StoredUser,
+  UpsertFoodItemEmbeddingInput,
+  UserFoodPreference
 } from "./types.js";
+
+const ACTIVE_EMBEDDING_MODEL: EmbeddingModelRecord = {
+  id: "local-bge-m3-1024",
+  provider: "local",
+  model: "bge-m3",
+  dimensions: 1024
+};
+const DEFAULT_FOOD_SEARCH_LIMIT = 50;
+const MAX_FOOD_SEARCH_LIMIT = 100;
+const LEXICAL_SCORE_WEIGHT = 0.7;
+const VECTOR_SCORE_WEIGHT = 0.25;
+const LEXICAL_ONLY_SCORE_WEIGHT = 0.95;
+const PREFERENCE_SCORE_WEIGHT = 0.05;
+const PREFERENCE_SCORE_NORMALIZER = 10;
 
 export class InMemoryRepository implements AppRepository {
   private users = new Map<string, StoredUser>();
@@ -26,6 +47,9 @@ export class InMemoryRepository implements AppRepository {
   private meals = new Map<string, Meal & { userId: string }>();
   private templates = new Map<string, MealTemplate & { userId: string }>();
   private memories = new Map<string, { id: string; userId: string; normalizedText: string; label: string; templateId?: string; confidence: number; usageCount: number }>();
+  private foodEmbeddings = new Map<string, FoodItemEmbeddingRecord & { embedding: number[] }>();
+  private foodPreferences = new Map<string, UserFoodPreference>();
+  private foodFeedbackEvents: Array<FoodFeedbackRecord & { createdAt: string }> = [];
   private actionCalls: ActionCallRecord[] = [];
   private auditEvents: AuditEventRecord[] = [];
 
@@ -114,20 +138,68 @@ export class InMemoryRepository implements AppRepository {
     return true;
   }
 
-  async listFoods(): Promise<FoodItemRecord[]> {
-    return [...this.foods.values()];
+  async listFoods(userId?: string): Promise<FoodItemRecord[]> {
+    return [...this.foods.values()].filter((food) => !userId || !food.userId || food.userId === userId);
   }
 
-  async searchFoods(_userId: string, query: string, barcode?: string): Promise<FoodItemRecord[]> {
-    const normalized = normalizeText(query);
-    return [...this.foods.values()].filter((food) => {
-      if (barcode && food.barcode === barcode) return true;
-      const canonical = food.canonicalName ? normalizeText(food.canonicalName) : food.normalizedName;
-      return food.normalizedName.includes(normalized) ||
-        normalized.includes(food.normalizedName) ||
-        canonical.includes(normalized) ||
-        normalized.includes(canonical);
+  async searchFoods(userId: string, query: string, barcode?: string): Promise<FoodItemRecord[]> {
+    const candidates = await this.searchFoodsHybrid(userId, { query, barcode });
+    return candidates.map(stripFoodSearchCandidate);
+  }
+
+  async searchFoodsHybrid(userId: string, input: FoodHybridSearchInput): Promise<FoodSearchCandidate[]> {
+    const normalized = normalizeText(input.query);
+    const limit = sanitizeLimit(input.limit);
+    const candidates = new Map<string, { food: FoodItemRecord; lexicalScore: number; vectorScore?: number }>();
+    const visibleFoods = [...this.foods.values()].filter((food) => {
+      if (food.userId && food.userId !== userId) return false;
+      if (input.excludeBranded && food.dataType === "Branded") return false;
+      return true;
     });
+
+    if (input.barcode) {
+      for (const food of visibleFoods) {
+        if (food.barcode === input.barcode) candidates.set(food.id, { food, lexicalScore: 1 });
+      }
+    } else if (normalized.length > 0) {
+      for (const food of visibleFoods) {
+        const lexicalScore = lexicalFoodScore(food, normalized);
+        if (lexicalScore > 0) candidates.set(food.id, { food, lexicalScore });
+      }
+    }
+
+    if (!input.barcode && input.embedding && input.embeddingModelId) {
+      for (const embedding of this.foodEmbeddings.values()) {
+        if (embedding.embeddingModelId !== input.embeddingModelId) continue;
+        const food = this.foods.get(embedding.foodItemId);
+        if (!food || (food.userId && food.userId !== userId)) continue;
+        const vectorScore = clampScore(cosineSimilarity(input.embedding, embedding.embedding));
+        const existing = candidates.get(food.id);
+        if (existing) {
+          existing.vectorScore = Math.max(existing.vectorScore ?? 0, vectorScore);
+        } else {
+          candidates.set(food.id, { food, lexicalScore: 0, vectorScore });
+        }
+      }
+    }
+
+    return [...candidates.values()]
+      .map(({ food, lexicalScore, vectorScore }) => {
+        const preference = this.foodPreferences.get(preferenceKey(userId, food.id));
+        const preferenceScore = clamp((preference?.affinityScore ?? 0) / PREFERENCE_SCORE_NORMALIZER, -1, 1);
+        const baseScore = vectorScore == null
+          ? lexicalScore * LEXICAL_ONLY_SCORE_WEIGHT
+          : lexicalScore * LEXICAL_SCORE_WEIGHT + vectorScore * VECTOR_SCORE_WEIGHT;
+        return {
+          ...food,
+          lexicalScore,
+          vectorScore,
+          preferenceScore,
+          finalScore: clampScore(baseScore + preferenceScore * PREFERENCE_SCORE_WEIGHT)
+        };
+      })
+      .sort((a, b) => b.finalScore - a.finalScore || b.lexicalScore - a.lexicalScore || (b.vectorScore ?? 0) - (a.vectorScore ?? 0))
+      .slice(0, limit);
   }
 
   async upsertFoodItem(input: Omit<FoodItemRecord, "id">): Promise<FoodItemRecord> {
@@ -146,6 +218,75 @@ export class InMemoryRepository implements AppRepository {
     const food = { ...input, id: newId(), normalizedName: normalized };
     this.foods.set(food.id, food);
     return food;
+  }
+
+  async recordFoodFeedback(input: FoodFeedbackRecord): Promise<UserFoodPreference | undefined> {
+    const foodItemId = input.foodItemId ?? this.findFoodForFeedback(input)?.id;
+    if (!foodItemId) return undefined;
+    this.foodFeedbackEvents.push({ ...input, foodItemId, createdAt: new Date().toISOString() });
+    const key = preferenceKey(input.userId, foodItemId);
+    const existing = this.foodPreferences.get(key);
+    const delta = foodFeedbackDelta(input.action);
+    const now = new Date().toISOString();
+    const preference: UserFoodPreference = existing
+      ? {
+          ...existing,
+          affinityScore: existing.affinityScore + delta,
+          positiveFeedbackCount: existing.positiveFeedbackCount + (delta > 0 ? 1 : 0),
+          negativeFeedbackCount: existing.negativeFeedbackCount + (delta < 0 ? 1 : 0),
+          lastFeedbackAt: now,
+          updatedAt: now
+        }
+      : {
+          userId: input.userId,
+          foodItemId,
+          affinityScore: delta,
+          positiveFeedbackCount: delta > 0 ? 1 : 0,
+          negativeFeedbackCount: delta < 0 ? 1 : 0,
+          lastFeedbackAt: now,
+          updatedAt: now
+        };
+    this.foodPreferences.set(key, preference);
+    return preference;
+  }
+
+  private findFoodForFeedback(input: FoodFeedbackRecord): FoodItemRecord | undefined {
+    if (!input.externalSource || !input.externalId) return undefined;
+    return [...this.foods.values()].find((food) =>
+      food.externalSource === input.externalSource &&
+      food.externalId === input.externalId &&
+      (food.userId === undefined || food.userId === input.userId)
+    );
+  }
+
+  async getUserFoodPreferences(userId: string): Promise<UserFoodPreference[]> {
+    return [...this.foodPreferences.values()]
+      .filter((preference) => preference.userId === userId)
+      .sort((a, b) => b.affinityScore - a.affinityScore || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  }
+
+  async getActiveEmbeddingModel(): Promise<EmbeddingModelRecord | undefined> {
+    return ACTIVE_EMBEDDING_MODEL;
+  }
+
+  async upsertFoodItemEmbedding(input: UpsertFoodItemEmbeddingInput): Promise<FoodItemEmbeddingRecord> {
+    if (input.embedding.length !== ACTIVE_EMBEDDING_MODEL.dimensions) throw new Error("invalid_embedding_dimensions");
+    const now = new Date().toISOString();
+    const key = `${input.foodItemId}:${input.embeddingModelId}`;
+    const existing = this.foodEmbeddings.get(key);
+    const record = {
+      id: existing?.id ?? newId(),
+      foodItemId: input.foodItemId,
+      embeddingModelId: input.embeddingModelId,
+      embeddedText: input.embeddedText,
+      embeddedTextHash: input.embeddedTextHash,
+      embedding: input.embedding,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now
+    };
+    this.foodEmbeddings.set(key, record);
+    const { embedding: _embedding, ...publicRecord } = record;
+    return publicRecord;
   }
 
   async getNutritionTarget(userId: string): Promise<NutritionSnapshot> {
@@ -396,4 +537,80 @@ function previousDatesInWeek(date: string): string[] {
     dates.push(value.toISOString().slice(0, 10));
   }
   return dates;
+}
+
+function stripFoodSearchCandidate(candidate: FoodSearchCandidate): FoodItemRecord {
+  const {
+    lexicalScore: _lexicalScore,
+    vectorScore: _vectorScore,
+    preferenceScore: _preferenceScore,
+    finalScore: _finalScore,
+    ...food
+  } = candidate;
+  return food;
+}
+
+function lexicalFoodScore(food: FoodItemRecord, normalizedQuery: string): number {
+  const canonical = food.canonicalName ? normalizeText(food.canonicalName) : food.normalizedName;
+  const brand = food.brand ? normalizeText(food.brand) : "";
+  if (food.normalizedName === normalizedQuery || canonical === normalizedQuery) return 1;
+  if (food.normalizedName.includes(normalizedQuery) || normalizedQuery.includes(food.normalizedName)) return 0.82;
+  if (canonical.includes(normalizedQuery) || normalizedQuery.includes(canonical)) return 0.76;
+  if (brand && (brand.includes(normalizedQuery) || normalizedQuery.includes(brand))) return 0.5;
+  const queryTokens = normalizedQuery.split(/\s+/).filter(Boolean);
+  if (queryTokens.length > 1) {
+    const nameTokens = new Set(`${food.normalizedName} ${canonical}`.split(/\s+/).filter(Boolean));
+    const matchedTokens = queryTokens.filter((token) => nameTokens.has(token)).length;
+    if (matchedTokens === queryTokens.length) return 0.68;
+  }
+  return 0;
+}
+
+function sanitizeLimit(limit?: number): number {
+  if (!Number.isFinite(limit)) return DEFAULT_FOOD_SEARCH_LIMIT;
+  return Math.max(1, Math.min(MAX_FOOD_SEARCH_LIMIT, Math.floor(limit as number)));
+}
+
+function clampScore(score: number): number {
+  return clamp(score, 0, 1);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
+function cosineSimilarity(left: number[], right: number[]): number {
+  if (left.length !== right.length) return 0;
+  let dot = 0;
+  let leftMagnitude = 0;
+  let rightMagnitude = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    const leftValue = left[index] ?? 0;
+    const rightValue = right[index] ?? 0;
+    dot += leftValue * rightValue;
+    leftMagnitude += leftValue * leftValue;
+    rightMagnitude += rightValue * rightValue;
+  }
+  if (leftMagnitude === 0 || rightMagnitude === 0) return 0;
+  return dot / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
+}
+
+function foodFeedbackDelta(action: FoodFeedbackRecord["action"]): number {
+  switch (action) {
+    case "selected":
+      return 1;
+    case "logged":
+      return 0.75;
+    case "corrected":
+      return 0.5;
+    case "dismissed":
+      return -0.5;
+    case "rejected":
+      return -1;
+  }
+}
+
+function preferenceKey(userId: string, foodItemId: string): string {
+  return `${userId}:${foodItemId}`;
 }

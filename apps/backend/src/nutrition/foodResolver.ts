@@ -4,7 +4,8 @@ import type {
   FoodPortionChoice,
   MealItem,
 } from "@cal-tracker/contracts";
-import type { AppRepository, FoodItemRecord, FoodPortionRecord } from "../repository/types.js";
+import type { EmbeddingProvider } from "../embeddings/provider.js";
+import type { AppRepository, FoodItemRecord, FoodPortionRecord, FoodSearchCandidate } from "../repository/types.js";
 import { normalizeText } from "../utils/normalize.js";
 import { scaleFood } from "../utils/nutrition.js";
 
@@ -13,6 +14,11 @@ export type FoodResolutionResult = {
   unresolvedMentions: FoodMention[];
   candidateGroups: FoodCandidateGroup[];
   clarificationRequired: boolean;
+};
+
+export type FoodSearchResult = {
+  items: MealItem[];
+  candidateGroups: FoodCandidateGroup[];
 };
 
 export interface FoodTextExtractor {
@@ -73,6 +79,13 @@ export class FoodResolver {
     text: string,
   ): Promise<FoodResolutionResult> {
     const mentions = await this.extractor.extract(text);
+    return this.resolveMealMentions(userId, mentions);
+  }
+
+  async resolveMealMentions(
+    userId: string,
+    mentions: FoodMention[],
+  ): Promise<FoodResolutionResult> {
     const items: MealItem[] = [];
     const unresolvedMentions: FoodMention[] = [];
     const candidateGroups: FoodCandidateGroup[] = [];
@@ -112,7 +125,7 @@ export class FoodResolver {
     userId: string,
     query: string,
     barcode?: string,
-  ): Promise<MealItem[]> {
+  ): Promise<FoodSearchResult> {
     const mention: FoodMention = {
       originalText: query,
       canonicalEnglishName: normalizeFoodName(query),
@@ -124,13 +137,27 @@ export class FoodResolver {
       confidence: 0.95,
       marketProduct: Boolean(barcode),
     };
-    const { candidates } = await this.resolveMention(userId, mention, {
-      includeMarketSearch: true,
-    });
+    const { candidates, reason, portionOptions } = await this.resolveMention(
+      userId,
+      mention,
+      {
+        includeMarketSearch: true,
+      },
+    );
     for (const candidate of candidates.slice(0, 3)) {
       await this.cacheExternalCandidate(candidate);
     }
-    return candidates;
+    return {
+      items: candidates,
+      candidateGroups: [
+        {
+          mention,
+          candidates,
+          reason: candidates.length === 0 ? reason : undefined,
+          portionOptions: candidates.length === 0 ? portionOptions : undefined,
+        },
+      ],
+    };
   }
 
   private async resolveMention(
@@ -181,14 +208,18 @@ export class FoodResolver {
       )
         break;
     }
-    candidates.sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+    candidates.sort(compareFoodCandidates);
     if (
       candidates.length === 0 &&
       !reason &&
       requiresPortionValidation(mention)
     )
       reason = "unsupported_unit";
-    return { candidates, reason, portionOptions };
+    return {
+      candidates: annotateCandidateMetadata(candidates),
+      reason,
+      portionOptions,
+    };
   }
 
   private async cacheExternalCandidate(item: MealItem): Promise<void> {
@@ -316,21 +347,40 @@ export class LocalFoodDataProvider implements FoodDataProvider {
 
   constructor(
     private readonly repository: AppRepository,
-    private readonly options: { allowSeededPortionFallback?: boolean } = {},
+    private readonly options: {
+      allowSeededPortionFallback?: boolean;
+      embeddingProvider?: EmbeddingProvider;
+    } = {},
   ) {}
 
   async resolve(
     userId: string,
     mention: FoodMention,
   ): Promise<FoodProviderResolution> {
-    const foods = await this.repository.searchFoods(
-      userId,
-      mention.canonicalEnglishName,
-      mention.barcode,
-    );
-    const compatibleFoods = foods
+    const foods = await this.searchFoods(userId, mention);
+    let compatibleFoods = foods
       .filter((food) => cachedFoodIsCompatible(food, mention))
-      .sort((a, b) => localFoodPriority(a, mention) - localFoodPriority(b, mention));
+      .sort((a, b) =>
+        (b.finalScore ?? 0) - (a.finalScore ?? 0) ||
+        localFoodPriority(a, mention) - localFoodPriority(b, mention),
+      );
+    if (
+      compatibleFoods.length === 0 &&
+      this.options.embeddingProvider &&
+      !hasMarketProductIntent(mention)
+    ) {
+      compatibleFoods = (await this.repository.searchFoodsHybrid(userId, {
+        query: mention.canonicalEnglishName,
+        barcode: mention.barcode,
+        excludeBranded: true,
+        limit: 50,
+      }))
+        .filter((food) => cachedFoodIsCompatible(food, mention))
+        .sort(
+          (a, b) =>
+            localFoodPriority(a, mention) - localFoodPriority(b, mention),
+        );
+    }
     const items: MealItem[] = [];
     let reason: FoodCandidateGroup["reason"] | undefined;
     let portionOptions: FoodPortionChoice[] | undefined;
@@ -347,6 +397,11 @@ export class LocalFoodDataProvider implements FoodDataProvider {
           allowSeededPortionFallback: this.options.allowSeededPortionFallback,
       });
       if (item) {
+        item.lexicalScore = food.lexicalScore ?? item.lexicalScore;
+        item.vectorScore = food.vectorScore ?? item.vectorScore;
+        item.preferenceScore = food.preferenceScore ?? item.preferenceScore;
+        item.matchScore = food.finalScore ?? item.matchScore;
+        item.matchReason = food.vectorScore ? "hybrid_search" : item.matchReason;
         items.push(markLocalCandidate(item));
         continue;
       }
@@ -370,6 +425,40 @@ export class LocalFoodDataProvider implements FoodDataProvider {
           : undefined,
       portionOptions,
     };
+  }
+
+  private async searchFoods(
+    userId: string,
+    mention: FoodMention,
+  ): Promise<Array<FoodItemRecord & Partial<FoodSearchCandidate>>> {
+    if (!mention.barcode && this.options.embeddingProvider) {
+      try {
+        const model = await this.repository.getActiveEmbeddingModel();
+        if (model) {
+          const embedding = (await this.options.embeddingProvider.embed([
+            mention.canonicalEnglishName,
+          ])).data[0]?.embedding;
+          if (embedding) {
+            return await this.repository.searchFoodsHybrid(userId, {
+              query: mention.canonicalEnglishName,
+              barcode: mention.barcode,
+              embedding,
+              embeddingModelId: model.id,
+              limit: 50,
+              excludeBranded: !hasMarketProductIntent(mention),
+            });
+          }
+        }
+      } catch {
+        // Fall back to lexical search if embeddings are unavailable.
+      }
+    }
+    return this.repository.searchFoodsHybrid(userId, {
+      query: mention.canonicalEnglishName,
+      barcode: mention.barcode,
+      excludeBranded: !hasMarketProductIntent(mention),
+      limit: 50,
+    });
   }
 }
 
@@ -1228,6 +1317,43 @@ function normalizeProviderResolution(
   return Array.isArray(result) ? { items: result } : result;
 }
 
+function annotateCandidateMetadata(candidates: MealItem[]): MealItem[] {
+  return candidates.slice(0, 10).map((candidate, index) => {
+    candidate.rank = index + 1;
+    candidate.matchScore ??= candidate.confidence;
+    candidate.lexicalScore ??= candidate.confidence;
+    candidate.matchReason ??= candidate.externalSource ?? candidate.source;
+    return candidate;
+  });
+}
+
+function compareFoodCandidates(a: MealItem, b: MealItem): number {
+  return (
+    recommendationScore(b) - recommendationScore(a) ||
+    (b.confidence ?? 0) - (a.confidence ?? 0) ||
+    (b.matchScore ?? 0) - (a.matchScore ?? 0) ||
+    (b.preferenceScore ?? 0) - (a.preferenceScore ?? 0) ||
+    (b.vectorScore ?? 0) - (a.vectorScore ?? 0) ||
+    (b.lexicalScore ?? 0) - (a.lexicalScore ?? 0) ||
+    a.name.localeCompare(b.name)
+  );
+}
+
+function recommendationScore(item: MealItem): number {
+  const confidence = item.confidence ?? item.matchScore ?? 0;
+  const matchScore = item.matchScore ?? confidence;
+  const preferenceScore = Math.max(-1, Math.min(1, item.preferenceScore ?? 0));
+  const vectorScore = item.vectorScore ?? 0;
+  const lexicalScore = item.lexicalScore ?? 0;
+  return (
+    confidence * 0.72 +
+    matchScore * 0.18 +
+    preferenceScore * 0.07 +
+    vectorScore * 0.02 +
+    lexicalScore * 0.01
+  );
+}
+
 function resolvedGrams(item: MealItem): number | undefined {
   const value = (item as MealItemWithResolvedGrams)[resolvedGramsSymbol];
   return isNumber(value) ? value : undefined;
@@ -1364,10 +1490,12 @@ const usdaScoringStopWords = new Set([
   "the",
   "to",
   "with",
+  "only",
 ]);
 
 const usdaNeutralDescriptorWords = new Set([
   "boneless",
+  "broiler",
   "chopped",
   "clarified",
   "commercial",
@@ -1379,6 +1507,7 @@ const usdaNeutralDescriptorWords = new Set([
   "dry",
   "extra",
   "fresh",
+  "fryer",
   "frozen",
   "golden",
   "green",

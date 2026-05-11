@@ -208,12 +208,27 @@ class VoiceLogViewModel extends ChangeNotifier {
 
   bool get isLoading => _uiState.isLoading;
 
-  Future<void> toggleRecording() async {
+  bool get canStartRecording => _canStartRecording;
+
+  bool get canStopRecording => state == VoiceLogState.recording;
+
+  Future<void> toggleRecording({bool submitAfterTranscription = false}) async {
     if (_canStartRecording) {
-      await _startRecording();
+      await startRecording();
     } else if (state == VoiceLogState.recording) {
-      await _stopRecording();
+      await stopRecording(submitAfterTranscription: submitAfterTranscription);
     }
+  }
+
+  Future<void> startRecording() => _startRecording();
+
+  Future<void> stopRecording({bool submitAfterTranscription = false}) {
+    if (state != VoiceLogState.recording) return Future.value();
+    return _stopRecording(submitAfterTranscription: submitAfterTranscription);
+  }
+
+  Future<void> toggleGlobalRecording() {
+    return toggleRecording(submitAfterTranscription: true);
   }
 
   bool get _canStartRecording =>
@@ -227,32 +242,37 @@ class VoiceLogViewModel extends ChangeNotifier {
       state == VoiceLogState.clarificationRequired;
 
   Future<void> _startRecording() async {
-    _setUiState(_uiState.copyWith(
-      phase: VoiceLogState.requestingPermission,
-      errorMessage: null,
-      message: null,
-      proposal: null,
-      autoCommittedMeal: null,
-      summary: null,
-      remaining: null,
-      meals: null,
-      items: null,
-      resolvedItems: null,
-      templates: null,
-      template: null,
-      deleted: null,
-      confirmationActionId: null,
-      confirmationInput: null,
-      candidateGroups: null,
-      selectedCandidateItems: const {},
-    ));
+    _setUiState(
+      _uiState.copyWith(
+        phase: VoiceLogState.requestingPermission,
+        errorMessage: null,
+        message: null,
+        proposal: null,
+        autoCommittedMeal: null,
+        summary: null,
+        remaining: null,
+        meals: null,
+        items: null,
+        resolvedItems: null,
+        templates: null,
+        template: null,
+        deleted: null,
+        confirmationActionId: null,
+        confirmationInput: null,
+        candidateGroups: null,
+        selectedCandidateItems: const {},
+      ),
+    );
     try {
       await _audioRecorderService.start();
       _setUiState(_uiState.copyWith(recordingDuration: Duration.zero));
       _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-        _setUiState(_uiState.copyWith(
+        _setUiState(
+          _uiState.copyWith(
             recordingDuration:
-                _uiState.recordingDuration + const Duration(seconds: 1)));
+                _uiState.recordingDuration + const Duration(seconds: 1),
+          ),
+        );
       });
       _setState(VoiceLogState.recording);
     } on RecorderException catch (e) {
@@ -266,13 +286,16 @@ class VoiceLogViewModel extends ChangeNotifier {
     }
   }
 
-  Future<void> _stopRecording() async {
+  Future<void> _stopRecording({bool submitAfterTranscription = false}) async {
     _durationTimer?.cancel();
     _setState(VoiceLogState.stopping);
     try {
       final audio = await _audioRecorderService.stop();
       if (audio != null) {
-        await _transcribe(audio.path);
+        await _transcribe(
+          audio.path,
+          submitAfterTranscription: submitAfterTranscription,
+        );
       } else {
         _setError('No audio file was created.');
       }
@@ -283,15 +306,35 @@ class VoiceLogViewModel extends ChangeNotifier {
     }
   }
 
-  Future<void> _transcribe(String path) async {
+  Future<void> _transcribe(
+    String path, {
+    bool submitAfterTranscription = false,
+  }) async {
     _setState(VoiceLogState.transcribing);
     try {
-      final transcript = await _nutritionRepository.transcribeAudio(File(path));
-      _setUiState(
-          _uiState.copyWith(transcript: transcript, errorMessage: null));
-      _setState(VoiceLogState.transcriptReady);
+      if (submitAfterTranscription) {
+        final voiceResult = await _nutritionRepository.logAudio(File(path));
+        _setUiState(
+          _uiState.copyWith(
+            transcript: voiceResult.transcript,
+            errorMessage: null,
+          ),
+        );
+        _applyAgentRunResult(voiceResult.result);
+      } else {
+        final transcript =
+            await _nutritionRepository.transcribeAudio(File(path));
+        _setUiState(
+          _uiState.copyWith(transcript: transcript, errorMessage: null),
+        );
+        _setState(VoiceLogState.transcriptReady);
+      }
     } catch (e) {
-      _setError('Transcription failed: ${e.toString()}');
+      _setError(
+        submitAfterTranscription
+            ? 'Voice meal failed: ${e.toString()}'
+            : 'Transcription failed: ${e.toString()}',
+      );
     } finally {
       try {
         await File(path).delete();
@@ -308,56 +351,70 @@ class VoiceLogViewModel extends ChangeNotifier {
   Future<void> submitText([String? overrideText]) async {
     final text = (overrideText ?? _uiState.transcript).trim();
     if (text.isEmpty) return;
-    _setUiState(_uiState.copyWith(
-      phase: VoiceLogState.agentRunning,
-      transcript: text,
-      errorMessage: null,
-      message: null,
-      proposal: null,
-      autoCommittedMeal: null,
-      summary: null,
-      remaining: null,
-      meals: null,
-      items: null,
-      resolvedItems: null,
-      templates: null,
-      template: null,
-      deleted: null,
-      confirmationActionId: null,
-      confirmationInput: null,
-      candidateGroups: null,
-      selectedCandidateItems: const {},
-    ));
+    _setUiState(
+      _uiState.copyWith(
+        phase: VoiceLogState.agentRunning,
+        transcript: text,
+        errorMessage: null,
+        message: null,
+        proposal: null,
+        autoCommittedMeal: null,
+        summary: null,
+        remaining: null,
+        meals: null,
+        items: null,
+        resolvedItems: null,
+        templates: null,
+        template: null,
+        deleted: null,
+        confirmationActionId: null,
+        confirmationInput: null,
+        candidateGroups: null,
+        selectedCandidateItems: const {},
+      ),
+    );
     try {
       final result = await _nutritionRepository.logText(text);
-      VoiceLogState nextState;
-      switch (result.kind) {
-        case 'meal_committed':
-          nextState = VoiceLogState.autoCommitted;
-          break;
-        case 'proposal':
-          nextState = VoiceLogState.proposalReady;
-          break;
-        case 'clarification_required':
-        case 'confirmation_required':
-          nextState = VoiceLogState.clarificationRequired;
-          break;
-        case 'summary':
-        case 'remaining_targets':
-        case 'history':
-        case 'food_memory':
-        case 'nutrition_search':
-        case 'templates':
-        case 'template_saved':
-        case 'template_deleted':
-        case 'meal_deleted':
-        case 'meal_corrected':
-          nextState = VoiceLogState.resultReady;
-          break;
-        default:
-          nextState = VoiceLogState.clarificationRequired;
-      }
-      _setUiState(_uiState.copyWith(
+      _applyAgentRunResult(result);
+    } catch (error) {
+      _setError('Agent failed: ${error.toString()}');
+    }
+  }
+
+  void _applyAgentRunResult(AgentRunResult result) {
+    VoiceLogState nextState;
+    switch (result.kind) {
+      case 'meal_committed':
+        nextState = VoiceLogState.autoCommitted;
+        break;
+      case 'proposal':
+        nextState = VoiceLogState.proposalReady;
+        break;
+      case 'clarification_required':
+      case 'confirmation_required':
+        nextState = VoiceLogState.clarificationRequired;
+        break;
+      case 'summary':
+      case 'remaining_targets':
+      case 'history':
+      case 'food_memory':
+      case 'nutrition_search':
+      case 'templates':
+      case 'template_saved':
+      case 'template_deleted':
+      case 'meal_deleted':
+      case 'meal_corrected':
+        nextState = VoiceLogState.resultReady;
+        break;
+      default:
+        nextState = VoiceLogState.clarificationRequired;
+    }
+    final selectedCandidateItems = _defaultCandidateSelections(
+      groups: result.candidateGroups,
+      resolvedItems: result.resolvedItems,
+    );
+    _setUiState(
+      _uiState.copyWith(
         phase: nextState,
         proposal: result.proposal,
         autoCommittedMeal: result.meal,
@@ -374,11 +431,9 @@ class VoiceLogViewModel extends ChangeNotifier {
         confirmationActionId: result.actionId,
         confirmationInput: result.input,
         candidateGroups: result.candidateGroups,
-        selectedCandidateItems: const {},
-      ));
-    } catch (error) {
-      _setError('Agent failed: ${error.toString()}');
-    }
+        selectedCandidateItems: selectedCandidateItems,
+      ),
+    );
   }
 
   Future<void> commitProposal({MealLabel? mealLabel}) async {
@@ -390,13 +445,15 @@ class VoiceLogViewModel extends ChangeNotifier {
         proposal.id,
         mealLabel: mealLabel,
       );
-      _setUiState(_uiState.copyWith(
-        phase: VoiceLogState.autoCommitted,
-        autoCommittedMeal: meal,
-        proposal: null,
-        message: 'Meal logged.',
-        errorMessage: null,
-      ));
+      _setUiState(
+        _uiState.copyWith(
+          phase: VoiceLogState.autoCommitted,
+          autoCommittedMeal: meal,
+          proposal: null,
+          message: 'Meal logged.',
+          errorMessage: null,
+        ),
+      );
     } catch (error) {
       _setError('Commit failed: ${error.toString()}');
     }
@@ -407,14 +464,18 @@ class VoiceLogViewModel extends ChangeNotifier {
     if (proposal == null) return;
     _setState(VoiceLogState.agentRunning);
     try {
-      final updated =
-          await _nutritionRepository.updateProposalItems(proposal.id, items);
-      _setUiState(_uiState.copyWith(
-        phase: VoiceLogState.proposalReady,
-        proposal: updated,
-        message: 'Proposal updated.',
-        errorMessage: null,
-      ));
+      final updated = await _nutritionRepository.updateProposalItems(
+        proposal.id,
+        items,
+      );
+      _setUiState(
+        _uiState.copyWith(
+          phase: VoiceLogState.proposalReady,
+          proposal: updated,
+          message: 'Proposal updated.',
+          errorMessage: null,
+        ),
+      );
     } catch (error) {
       _setError('Proposal edit failed: ${error.toString()}');
     }
@@ -425,36 +486,47 @@ class VoiceLogViewModel extends ChangeNotifier {
     MealItem candidate,
   ) async {
     final groups = _uiState.candidateGroups ?? const <FoodCandidateGroup>[];
+    final previousSelection = selectedCandidateFor(group);
     final selections = Map<String, MealItem>.of(_uiState.selectedCandidateItems)
       ..[_candidateGroupKey(group)] = candidate;
     _setUiState(_uiState.copyWith(selectedCandidateItems: selections));
-
-    final pendingGroups = groups.where(_needsCandidateSelection).toList();
-    if (pendingGroups.isEmpty ||
-        !pendingGroups.every(
-            (group) => selections.containsKey(_candidateGroupKey(group)))) {
+    if (previousSelection != null &&
+        _sameMealItem(previousSelection, candidate)) {
       return;
     }
 
-    final selectedItems = [
-      ...?_uiState.resolvedItems,
-      for (final group in pendingGroups) selections[_candidateGroupKey(group)]!,
-    ];
+    final selectableGroups =
+        groups.where((group) => group.candidates.isNotEmpty).toList();
+    final requiredGroups =
+        selectableGroups.where(_needsCandidateSelection).toList();
+    if (selectableGroups.isEmpty ||
+        !requiredGroups.every(
+          (group) => selections.containsKey(_candidateGroupKey(group)),
+        )) {
+      return;
+    }
+
+    final selectedItems = _itemsWithCandidateSelections(
+      groups: groups,
+      selections: selections,
+    );
     _setState(VoiceLogState.agentRunning);
     try {
       final proposal = await _nutritionRepository.createProposalFromItems(
         phrase: _uiState.transcript,
         items: selectedItems,
       );
-      _setUiState(_uiState.copyWith(
-        phase: VoiceLogState.proposalReady,
-        proposal: proposal,
-        message: 'Meal proposal created.',
-        errorMessage: null,
-        candidateGroups: null,
-        resolvedItems: null,
-        selectedCandidateItems: const {},
-      ));
+      _setUiState(
+        _uiState.copyWith(
+          phase: VoiceLogState.proposalReady,
+          proposal: proposal,
+          message: 'Meal proposal created.',
+          errorMessage: null,
+          resolvedItems: null,
+          candidateGroups: groups,
+          selectedCandidateItems: selections,
+        ),
+      );
     } catch (error) {
       _setError('Candidate selection failed: ${error.toString()}');
     }
@@ -466,7 +538,8 @@ class VoiceLogViewModel extends ChangeNotifier {
 
   void retry() {
     _setUiState(
-        _uiState.copyWith(phase: VoiceLogState.idle, errorMessage: null));
+      _uiState.copyWith(phase: VoiceLogState.idle, errorMessage: null),
+    );
   }
 
   void _setState(VoiceLogState value) {
@@ -475,7 +548,8 @@ class VoiceLogViewModel extends ChangeNotifier {
 
   void _setError(String message) {
     _setUiState(
-        _uiState.copyWith(phase: VoiceLogState.error, errorMessage: message));
+      _uiState.copyWith(phase: VoiceLogState.error, errorMessage: message),
+    );
   }
 
   void _setUiState(VoiceLogUiState value) {
@@ -483,12 +557,107 @@ class VoiceLogViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  Map<String, MealItem> _defaultCandidateSelections({
+    required List<FoodCandidateGroup>? groups,
+    required List<MealItem>? resolvedItems,
+  }) {
+    if (groups == null || resolvedItems == null) return const {};
+    final selections = <String, MealItem>{};
+    for (final group in groups) {
+      final resolvedItem = _resolvedItemForGroup(group, resolvedItems);
+      if (resolvedItem == null) continue;
+      final candidate = _matchingCandidateForResolvedItem(group, resolvedItem);
+      if (candidate != null) {
+        selections[_candidateGroupKey(group)] = candidate;
+      }
+    }
+    return selections;
+  }
+
+  List<MealItem> _itemsWithCandidateSelections({
+    required List<FoodCandidateGroup> groups,
+    required Map<String, MealItem> selections,
+  }) {
+    final resolvedItems = _uiState.resolvedItems ?? const <MealItem>[];
+    final selectedItems = <MealItem>[];
+    final representedGroupKeys = <String>{};
+
+    for (final item in resolvedItems) {
+      final group = _groupForResolvedItem(item, groups);
+      if (group == null) {
+        selectedItems.add(item);
+        continue;
+      }
+
+      final key = _candidateGroupKey(group);
+      representedGroupKeys.add(key);
+      selectedItems.add(selections[key] ?? item);
+    }
+
+    for (final group in groups) {
+      final key = _candidateGroupKey(group);
+      if (representedGroupKeys.contains(key)) continue;
+      final selected = selections[key];
+      if (selected != null) selectedItems.add(selected);
+    }
+
+    return selectedItems;
+  }
+
   bool _needsCandidateSelection(FoodCandidateGroup group) {
     if (group.candidates.isEmpty) return false;
-    return !(_uiState.resolvedItems ?? const <MealItem>[]).any((item) =>
-        item.canonicalName == group.mention.canonicalEnglishName &&
+    return _resolvedItemForGroup(
+          group,
+          _uiState.resolvedItems ?? const <MealItem>[],
+        ) ==
+        null;
+  }
+
+  MealItem? _resolvedItemForGroup(
+    FoodCandidateGroup group,
+    List<MealItem> resolvedItems,
+  ) {
+    for (final item in resolvedItems) {
+      if (_resolvedItemMatchesGroup(item, group)) return item;
+    }
+    return null;
+  }
+
+  FoodCandidateGroup? _groupForResolvedItem(
+    MealItem item,
+    List<FoodCandidateGroup> groups,
+  ) {
+    for (final group in groups) {
+      if (_resolvedItemMatchesGroup(item, group)) return group;
+    }
+    return null;
+  }
+
+  bool _resolvedItemMatchesGroup(MealItem item, FoodCandidateGroup group) {
+    return item.canonicalName == group.mention.canonicalEnglishName &&
         item.quantity == group.mention.quantity &&
-        item.unit == group.mention.unit);
+        item.unit == group.mention.unit;
+  }
+
+  MealItem? _matchingCandidateForResolvedItem(
+    FoodCandidateGroup group,
+    MealItem resolvedItem,
+  ) {
+    for (final candidate in group.candidates) {
+      if (_sameMealItem(candidate, resolvedItem)) return candidate;
+    }
+    return null;
+  }
+
+  bool _sameMealItem(MealItem a, MealItem b) {
+    if (a.externalId != null && b.externalId != null) {
+      return a.externalId == b.externalId &&
+          a.externalSource == b.externalSource;
+    }
+    return a.name == b.name &&
+        a.source == b.source &&
+        a.quantity == b.quantity &&
+        a.unit == b.unit;
   }
 
   String _candidateGroupKey(FoodCandidateGroup group) {
