@@ -122,6 +122,7 @@ export type FoodHybridSearchInput = {
   embedding?: number[];
   embeddingModelId?: string;
   limit?: number;
+  excludeBranded?: boolean;
 };
 
 export type UpsertFoodItemEmbeddingInput = {

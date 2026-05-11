@@ -144,7 +144,11 @@ export class InMemoryRepository implements AppRepository {
     const normalized = normalizeText(input.query);
     const limit = sanitizeLimit(input.limit);
     const candidates = new Map<string, { food: FoodItemRecord; lexicalScore: number; vectorScore?: number }>();
-    const visibleFoods = [...this.foods.values()].filter((food) => !food.userId || food.userId === userId);
+    const visibleFoods = [...this.foods.values()].filter((food) => {
+      if (food.userId && food.userId !== userId) return false;
+      if (input.excludeBranded && food.dataType === "Branded") return false;
+      return true;
+    });
 
     if (input.barcode) {
       for (const food of visibleFoods) {

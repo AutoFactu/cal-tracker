@@ -150,6 +150,7 @@ export class PostgresRepository implements AppRepository {
     const limit = sanitizeLimit(input.limit);
     const normalized = normalizeText(input.query);
     const candidateRows = new Map<string, { row: Record<string, unknown>; lexicalScore: number; vectorScore?: number }>();
+    const includeBranded = !input.excludeBranded;
 
     if (input.barcode) {
       const rows = await this.sql`
@@ -172,6 +173,7 @@ export class PostgresRepository implements AppRepository {
                  ) AS search_score
           FROM food_items, food_query
           WHERE (food_items.user_id IS NULL OR food_items.user_id = ${userId})
+            AND (${includeBranded} OR food_items.data_type IS DISTINCT FROM 'Branded')
             AND (
               food_items.normalized_name % food_query.q
               OR COALESCE(food_items.canonical_name, '') % food_query.q
@@ -186,6 +188,7 @@ export class PostgresRepository implements AppRepository {
             CASE food_items.data_type
               WHEN 'SR Legacy' THEN 0
               WHEN 'Foundation' THEN 1
+              WHEN 'Survey (FNDDS)' THEN 2
               WHEN 'Branded' THEN 3
               ELSE 2
             END,
@@ -208,6 +211,7 @@ export class PostgresRepository implements AppRepository {
         JOIN food_items ON food_items.id = food_item_embeddings.food_item_id
         WHERE food_item_embeddings.embedding_model_id = ${input.embeddingModelId}
           AND (food_items.user_id IS NULL OR food_items.user_id = ${userId})
+          AND (${includeBranded} OR food_items.data_type IS DISTINCT FROM 'Branded')
         ORDER BY food_item_embeddings.embedding <=> ${vectorLiteral}::vector
         LIMIT ${Math.max(limit, DEFAULT_FOOD_SEARCH_LIMIT)}
       `;

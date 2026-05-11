@@ -358,12 +358,29 @@ export class LocalFoodDataProvider implements FoodDataProvider {
     mention: FoodMention,
   ): Promise<FoodProviderResolution> {
     const foods = await this.searchFoods(userId, mention);
-    const compatibleFoods = foods
+    let compatibleFoods = foods
       .filter((food) => cachedFoodIsCompatible(food, mention))
       .sort((a, b) =>
         (b.finalScore ?? 0) - (a.finalScore ?? 0) ||
         localFoodPriority(a, mention) - localFoodPriority(b, mention),
       );
+    if (
+      compatibleFoods.length === 0 &&
+      this.options.embeddingProvider &&
+      !hasMarketProductIntent(mention)
+    ) {
+      compatibleFoods = (await this.repository.searchFoodsHybrid(userId, {
+        query: mention.canonicalEnglishName,
+        barcode: mention.barcode,
+        excludeBranded: true,
+        limit: 50,
+      }))
+        .filter((food) => cachedFoodIsCompatible(food, mention))
+        .sort(
+          (a, b) =>
+            localFoodPriority(a, mention) - localFoodPriority(b, mention),
+        );
+    }
     const items: MealItem[] = [];
     let reason: FoodCandidateGroup["reason"] | undefined;
     let portionOptions: FoodPortionChoice[] | undefined;
@@ -428,6 +445,7 @@ export class LocalFoodDataProvider implements FoodDataProvider {
               embedding,
               embeddingModelId: model.id,
               limit: 50,
+              excludeBranded: !hasMarketProductIntent(mention),
             });
           }
         }
@@ -435,7 +453,12 @@ export class LocalFoodDataProvider implements FoodDataProvider {
         // Fall back to lexical search if embeddings are unavailable.
       }
     }
-    return this.repository.searchFoods(userId, mention.canonicalEnglishName, mention.barcode);
+    return this.repository.searchFoodsHybrid(userId, {
+      query: mention.canonicalEnglishName,
+      barcode: mention.barcode,
+      excludeBranded: !hasMarketProductIntent(mention),
+      limit: 50,
+    });
   }
 }
 
