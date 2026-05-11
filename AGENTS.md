@@ -31,6 +31,34 @@ flutter build apk --debug --dart-define=API_BASE_URL=http://10.0.2.2:3000
 
 ---
 
+## Production VPS SSH Access
+
+Production host:
+
+- Host: `bettercalories.app`
+- User: `root`
+- Verified OS hostname: `ubuntu`
+
+Use this non-mutating smoke test to confirm access:
+
+```bash
+ssh -o BatchMode=yes -o ConnectTimeout=10 root@bettercalories.app 'printf "connected as %s on %s\n" "$(whoami)" "$(hostname)"'
+```
+
+Expected response:
+
+```text
+connected as root on ubuntu
+```
+
+If the named private key is available locally, keep it under `~/.ssh/jgf` with private-key permissions and connect explicitly:
+
+```bash
+ssh -i ~/.ssh/jgf root@bettercalories.app
+```
+
+---
+
 ## Flutter E2E Testing and Visual Validation
 
 For Flutter mobile features, use **Patrol** as the main E2E testing framework. Whenever a new feature, screen, permission flow, navigation flow, or critical user interaction is implemented, add or update Patrol tests to verify the behavior on Android/iOS where relevant. Patrol should be used for real end-to-end flows, especially those involving native dialogs, permissions, authentication, recording/audio flows, backend interactions, and multi-screen journeys. Use stable finders such as keys, semantic labels, and visible text; avoid fragile selectors.
@@ -119,14 +147,21 @@ Use `-no-audio` only for non-voice tests where microphone input is irrelevant.
 
 ### Installing and Running the Flutter App
 
+For normal development and any "start the whole system" request, start the app with `flutter run` so hot reload and hot restart stay available:
+
+```bash
+cd /home/javier/dev/cal-tracker/apps/mobile
+flutter run --debug --dart-define=API_BASE_URL=http://10.0.2.2:3000 -d emulator-5554
+```
+
+Use `flutter build apk` plus `adb install -r` only when you specifically need a one-off APK install without a live Flutter tool session:
+
 ```bash
 cd /home/javier/dev/cal-tracker/apps/mobile
 flutter build apk --debug --dart-define=API_BASE_URL=http://10.0.2.2:3000
 adb -s emulator-5554 install -r build/app/outputs/flutter-apk/app-debug.apk
 adb -s emulator-5554 shell am start -n com.example.cal_tracker_mobile/.MainActivity
 ```
-
-Use `flutter run --debug --dart-define=API_BASE_URL=http://10.0.2.2:3000 -d emulator-5554` only when you need a live debug session.
 
 ### Taking Screenshots
 
@@ -217,7 +252,7 @@ bun --env-file=.env src/index.ts
 # Emulator
 # Follow "Android Emulator Initialization".
 
-# Flutter app
+# Flutter app with hot reload/hot restart enabled
 cd /home/javier/dev/cal-tracker/apps/mobile
 flutter run --debug --dart-define=API_BASE_URL=http://10.0.2.2:3000 -d emulator-5554
 ```
@@ -290,4 +325,4 @@ bun --env-file=.env scripts/test-groq-whisper.ts
 ```
 
 
-*Last updated: 2026-05-08*
+*Last updated: 2026-05-09*
