@@ -471,6 +471,12 @@ function lexicalFoodScore(food: FoodItemRecord, normalizedQuery: string): number
   if (food.normalizedName.includes(normalizedQuery) || normalizedQuery.includes(food.normalizedName)) return 0.82;
   if (canonical.includes(normalizedQuery) || normalizedQuery.includes(canonical)) return 0.76;
   if (brand && (brand.includes(normalizedQuery) || normalizedQuery.includes(brand))) return 0.5;
+  const queryTokens = normalizedQuery.split(/\s+/).filter(Boolean);
+  if (queryTokens.length > 1) {
+    const nameTokens = new Set(`${food.normalizedName} ${canonical}`.split(/\s+/).filter(Boolean));
+    const matchedTokens = queryTokens.filter((token) => nameTokens.has(token)).length;
+    if (matchedTokens === queryTokens.length) return 0.68;
+  }
   return 0;
 }
 

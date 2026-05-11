@@ -106,6 +106,19 @@ describe("scoreUsdaCandidate", () => {
       ),
     ).toBeNull();
   });
+
+  it("does not penalize USDA poultry taxonomy for grilled chicken breast", () => {
+    const score = scoreUsdaCandidate(
+      {
+        description:
+          "Chicken, broiler or fryers, breast, skinless, boneless, meat only, cooked, grilled",
+        dataType: "SR Legacy",
+      },
+      mention("grilled chicken breast", "pechuga de pollo a la plancha"),
+    );
+
+    expect(score?.confidence).toBeGreaterThan(0.75);
+  });
 });
 
 describe("FoodResolver candidate groups", () => {
@@ -821,6 +834,48 @@ describe("FoodResolver", () => {
       expect.objectContaining({
         externalId: "3002",
         calories: 165,
+      }),
+    );
+  });
+
+  it("resolves local SR Legacy grilled chicken breast from a Spanish mention", async () => {
+    const repository = InMemoryRepository.seeded();
+    await repository.upsertFoodItem({
+      name: "Chicken, broiler or fryers, breast, skinless, boneless, meat only, cooked, grilled",
+      normalizedName:
+        "chicken broiler or fryers breast skinless boneless meat only cooked grilled",
+      canonicalName:
+        "chicken broiler or fryers breast skinless boneless meat only cooked grilled",
+      source: "usda_fdc",
+      externalSource: "usda_fdc",
+      externalId: "171534",
+      dataType: "SR Legacy",
+      servingGrams: 100,
+      calories: 151,
+      proteinGrams: 30.5,
+      carbsGrams: 0,
+      fatGrams: 3.2,
+    });
+    const resolver = new FoodResolver(
+      new DeterministicFoodTextExtractor(),
+      [new LocalFoodDataProvider(repository)],
+      repository,
+      0.75,
+    );
+
+    const result = await resolver.resolveMealMentions("user-1", [
+      {
+        ...mention("grilled chicken breast", "pechuga de pollo a la plancha"),
+        quantity: 300,
+      },
+    ]);
+
+    expect(result.clarificationRequired).toBe(false);
+    expect(result.items[0]).toEqual(
+      expect.objectContaining({
+        externalId: "171534",
+        quantity: 300,
+        unit: "g",
       }),
     );
   });

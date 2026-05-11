@@ -1490,10 +1490,12 @@ const usdaScoringStopWords = new Set([
   "the",
   "to",
   "with",
+  "only",
 ]);
 
 const usdaNeutralDescriptorWords = new Set([
   "boneless",
+  "broiler",
   "chopped",
   "clarified",
   "commercial",
@@ -1505,6 +1507,7 @@ const usdaNeutralDescriptorWords = new Set([
   "dry",
   "extra",
   "fresh",
+  "fryer",
   "frozen",
   "golden",
   "green",
