@@ -11,7 +11,8 @@ describe("config", () => {
     expect(config.OPENROUTER_PROVIDER_MAX_LATENCY_P99).toBe(3);
     expect(config.OPENROUTER_PROVIDER_MIN_THROUGHPUT_P50).toBe(80);
     expect(config.OPENROUTER_PROVIDER_MIN_THROUGHPUT_P90).toBe(40);
-    expect(config.OPENROUTER_PROVIDER_REQUIRE_PARAMETERS).toBe(true);
+    expect(config.OPENROUTER_PROVIDER_REQUIRE_PARAMETERS).toBe(false);
+    expect(config.OPENROUTER_PROVIDER_ALLOW_FALLBACKS).toBe(true);
   });
 
   it("allows OpenRouter provider routing overrides from env", () => {
@@ -23,7 +24,8 @@ describe("config", () => {
       OPENROUTER_PROVIDER_MAX_LATENCY_P99: "2.5",
       OPENROUTER_PROVIDER_MIN_THROUGHPUT_P50: "120",
       OPENROUTER_PROVIDER_MIN_THROUGHPUT_P90: "60",
-      OPENROUTER_PROVIDER_REQUIRE_PARAMETERS: "false",
+      OPENROUTER_PROVIDER_REQUIRE_PARAMETERS: "true",
+      OPENROUTER_PROVIDER_ALLOW_FALLBACKS: "false",
     } as NodeJS.ProcessEnv);
 
     expect(config.OPENROUTER_PROVIDER_SORT).toBe("throughput");
@@ -32,6 +34,7 @@ describe("config", () => {
     expect(config.OPENROUTER_PROVIDER_MAX_LATENCY_P99).toBe(2.5);
     expect(config.OPENROUTER_PROVIDER_MIN_THROUGHPUT_P50).toBe(120);
     expect(config.OPENROUTER_PROVIDER_MIN_THROUGHPUT_P90).toBe(60);
-    expect(config.OPENROUTER_PROVIDER_REQUIRE_PARAMETERS).toBe(false);
+    expect(config.OPENROUTER_PROVIDER_REQUIRE_PARAMETERS).toBe(true);
+    expect(config.OPENROUTER_PROVIDER_ALLOW_FALLBACKS).toBe(false);
   });
 });

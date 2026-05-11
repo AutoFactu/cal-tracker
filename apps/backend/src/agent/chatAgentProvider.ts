@@ -79,6 +79,7 @@ export type OpenRouterProviderRouting = {
     p90: number;
   };
   require_parameters: boolean;
+  allow_fallbacks: boolean;
 };
 
 export class RemoteChatAgentProvider implements ChatAgentProvider {
@@ -176,7 +177,8 @@ export function defaultOpenRouterProviderRouting(): OpenRouterProviderRouting {
       p50: 80,
       p90: 40,
     },
-    require_parameters: true,
+    require_parameters: false,
+    allow_fallbacks: true,
   };
 }
 

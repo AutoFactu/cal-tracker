@@ -25,7 +25,8 @@ describe("RemoteChatAgentProvider", () => {
         p50: 80,
         p90: 40,
       },
-      require_parameters: true,
+      require_parameters: false,
+      allow_fallbacks: true,
     };
 
     globalThis.fetch = vi.fn(

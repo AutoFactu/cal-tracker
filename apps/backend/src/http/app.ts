@@ -58,6 +58,7 @@ export function createApp(input: {
         p90: config.OPENROUTER_PROVIDER_MIN_THROUGHPUT_P90,
       },
       require_parameters: config.OPENROUTER_PROVIDER_REQUIRE_PARAMETERS,
+      allow_fallbacks: config.OPENROUTER_PROVIDER_ALLOW_FALLBACKS,
     },
   );
   const agentService = new AgentService(resolvedAgentProvider, actionExecutor, config.OPENROUTER_MODEL, runLogger);
