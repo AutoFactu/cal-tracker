@@ -1,4 +1,8 @@
-import type { FoodCandidateGroup, MealItem } from "@cal-tracker/contracts";
+import type {
+  FoodCandidateGroup,
+  FoodMention,
+  MealItem,
+} from "@cal-tracker/contracts";
 import type { FoodResolutionResult, FoodResolver } from "./foodResolver.js";
 
 export type NutritionSearchResult = {
@@ -18,6 +22,10 @@ export interface NutritionProvider {
 
 export interface MealTextResolutionProvider extends NutritionProvider {
   resolveMealText(userId: string, text: string): Promise<FoodResolutionResult>;
+  resolveMealMentions(
+    userId: string,
+    mentions: FoodMention[],
+  ): Promise<FoodResolutionResult>;
 }
 
 export class ResolverNutritionProvider implements MealTextResolutionProvider {
@@ -38,5 +46,12 @@ export class ResolverNutritionProvider implements MealTextResolutionProvider {
 
   resolveMealText(userId: string, text: string): Promise<FoodResolutionResult> {
     return this.resolver.resolveMealText(userId, text);
+  }
+
+  resolveMealMentions(
+    userId: string,
+    mentions: FoodMention[],
+  ): Promise<FoodResolutionResult> {
+    return this.resolver.resolveMealMentions(userId, mentions);
   }
 }

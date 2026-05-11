@@ -312,17 +312,29 @@ class VoiceLogViewModel extends ChangeNotifier {
   }) async {
     _setState(VoiceLogState.transcribing);
     try {
-      final transcript = await _nutritionRepository.transcribeAudio(File(path));
-      _setUiState(
-        _uiState.copyWith(transcript: transcript, errorMessage: null),
-      );
-      if (submitAfterTranscription && transcript.trim().isNotEmpty) {
-        await submitText(transcript);
+      if (submitAfterTranscription) {
+        final voiceResult = await _nutritionRepository.logAudio(File(path));
+        _setUiState(
+          _uiState.copyWith(
+            transcript: voiceResult.transcript,
+            errorMessage: null,
+          ),
+        );
+        _applyAgentRunResult(voiceResult.result);
       } else {
+        final transcript =
+            await _nutritionRepository.transcribeAudio(File(path));
+        _setUiState(
+          _uiState.copyWith(transcript: transcript, errorMessage: null),
+        );
         _setState(VoiceLogState.transcriptReady);
       }
     } catch (e) {
-      _setError('Transcription failed: ${e.toString()}');
+      _setError(
+        submitAfterTranscription
+            ? 'Voice meal failed: ${e.toString()}'
+            : 'Transcription failed: ${e.toString()}',
+      );
     } finally {
       try {
         await File(path).delete();
@@ -363,61 +375,65 @@ class VoiceLogViewModel extends ChangeNotifier {
     );
     try {
       final result = await _nutritionRepository.logText(text);
-      VoiceLogState nextState;
-      switch (result.kind) {
-        case 'meal_committed':
-          nextState = VoiceLogState.autoCommitted;
-          break;
-        case 'proposal':
-          nextState = VoiceLogState.proposalReady;
-          break;
-        case 'clarification_required':
-        case 'confirmation_required':
-          nextState = VoiceLogState.clarificationRequired;
-          break;
-        case 'summary':
-        case 'remaining_targets':
-        case 'history':
-        case 'food_memory':
-        case 'nutrition_search':
-        case 'templates':
-        case 'template_saved':
-        case 'template_deleted':
-        case 'meal_deleted':
-        case 'meal_corrected':
-          nextState = VoiceLogState.resultReady;
-          break;
-        default:
-          nextState = VoiceLogState.clarificationRequired;
-      }
-      final selectedCandidateItems = _defaultCandidateSelections(
-        groups: result.candidateGroups,
-        resolvedItems: result.resolvedItems,
-      );
-      _setUiState(
-        _uiState.copyWith(
-          phase: nextState,
-          proposal: result.proposal,
-          autoCommittedMeal: result.meal,
-          summary: result.summary,
-          remaining: result.remaining,
-          meals: result.meals,
-          items: result.items,
-          resolvedItems: result.resolvedItems,
-          templates: result.templates,
-          template: result.template,
-          deleted: result.deleted,
-          message: result.message,
-          errorMessage: null,
-          confirmationActionId: result.actionId,
-          confirmationInput: result.input,
-          candidateGroups: result.candidateGroups,
-          selectedCandidateItems: selectedCandidateItems,
-        ),
-      );
+      _applyAgentRunResult(result);
     } catch (error) {
       _setError('Agent failed: ${error.toString()}');
     }
+  }
+
+  void _applyAgentRunResult(AgentRunResult result) {
+    VoiceLogState nextState;
+    switch (result.kind) {
+      case 'meal_committed':
+        nextState = VoiceLogState.autoCommitted;
+        break;
+      case 'proposal':
+        nextState = VoiceLogState.proposalReady;
+        break;
+      case 'clarification_required':
+      case 'confirmation_required':
+        nextState = VoiceLogState.clarificationRequired;
+        break;
+      case 'summary':
+      case 'remaining_targets':
+      case 'history':
+      case 'food_memory':
+      case 'nutrition_search':
+      case 'templates':
+      case 'template_saved':
+      case 'template_deleted':
+      case 'meal_deleted':
+      case 'meal_corrected':
+        nextState = VoiceLogState.resultReady;
+        break;
+      default:
+        nextState = VoiceLogState.clarificationRequired;
+    }
+    final selectedCandidateItems = _defaultCandidateSelections(
+      groups: result.candidateGroups,
+      resolvedItems: result.resolvedItems,
+    );
+    _setUiState(
+      _uiState.copyWith(
+        phase: nextState,
+        proposal: result.proposal,
+        autoCommittedMeal: result.meal,
+        summary: result.summary,
+        remaining: result.remaining,
+        meals: result.meals,
+        items: result.items,
+        resolvedItems: result.resolvedItems,
+        templates: result.templates,
+        template: result.template,
+        deleted: result.deleted,
+        message: result.message,
+        errorMessage: null,
+        confirmationActionId: result.actionId,
+        confirmationInput: result.input,
+        candidateGroups: result.candidateGroups,
+        selectedCandidateItems: selectedCandidateItems,
+      ),
+    );
   }
 
   Future<void> commitProposal({MealLabel? mealLabel}) async {

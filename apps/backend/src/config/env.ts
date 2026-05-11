@@ -29,12 +29,15 @@ const envSchema = z.object({
   APP_BASE_URL: z.string().url(),
   CORS_ALLOWED_ORIGINS: z.string().min(1),
   TRUSTED_AUTO_COMMIT_THRESHOLD: z.coerce.number().min(0).max(1).default(0.92),
+  AGENT_RUN_LOG_ENABLED: stringBooleanSchema.optional(),
+  AGENT_RUN_LOG_DIR: z.string().min(1).default("../../logs/agent-runs"),
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_SCHEMA: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).default("public"),
   NODE_ENV: z.string().default("development")
 });
 
-export type AppConfig = z.infer<typeof envSchema> & {
+export type AppConfig = Omit<z.infer<typeof envSchema>, "AGENT_RUN_LOG_ENABLED"> & {
+  AGENT_RUN_LOG_ENABLED: boolean;
   corsAllowedOrigins: string[];
 };
 
@@ -63,6 +66,8 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
         APP_BASE_URL: "http://localhost:3000",
         CORS_ALLOWED_ORIGINS: "http://localhost:3000",
         TRUSTED_AUTO_COMMIT_THRESHOLD: "0.92",
+        AGENT_RUN_LOG_ENABLED: "false",
+        AGENT_RUN_LOG_DIR: "../../logs/agent-runs",
         PORT: "3000",
         DATABASE_SCHEMA: "public",
         NODE_ENV: "test"
@@ -74,6 +79,9 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     ...parsed,
     DATABASE_URL: databaseUrl,
+    AGENT_RUN_LOG_ENABLED:
+      parsed.AGENT_RUN_LOG_ENABLED ??
+      (parsed.NODE_ENV !== "test" && parsed.NODE_ENV !== "production"),
     corsAllowedOrigins: parsed.CORS_ALLOWED_ORIGINS.split(",").map((origin) => origin.trim())
   };
 }

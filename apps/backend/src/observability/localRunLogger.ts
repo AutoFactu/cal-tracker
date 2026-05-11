@@ -1,0 +1,73 @@
+import { mkdir, appendFile } from "node:fs/promises";
+import { isAbsolute, resolve } from "node:path";
+
+export type LocalRunLogger = {
+  enabled: boolean;
+  log(event: Record<string, unknown>): Promise<void>;
+};
+
+export function createLocalRunLogger(input: {
+  enabled: boolean;
+  directory: string;
+  cwd?: string;
+}): LocalRunLogger {
+  const directory = isAbsolute(input.directory)
+    ? input.directory
+    : resolve(input.cwd ?? process.cwd(), input.directory);
+  return new JsonlRunLogger(input.enabled, directory);
+}
+
+class JsonlRunLogger implements LocalRunLogger {
+  constructor(
+    public readonly enabled: boolean,
+    private readonly directory: string,
+  ) {}
+
+  async log(event: Record<string, unknown>): Promise<void> {
+    if (!this.enabled) return;
+    const timestamp = new Date();
+    const file = resolve(
+      this.directory,
+      `runs-${timestamp.toISOString().slice(0, 10)}.jsonl`,
+    );
+    await mkdir(this.directory, { recursive: true });
+    await appendFile(
+      file,
+      `${JSON.stringify({ timestamp: timestamp.toISOString(), ...event })}\n`,
+      "utf8",
+    );
+  }
+}
+
+export function extractTokenUsage(rawResponse: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(rawResponse)) return undefined;
+  const usage = rawResponse.usage;
+  return isRecord(usage) ? usage : undefined;
+}
+
+export function extractReasoningTokens(rawResponse: unknown): number | undefined {
+  const usage = extractTokenUsage(rawResponse);
+  if (!usage) return undefined;
+  const direct = usage.reasoning_tokens;
+  if (typeof direct === "number") return direct;
+  const completionDetails = usage.completion_tokens_details;
+  if (isRecord(completionDetails)) {
+    const value = completionDetails.reasoning_tokens;
+    if (typeof value === "number") return value;
+  }
+  return undefined;
+}
+
+export function summarizeError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+    };
+  }
+  return { message: String(error) };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

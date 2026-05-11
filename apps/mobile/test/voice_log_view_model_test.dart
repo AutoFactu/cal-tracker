@@ -92,6 +92,61 @@ void main() {
         expect(viewModel.transcript, 'chicken and rice');
       });
 
+      test('stops global recording and creates proposal from audio', () async {
+        const proposal = MealProposal(
+          id: 'voice_prop_1',
+          title: 'Chicken and rice',
+          confidence: 0.85,
+          requiresConfirmation: true,
+          trustedAutoCommitEligible: false,
+          nutrition: NutritionSnapshot(
+            calories: 500,
+            proteinGrams: 30,
+            carbsGrams: 60,
+            fatGrams: 15,
+          ),
+          items: [],
+        );
+        when(
+          () => mockAudioRecorderService.hasPermission(),
+        ).thenAnswer((_) async => true);
+        when(() => mockAudioRecorderService.start()).thenAnswer((_) async {});
+        when(() => mockAudioRecorderService.stop()).thenAnswer(
+          (_) async => const RecordedAudio(
+            path: '/tmp/test.m4a',
+            mimeType: 'audio/m4a',
+            sizeBytes: 1024,
+          ),
+        );
+        when(
+          () => mockNutritionRepository.logAudio(any()),
+        ).thenAnswer(
+          (_) async => const VoiceMealRunResult(
+            transcript: 'chicken and rice',
+            provider: 'test',
+            model: 'test-model',
+            traceId: 'trace-1',
+            result: AgentRunResult(
+              kind: 'proposal',
+              proposal: proposal,
+              message: 'Meal proposal created.',
+            ),
+          ),
+        );
+
+        await viewModel.toggleGlobalRecording();
+        expect(viewModel.state, VoiceLogState.recording);
+
+        await viewModel.toggleGlobalRecording();
+        await Future.delayed(const Duration(milliseconds: 100));
+
+        expect(viewModel.state, VoiceLogState.proposalReady);
+        expect(viewModel.transcript, 'chicken and rice');
+        expect(viewModel.proposal, proposal);
+        verify(() => mockNutritionRepository.logAudio(any())).called(1);
+        verifyNever(() => mockNutritionRepository.logText(any()));
+      });
+
       test('starts a new recording from transcriptReady', () async {
         when(
           () => mockAudioRecorderService.hasPermission(),
@@ -153,6 +208,32 @@ void main() {
 
         expect(viewModel.state, VoiceLogState.error);
         expect(viewModel.errorMessage, contains('Transcription failed'));
+      });
+
+      test('shows error on voice meal failure', () async {
+        when(
+          () => mockAudioRecorderService.hasPermission(),
+        ).thenAnswer((_) async => true);
+        when(() => mockAudioRecorderService.start()).thenAnswer((_) async {});
+        when(() => mockAudioRecorderService.stop()).thenAnswer(
+          (_) async => const RecordedAudio(
+            path: '/tmp/test.m4a',
+            mimeType: 'audio/m4a',
+            sizeBytes: 1024,
+          ),
+        );
+        when(
+          () => mockNutritionRepository.logAudio(any()),
+        ).thenThrow(Exception('network error'));
+
+        await viewModel.toggleGlobalRecording();
+        expect(viewModel.state, VoiceLogState.recording);
+
+        await viewModel.toggleGlobalRecording();
+        await Future.delayed(const Duration(milliseconds: 100));
+
+        expect(viewModel.state, VoiceLogState.error);
+        expect(viewModel.errorMessage, contains('Voice meal failed'));
       });
 
       test('starts a new recording from error', () async {

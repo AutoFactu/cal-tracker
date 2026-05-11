@@ -66,6 +66,7 @@ export const searchNutritionDatabaseOutputSchema = z.object({
 
 export const proposeMealLogInputSchema = z.object({
   text: z.string().min(1),
+  mentions: z.array(foodMentionSchema).optional(),
   occurredAt: z.string().datetime().optional(),
 });
 export const proposeMealLogOutputSchema = z.object({
@@ -222,7 +223,7 @@ export const actionDefinitions = [
     version: "1.0.0",
     title: "Propose Meal Log",
     description:
-      "Create a meal proposal from typed or transcribed natural language.",
+      "Create a meal proposal from typed or transcribed natural language. Include structured food mentions when the caller can identify foods and quantities.",
     inputSchema: proposeMealLogInputSchema,
     outputSchema: proposeMealLogOutputSchema,
     permissionScope: PermissionScope.NutritionWritePropose,

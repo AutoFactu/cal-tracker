@@ -22,9 +22,13 @@ import { getTraceId, requestIdMiddleware } from "../middleware/requestContext.js
 import type { AppRepository, StoredUser } from "../repository/types.js";
 import type { SpeechToTextProvider, TranscriptionResult } from "../stt/speechToTextProvider.js";
 import { readAudioBuffer, validateAudioUpload } from "../stt/audioValidation.js";
-import { AgentService } from "../agent/agentService.js";
+import { AgentService, type AgentRunResult } from "../agent/agentService.js";
 import type { ChatAgentProvider } from "../agent/chatAgentProvider.js";
 import { RemoteChatAgentProvider } from "../agent/chatAgentProvider.js";
+import {
+  summarizeError,
+  type LocalRunLogger,
+} from "../observability/localRunLogger.js";
 
 export function createApp(input: {
   config: AppConfig;
@@ -33,12 +37,13 @@ export function createApp(input: {
   actionExecutor: ActionExecutor;
   sttProvider: SpeechToTextProvider;
   agentProvider?: ChatAgentProvider;
+  runLogger?: LocalRunLogger;
 }) {
   const app = new Hono<{ Variables: { authUser: StoredUser; traceId: string } }>();
-  const { config, repository, authService, actionExecutor, sttProvider, agentProvider } = input;
+  const { config, repository, authService, actionExecutor, sttProvider, agentProvider, runLogger } = input;
 
   const resolvedAgentProvider = agentProvider ?? new RemoteChatAgentProvider(config.OPENROUTER_API_KEY);
-  const agentService = new AgentService(resolvedAgentProvider, actionExecutor, config.OPENROUTER_MODEL);
+  const agentService = new AgentService(resolvedAgentProvider, actionExecutor, config.OPENROUTER_MODEL, runLogger);
 
   app.use("*", requestIdMiddleware);
   app.use("*", cors({
@@ -113,65 +118,22 @@ export function createApp(input: {
   app.post("/v1/stt/transcriptions", async (c) => {
     const user = c.get("authUser");
     const traceId = getTraceId(c);
-    let body: Record<string, unknown>;
-    try {
-      body = await c.req.parseBody({ all: true });
-    } catch (error) {
-      console.warn("stt.transcription.invalid_multipart", {
-        traceId,
-        userId: user.id,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return c.json({
-        error: {
-          code: "validation_error",
-          message: "Invalid multipart/form-data request.",
-          traceId,
-        },
-      }, 400);
-    }
-    const audioField = body.audio;
-    if (!audioField || (Array.isArray(audioField) && audioField.length === 0)) {
-      console.warn("stt.transcription.missing_audio", {
-        traceId,
-        userId: user.id,
-      });
-      return c.json({
-        error: {
-          code: "validation_error",
-          message: "Missing audio file.",
-          traceId,
-        },
-      }, 400);
-    }
-    const file = Array.isArray(audioField) ? audioField[0] : audioField;
-
-    const validation = validateAudioUpload(file);
-    if (!validation.ok) {
-      console.warn("stt.transcription.invalid_audio", {
-        traceId,
-        userId: user.id,
-        status: validation.status,
-        error: validation.error,
-      });
-      return c.json({ error: { code: "validation_error", message: validation.error, traceId } }, validation.status);
-    }
-
-    const buffer = await readAudioBuffer(file);
+    const upload = await parseAudioUpload(c, user, traceId, "stt.transcription");
+    if (upload instanceof Response) return upload;
     console.info("stt.transcription.started", {
       traceId,
       userId: user.id,
-      filename: validation.filename,
-      mimeType: validation.mimeType,
-      bytes: buffer.byteLength,
+      filename: upload.filename,
+      mimeType: upload.mimeType,
+      bytes: upload.buffer.byteLength,
     });
 
     let result: TranscriptionResult;
     try {
       result = await sttProvider.transcribe({
-        audio: buffer,
-        filename: validation.filename,
-        mimeType: validation.mimeType,
+        audio: upload.buffer,
+        filename: upload.filename,
+        mimeType: upload.mimeType,
         userId: user.id,
         traceId,
       });
@@ -179,9 +141,9 @@ export function createApp(input: {
       console.error("stt.transcription.failed", {
         traceId,
         userId: user.id,
-        filename: validation.filename,
-        mimeType: validation.mimeType,
-        bytes: buffer.byteLength,
+        filename: upload.filename,
+        mimeType: upload.mimeType,
+        bytes: upload.buffer.byteLength,
         error: error instanceof Error ? error.message : String(error),
       });
       throw error;
@@ -200,6 +162,147 @@ export function createApp(input: {
       provider: result.provider,
       model: result.model,
       traceId,
+    });
+  });
+
+  app.post("/v1/voice/meal-runs", async (c) => {
+    const routeStarted = Date.now();
+    const user = c.get("authUser");
+    const traceId = getTraceId(c);
+    const upload = await parseAudioUpload(c, user, traceId, "voice.meal_run", {
+      parseSource: true,
+    });
+    if (upload instanceof Response) return upload;
+
+    console.info("voice.meal_run.started", {
+      traceId,
+      userId: user.id,
+      filename: upload.filename,
+      mimeType: upload.mimeType,
+      bytes: upload.buffer.byteLength,
+    });
+
+    let transcription: TranscriptionResult;
+    let sttMs = 0;
+    try {
+      const sttStarted = Date.now();
+      transcription = await sttProvider.transcribe({
+        audio: upload.buffer,
+        filename: upload.filename,
+        mimeType: upload.mimeType,
+        userId: user.id,
+        traceId,
+      });
+      sttMs = Date.now() - sttStarted;
+    } catch (error) {
+      console.error("voice.meal_run.transcription_failed", {
+        traceId,
+        userId: user.id,
+        filename: upload.filename,
+        mimeType: upload.mimeType,
+        bytes: upload.buffer.byteLength,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await logLocalRun(runLogger, {
+        type: "voice.meal_run",
+        traceId,
+        userId: user.id,
+        source: upload.source ?? "flutter",
+        audio: {
+          filename: upload.filename,
+          mimeType: upload.mimeType,
+          bytes: upload.buffer.byteLength,
+        },
+        errorStage: "stt",
+        error: summarizeError(error),
+        timingsMs: {
+          stt: Date.now() - routeStarted,
+          total: Date.now() - routeStarted,
+        },
+      });
+      throw error;
+    }
+
+    const transcript = transcription.text;
+    const trimmedTranscript = transcript.trim();
+    let agentMs = 0;
+    let result: AgentRunResult;
+    try {
+      if (trimmedTranscript.length === 0) {
+        result = {
+          kind: "clarification_required" as const,
+          message:
+            "I could not understand enough audio to create a meal. Please try again or type the meal.",
+          options: [],
+        };
+      } else {
+        const agentStarted = Date.now();
+        result = await agentService.run(
+          trimmedTranscript,
+          buildActionContext(c, user, upload.source ?? "flutter"),
+        );
+        agentMs = Date.now() - agentStarted;
+      }
+    } catch (error) {
+      await logLocalRun(runLogger, {
+        type: "voice.meal_run",
+        traceId,
+        userId: user.id,
+        source: upload.source ?? "flutter",
+        audio: {
+          filename: upload.filename,
+          mimeType: upload.mimeType,
+          bytes: upload.buffer.byteLength,
+        },
+        transcript,
+        provider: transcription.provider,
+        model: transcription.model,
+        errorStage: "agent",
+        error: summarizeError(error),
+        timingsMs: {
+          stt: sttMs,
+          agent: Date.now() - routeStarted - sttMs,
+          total: Date.now() - routeStarted,
+        },
+      });
+      throw error;
+    }
+
+    console.info("voice.meal_run.completed", {
+      traceId,
+      userId: user.id,
+      provider: transcription.provider,
+      model: transcription.model,
+      transcriptLength: transcript.length,
+      resultKind: result.kind,
+    });
+    await logLocalRun(runLogger, {
+      type: "voice.meal_run",
+      traceId,
+      userId: user.id,
+      source: upload.source ?? "flutter",
+      audio: {
+        filename: upload.filename,
+        mimeType: upload.mimeType,
+        bytes: upload.buffer.byteLength,
+      },
+      transcript,
+      provider: transcription.provider,
+      model: transcription.model,
+      resultKind: result.kind,
+      timingsMs: {
+        stt: sttMs,
+        agent: agentMs,
+        total: Date.now() - routeStarted,
+      },
+    });
+
+    return c.json({
+      transcript,
+      provider: transcription.provider,
+      model: transcription.model,
+      traceId,
+      result,
     });
   });
 
@@ -254,6 +357,117 @@ export function createApp(input: {
   });
 
   return app;
+}
+
+type ParsedAudioUpload = {
+  buffer: Buffer;
+  filename: string;
+  mimeType: string;
+  source?: ActionSource;
+};
+
+async function parseAudioUpload(
+  c: Context,
+  user: StoredUser,
+  traceId: string,
+  logPrefix: string,
+  options: { parseSource?: boolean } = {},
+): Promise<ParsedAudioUpload | Response> {
+  let body: Record<string, unknown>;
+  try {
+    body = await c.req.parseBody({ all: true });
+  } catch (error) {
+    console.warn(`${logPrefix}.invalid_multipart`, {
+      traceId,
+      userId: user.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return c.json({
+      error: {
+        code: "validation_error",
+        message: "Invalid multipart/form-data request.",
+        traceId,
+      },
+    }, 400);
+  }
+
+  const source = options.parseSource
+    ? parseMultipartActionSource(body.source)
+    : undefined;
+  if (options.parseSource && source === null) {
+    console.warn(`${logPrefix}.invalid_source`, {
+      traceId,
+      userId: user.id,
+      source: body.source,
+    });
+    return c.json({
+      error: {
+        code: "validation_error",
+        message: "Invalid source.",
+        traceId,
+      },
+    }, 400);
+  }
+
+  const audioField = body.audio;
+  if (!audioField || (Array.isArray(audioField) && audioField.length === 0)) {
+    console.warn(`${logPrefix}.missing_audio`, {
+      traceId,
+      userId: user.id,
+    });
+    return c.json({
+      error: {
+        code: "validation_error",
+        message: "Missing audio file.",
+        traceId,
+      },
+    }, 400);
+  }
+  const file = Array.isArray(audioField) ? audioField[0] : audioField;
+
+  const validation = validateAudioUpload(file);
+  if (!validation.ok) {
+    console.warn(`${logPrefix}.invalid_audio`, {
+      traceId,
+      userId: user.id,
+      status: validation.status,
+      error: validation.error,
+    });
+    return c.json({
+      error: { code: "validation_error", message: validation.error, traceId },
+    }, validation.status);
+  }
+
+  return {
+    buffer: await readAudioBuffer(file),
+    filename: validation.filename,
+    mimeType: validation.mimeType,
+    source: source ?? undefined,
+  };
+}
+
+function parseMultipartActionSource(value: unknown): ActionSource | null {
+  const source = Array.isArray(value) ? value[0] : value;
+  if (source == null) return "flutter";
+  if (
+    source === "flutter" ||
+    source === "ios_appintents" ||
+    source === "android_appfunctions"
+  ) {
+    return source;
+  }
+  return null;
+}
+
+async function logLocalRun(
+  runLogger: LocalRunLogger | undefined,
+  event: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await runLogger?.log(event);
+  } catch (error) {
+    console.warn("local_run_log.failed", summarizeError(error));
+  }
 }
 
 function buildActionContext(c: Context, user: StoredUser, source: ActionSource): ActionContext {

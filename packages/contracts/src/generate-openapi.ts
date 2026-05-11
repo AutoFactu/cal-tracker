@@ -29,6 +29,19 @@ const actionSchemas = Object.fromEntries(
   ])
 );
 
+const voiceMealRunResponseOpenApiSchema = {
+  type: "object",
+  properties: {
+    transcript: { type: "string" },
+    provider: { type: "string" },
+    model: { type: "string" },
+    traceId: { type: "string" },
+    result: { $ref: "#/components/schemas/AgentRunResponse" }
+  },
+  required: ["transcript", "provider", "model", "traceId", "result"],
+  additionalProperties: false
+};
+
 const spec = {
   openapi: "3.1.0",
   info: {
@@ -58,6 +71,7 @@ const spec = {
       AgentRunRequest: schema("AgentRunRequest", agentRunRequestSchema),
       AgentRunResponse: schema("AgentRunResponse", agentRunResponseSchema),
       TranscriptionResponse: schema("TranscriptionResponse", transcriptionResponseSchema),
+      VoiceMealRunResponse: voiceMealRunResponseOpenApiSchema,
       ...actionSchemas
     }
   },
@@ -182,6 +196,27 @@ const spec = {
         },
         responses: {
           "200": { description: "Transcript", content: { "application/json": { schema: { $ref: "#/components/schemas/TranscriptionResponse" } } } }
+        }
+      }
+    },
+    "/v1/voice/meal-runs": {
+      post: {
+        operationId: "runVoiceMeal",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                properties: { audio: { type: "string", format: "binary" }, source: { type: "string" } },
+                required: ["audio"]
+              }
+            }
+          }
+        },
+        responses: {
+          "200": { description: "Transcript and meal agent result", content: { "application/json": { schema: { $ref: "#/components/schemas/VoiceMealRunResponse" } } } }
         }
       }
     },

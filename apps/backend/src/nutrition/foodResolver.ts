@@ -79,6 +79,13 @@ export class FoodResolver {
     text: string,
   ): Promise<FoodResolutionResult> {
     const mentions = await this.extractor.extract(text);
+    return this.resolveMealMentions(userId, mentions);
+  }
+
+  async resolveMealMentions(
+    userId: string,
+    mentions: FoodMention[],
+  ): Promise<FoodResolutionResult> {
     const items: MealItem[] = [];
     const unresolvedMentions: FoodMention[] = [];
     const candidateGroups: FoodCandidateGroup[] = [];

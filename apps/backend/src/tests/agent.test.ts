@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { FoodMention } from "@cal-tracker/contracts";
 import type {
   AgentToolDecision,
   ChatAgentProvider,
@@ -34,6 +35,11 @@ class ThrowingChatAgentProvider implements ChatAgentProvider {
 describe("AgentService", () => {
   it("maps chicken and rice with quantities to propose_meal_log", async () => {
     const { request } = buildTestApp({
+      foodTextExtractor: {
+        async extract(): Promise<FoodMention[]> {
+          throw new Error("text extractor should not be called");
+        },
+      },
       agentProvider: new FakeChatAgentProvider({
         toolCalls: [
           {
@@ -43,6 +49,28 @@ describe("AgentService", () => {
               name: "propose_meal_log",
               arguments: JSON.stringify({
                 text: "Add 100 grams of chicken breast and 100 grams of rice",
+                mentions: [
+                  {
+                    originalText: "100 grams of chicken breast",
+                    canonicalEnglishName: "chicken breast",
+                    quantity: 100,
+                    unit: "g",
+                    rawUnitText: "grams",
+                    unitKind: "metric",
+                    confidence: 0.95,
+                    marketProduct: false,
+                  },
+                  {
+                    originalText: "100 grams of rice",
+                    canonicalEnglishName: "rice",
+                    quantity: 100,
+                    unit: "g",
+                    rawUnitText: "grams",
+                    unitKind: "metric",
+                    confidence: 0.95,
+                    marketProduct: false,
+                  },
+                ],
               }),
             },
           },

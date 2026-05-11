@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { FoodMention } from "@cal-tracker/contracts";
 import {
   buildTestApp,
   createTestUsualBreakfastTemplate,
@@ -276,6 +277,78 @@ describe("action loop", () => {
         };
       };
     };
+    expect(body.output.proposal.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "Chicken breast", quantity: 100 }),
+        expect.objectContaining({ name: "Cooked rice", quantity: 100 }),
+      ]),
+    );
+  });
+
+  it("uses model-provided food mentions without extracting text again", async () => {
+    const throwingExtractor = {
+      async extract(): Promise<FoodMention[]> {
+        throw new Error("text extractor should not be called");
+      },
+    };
+    const { request } = buildTestApp({ foodTextExtractor: throwingExtractor });
+    const auth = await registerAndAuth(request);
+
+    const proposalResponse = await request(
+      "http://localhost/v1/actions/propose_meal_log/execute",
+      {
+        method: "POST",
+        headers: auth.authHeader,
+        body: JSON.stringify({
+          input: {
+            text: "He comido 100 gramos de pollo y 100 gramos de arroz",
+            mentions: [
+              {
+                originalText: "100 gramos de pollo",
+                canonicalEnglishName: "chicken breast",
+                quantity: 100,
+                unit: "g",
+                rawUnitText: "gramos",
+                unitKind: "metric",
+                confidence: 0.95,
+                marketProduct: false,
+              },
+              {
+                originalText: "100 gramos de arroz",
+                canonicalEnglishName: "rice",
+                quantity: 100,
+                unit: "g",
+                rawUnitText: "gramos",
+                unitKind: "metric",
+                confidence: 0.95,
+                marketProduct: false,
+              },
+            ],
+          },
+          source: "flutter",
+        }),
+      },
+    );
+
+    expect(proposalResponse.status).toBe(200);
+    const body = (await proposalResponse.json()) as {
+      output: {
+        proposal: {
+          items: { name: string; quantity: number }[];
+        };
+        instrumentation: {
+          inputMode: string;
+          phasesMs: Record<string, number>;
+        };
+      };
+    };
+    expect(body.output.instrumentation.inputMode).toBe("model_mentions");
+    expect(body.output.instrumentation.phasesMs).toHaveProperty(
+      "resolve_provided_mentions",
+    );
+    expect(body.output.instrumentation.phasesMs).not.toHaveProperty(
+      "resolve_meal_text",
+    );
     expect(body.output.proposal.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "Chicken breast", quantity: 100 }),

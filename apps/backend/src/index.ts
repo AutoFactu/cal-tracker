@@ -6,15 +6,14 @@ import { LocalBgeM3EmbeddingProvider } from "./embeddings/provider.js";
 import { createApp } from "./http/app.js";
 import { MemoryRetrievalService } from "./memory/retrieval.js";
 import {
-  CompositeFoodTextExtractor,
   DeterministicFoodTextExtractor,
   FoodResolver,
   LocalFoodDataProvider,
   OpenFoodFactsFoodDataProvider,
-  OpenRouterFoodTextExtractor,
   UsdaFoodDataProvider,
 } from "./nutrition/foodResolver.js";
 import { ResolverNutritionProvider } from "./nutrition/provider.js";
+import { createLocalRunLogger } from "./observability/localRunLogger.js";
 import { PostgresRepository } from "./repository/postgres.js";
 import { RemoteSpeechToTextProvider } from "./stt/speechToTextProvider.js";
 
@@ -29,13 +28,7 @@ const embeddingProvider = config.EMBEDDING_BASE_URL
     )
   : undefined;
 const foodResolver = new FoodResolver(
-  new CompositeFoodTextExtractor([
-    new OpenRouterFoodTextExtractor(
-      config.OPENROUTER_API_KEY,
-      config.OPENROUTER_MODEL,
-    ),
-    new DeterministicFoodTextExtractor(),
-  ]),
+  new DeterministicFoodTextExtractor(),
   [
     new LocalFoodDataProvider(repository, { embeddingProvider }),
     new OpenFoodFactsFoodDataProvider(
@@ -65,12 +58,17 @@ const sttProvider = new RemoteSpeechToTextProvider(
   config.STT_MODEL,
   config.STT_BASE_URL,
 );
+const runLogger = createLocalRunLogger({
+  enabled: config.AGENT_RUN_LOG_ENABLED,
+  directory: config.AGENT_RUN_LOG_DIR,
+});
 const app = createApp({
   config,
   repository,
   authService,
   actionExecutor,
   sttProvider,
+  runLogger,
 });
 
 serve({ fetch: app.fetch, port: config.PORT });

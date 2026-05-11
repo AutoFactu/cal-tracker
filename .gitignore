@@ -8,6 +8,7 @@ dist/
 .env
 .venv-usda/
 *.log
+logs/
 data/usda/
 __pycache__/
 *.pyc
