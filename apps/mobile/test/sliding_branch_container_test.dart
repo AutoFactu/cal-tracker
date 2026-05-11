@@ -28,7 +28,8 @@ void main() {
 
     await tester.pump(const Duration(milliseconds: 80));
 
-    expect(find.byType(ImageFiltered), findsWidgets);
+    expect(find.byType(ImageFiltered), findsNothing);
+    expect(find.byType(RepaintBoundary), findsWidgets);
     expect(tester.takeException(), isNull);
 
     await tester.pump(const Duration(milliseconds: 260));
