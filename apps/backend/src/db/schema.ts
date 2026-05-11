@@ -22,6 +22,19 @@ export const userCredentials = pgTable("user_credentials", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
 
+export const authIdentities = pgTable("auth_identities", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),
+  providerUserId: text("provider_user_id").notNull(),
+  email: text("email").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+}, (table) => [
+  uniqueIndex("auth_identities_provider_user_unique").on(table.provider, table.providerUserId),
+  index("auth_identities_user_idx").on(table.userId)
+]);
+
 export const authSessions = pgTable("auth_sessions", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -260,6 +273,7 @@ export const auditEvents = pgTable("audit_events", {
 
 export const userRelations = relations(users, ({ one, many }) => ({
   credential: one(userCredentials),
+  identities: many(authIdentities),
   sessions: many(authSessions),
   meals: many(meals)
 }));

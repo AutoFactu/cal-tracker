@@ -45,6 +45,7 @@
   "authGetStartedButton": "Empezar",
   "authUseExistingAccountButton": "Usar cuenta existente",
   "authCreateAccountLink": "Crear una cuenta",
+  "authContinueWithGoogleButton": "Continuar con Google",
   "authSignInFailedTitle": "No se pudo iniciar sesión",
   "authHeroHeadline": "Controla mejor\ntus calorías.",
   "darkModeSwitchToLight": "Cambiar a modo claro",

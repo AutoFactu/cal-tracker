@@ -368,6 +368,12 @@ abstract class AppLocalizations {
   /// **'Create an account'**
   String get authCreateAccountLink;
 
+  /// No description provided for @authContinueWithGoogleButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue with Google'**
+  String get authContinueWithGoogleButton;
+
   /// No description provided for @authSignInFailedTitle.
   ///
   /// In en, this message translates to:

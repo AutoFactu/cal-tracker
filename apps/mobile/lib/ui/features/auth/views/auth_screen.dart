@@ -128,6 +128,15 @@ class _AuthScreenState extends State<AuthScreen> {
                                 : l10n.authGetStartedButton,
                           ),
                         ),
+                        const SizedBox(height: FreshSpacing.sm),
+                        OutlinedButton.icon(
+                          key: const ValueKey('google_sign_in_button'),
+                          onPressed: viewModel.isLoading
+                              ? null
+                              : () => viewModel.loginWithGoogle(),
+                          icon: const Icon(Icons.g_mobiledata_rounded),
+                          label: Text(l10n.authContinueWithGoogleButton),
+                        ),
                         TextButton(
                           key: const ValueKey('auth_toggle_mode_button'),
                           onPressed: () =>

@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
-import { defaultUserScopes, type AuthUser, type LoginRequest, type RegisterRequest, type TokenPair } from "@cal-tracker/contracts";
+import { defaultUserScopes, type AuthUser, type GoogleLoginRequest, type LoginRequest, type RegisterRequest, type TokenPair } from "@cal-tracker/contracts";
 import type { AppConfig } from "../config/env.js";
 import type { AppRepository } from "../repository/types.js";
 import { newId } from "../utils/ids.js";
+import { RemoteGoogleTokenVerifier, type GoogleTokenVerifier } from "./google.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { createRefreshToken, hashRefreshToken, refreshExpiry, signAccessToken } from "./tokens.js";
 
@@ -15,7 +16,8 @@ export class AuthError extends Error {
 export class AuthService {
   constructor(
     private readonly config: AppConfig,
-    private readonly repository: AppRepository
+    private readonly repository: AppRepository,
+    private readonly googleTokenVerifier: GoogleTokenVerifier = new RemoteGoogleTokenVerifier(config)
   ) {}
 
   async register(input: RegisterRequest): Promise<TokenPair> {
@@ -37,7 +39,7 @@ export class AuthService {
 
   async login(input: LoginRequest): Promise<TokenPair> {
     const user = await this.repository.findUserByEmail(input.email);
-    if (!user || !(await verifyPassword(user.passwordHash, input.password))) {
+    if (!user?.passwordHash || !(await verifyPassword(user.passwordHash, input.password))) {
       throw new AuthError("invalid_credentials", "Invalid email or password");
     }
     await this.repository.recordAuditEvent({
@@ -45,6 +47,42 @@ export class AuthService {
       eventType: "auth.login_succeeded",
       metadata: { email: user.email },
       traceId: "auth-login"
+    });
+    return this.issueTokenPair(publicUser(user), user.scopes);
+  }
+
+  async loginWithGoogle(input: GoogleLoginRequest): Promise<TokenPair> {
+    let claims;
+    try {
+      claims = await this.googleTokenVerifier.verify(input.idToken);
+    } catch {
+      throw new AuthError("invalid_google_token", "Invalid Google sign-in token");
+    }
+
+    const existingIdentity = await this.repository.findAuthIdentity("google", claims.subject);
+    let user = existingIdentity ? await this.repository.findUserById(existingIdentity.userId) : undefined;
+    if (!user) {
+      user = await this.repository.findUserByEmail(claims.email);
+    }
+    if (!user) {
+      user = await this.repository.createUser({
+        email: claims.email,
+        displayName: claims.displayName,
+        scopes: defaultUserScopes
+      });
+    }
+
+    await this.repository.linkAuthIdentity({
+      userId: user.id,
+      provider: "google",
+      providerUserId: claims.subject,
+      email: claims.email
+    });
+    await this.repository.recordAuditEvent({
+      userId: user.id,
+      eventType: "auth.google_login_succeeded",
+      metadata: { email: user.email },
+      traceId: "auth-google-login"
     });
     return this.issueTokenPair(publicUser(user), user.scopes);
   }

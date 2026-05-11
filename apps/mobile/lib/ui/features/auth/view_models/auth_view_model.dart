@@ -43,6 +43,21 @@ class AuthViewModel extends ChangeNotifier {
     }
   }
 
+  Future<void> loginWithGoogle() async {
+    _setLoading(true);
+    try {
+      final session = await _authRepository.loginWithGoogle();
+      if (session != null) {
+        _user = session.user;
+        _error = null;
+      }
+    } catch (error) {
+      _error = error.toString();
+    } finally {
+      _setLoading(false);
+    }
+  }
+
   Future<void> register(
       String email, String password, String displayName) async {
     _setLoading(true);

@@ -11,6 +11,8 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url(),
   JWT_ACCESS_SECRET: z.string().min(32),
   SESSION_TOKEN_PEPPER: z.string().min(32),
+  GOOGLE_OAUTH_CLIENT_IDS: z.string().optional(),
+  OAUTH_GOOGLE_SECRET: z.string().optional(),
   OPENROUTER_API_KEY: z.string().min(1),
   OPENROUTER_MODEL: z.string().min(1),
   OPENROUTER_PROVIDER_SORT: z.enum(["price", "throughput", "latency"]).default("latency"),
@@ -44,8 +46,9 @@ const envSchema = z.object({
   NODE_ENV: z.string().default("development")
 });
 
-export type AppConfig = Omit<z.infer<typeof envSchema>, "AGENT_RUN_LOG_ENABLED"> & {
+export type AppConfig = Omit<z.infer<typeof envSchema>, "AGENT_RUN_LOG_ENABLED" | "OAUTH_GOOGLE_SECRET" | "GOOGLE_OAUTH_CLIENT_IDS"> & {
   AGENT_RUN_LOG_ENABLED: boolean;
+  GOOGLE_OAUTH_CLIENT_IDS: string;
   corsAllowedOrigins: string[];
 };
 
@@ -56,6 +59,7 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
         DATABASE_URL: "postgres://cal_tracker:cal_tracker@localhost:5432/cal_tracker",
         JWT_ACCESS_SECRET: "test-access-secret-with-more-than-32-characters",
         SESSION_TOKEN_PEPPER: "test-session-pepper-with-more-than-32-characters",
+        GOOGLE_OAUTH_CLIENT_IDS: "test-google-client-id",
         OPENROUTER_API_KEY: "test-openrouter-key",
         OPENROUTER_MODEL: "test-model",
         OPENROUTER_PROVIDER_SORT: "latency",
@@ -95,6 +99,7 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     ...parsed,
     DATABASE_URL: databaseUrl,
+    GOOGLE_OAUTH_CLIENT_IDS: parsed.GOOGLE_OAUTH_CLIENT_IDS ?? parsed.OAUTH_GOOGLE_SECRET ?? "",
     AGENT_RUN_LOG_ENABLED:
       parsed.AGENT_RUN_LOG_ENABLED ??
       (parsed.NODE_ENV !== "test" && parsed.NODE_ENV !== "production"),

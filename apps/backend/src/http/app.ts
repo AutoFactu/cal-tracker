@@ -3,6 +3,7 @@ import {
   calorieEstimateRequestSchema,
   executeActionRequestSchema,
   goalsUpdateSchema,
+  googleLoginRequestSchema,
   loginRequestSchema,
   logoutRequestSchema,
   passwordResetConfirmSchema,
@@ -84,6 +85,7 @@ export function createApp(input: {
 
   app.post("/v1/auth/register", async (c) => c.json(await authService.register(registerRequestSchema.parse(await c.req.json()))));
   app.post("/v1/auth/login", async (c) => c.json(await authService.login(loginRequestSchema.parse(await c.req.json()))));
+  app.post("/v1/auth/google/login", async (c) => c.json(await authService.loginWithGoogle(googleLoginRequestSchema.parse(await c.req.json()))));
   app.post("/v1/auth/refresh", async (c) => {
     const body = refreshRequestSchema.parse(await c.req.json());
     return c.json(await authService.refresh(body.refreshToken));
@@ -103,7 +105,7 @@ export function createApp(input: {
   });
 
   app.use("/v1/*", async (c, next) => {
-    const publicPaths = ["/v1/health", "/v1/auth/register", "/v1/auth/login", "/v1/auth/refresh", "/v1/auth/logout", "/v1/auth/password-reset/request", "/v1/auth/password-reset/confirm"];
+    const publicPaths = ["/v1/health", "/v1/auth/register", "/v1/auth/login", "/v1/auth/google/login", "/v1/auth/refresh", "/v1/auth/logout", "/v1/auth/password-reset/request", "/v1/auth/password-reset/confirm"];
     if (publicPaths.includes(new URL(c.req.url).pathname)) return next();
     return authMiddleware(config, repository)(c, next);
   });

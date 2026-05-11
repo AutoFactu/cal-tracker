@@ -89,6 +89,19 @@
         ],
         "additionalProperties": false
       },
+      "GoogleLoginRequest": {
+        "type": "object",
+        "properties": {
+          "idToken": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "idToken"
+        ],
+        "additionalProperties": false
+      },
       "RefreshRequest": {
         "type": "object",
         "properties": {
@@ -542,6 +555,33 @@
                             "exclusiveMinimum": 0
                           },
                           "portionDescription": {
+                            "type": "string"
+                          },
+                          "rank": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0
+                          },
+                          "matchScore": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "lexicalScore": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "vectorScore": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "preferenceScore": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "matchReason": {
                             "type": "string"
                           }
                         },
@@ -7357,6 +7397,33 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Token pair",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPair"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/google/login": {
+      "post": {
+        "operationId": "loginWithGoogle",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleLoginRequest"
               }
             }
           }

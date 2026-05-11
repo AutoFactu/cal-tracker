@@ -6,9 +6,13 @@ build/
 coverage/
 dist/
 .env
+.env.dev
+.env.prod
 .venv-usda/
+.venv-openfoodfacts/
 *.log
 logs/
 data/usda/
+data/openfoodfacts/
 __pycache__/
 *.pyc

@@ -12,6 +12,10 @@ export const loginRequestSchema = z.object({
   password: z.string().min(1)
 });
 
+export const googleLoginRequestSchema = z.object({
+  idToken: z.string().min(1)
+});
+
 export const refreshRequestSchema = z.object({
   refreshToken: z.string().min(32)
 });
@@ -46,5 +50,6 @@ export const tokenPairSchema = z.object({
 
 export type RegisterRequest = z.infer<typeof registerRequestSchema>;
 export type LoginRequest = z.infer<typeof loginRequestSchema>;
+export type GoogleLoginRequest = z.infer<typeof googleLoginRequestSchema>;
 export type TokenPair = z.infer<typeof tokenPairSchema>;
 export type AuthUser = z.infer<typeof authUserSchema>;
