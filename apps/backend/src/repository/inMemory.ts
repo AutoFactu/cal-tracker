@@ -1,4 +1,4 @@
-import { defaultUserScopes, type DailyGoals, type Meal, type MealItem, type MealLabel, type MealProposal, type MealTemplate, type NutritionSnapshot } from "@cal-tracker/contracts";
+import { defaultUserScopes, type CalorieTargetSource, type DailyGoals, type Meal, type MealItem, type MealLabel, type MealProposal, type MealTemplate, type NutritionSnapshot } from "@cal-tracker/contracts";
 import { newId } from "../utils/ids.js";
 import { normalizeText } from "../utils/normalize.js";
 import { subtractNutrition, sumNutrition } from "../utils/nutrition.js";
@@ -19,6 +19,8 @@ export class InMemoryRepository implements AppRepository {
   private foods = new Map<string, FoodItemRecord>();
   private targets = new Map<string, NutritionSnapshot>();
   private hydrationGoals = new Map<string, number>();
+  private calorieTargetConfigured = new Map<string, boolean>();
+  private calorieTargetSources = new Map<string, CalorieTargetSource>();
   private dailyGoalSnapshots = new Map<string, DailyGoals>();
   private proposals = new Map<string, MealProposal & { userId: string }>();
   private meals = new Map<string, Meal & { userId: string }>();
@@ -47,6 +49,8 @@ export class InMemoryRepository implements AppRepository {
     this.users.set(user.id, user);
     this.targets.set(user.id, { calories: 2200, proteinGrams: 160, carbsGrams: 240, fatGrams: 70 });
     this.hydrationGoals.set(user.id, 12);
+    this.calorieTargetConfigured.set(user.id, false);
+    this.calorieTargetSources.set(user.id, "default");
     return user;
   }
 
@@ -152,16 +156,22 @@ export class InMemoryRepository implements AppRepository {
     return this.ensureDailyGoalSnapshot(userId, date, {
       target: await this.getNutritionTarget(userId),
       hydrationGoalGlasses: this.hydrationGoals.get(userId) ?? 12,
+      calorieTargetConfigured: this.calorieTargetConfigured.get(userId) ?? false,
+      calorieTargetSource: this.calorieTargetSources.get(userId) ?? "default",
     });
   }
 
-  async updateDailyGoals(userId: string, input: { date: string; calories?: number; hydrationGoalGlasses?: number }): Promise<DailyGoals> {
+  async updateDailyGoals(userId: string, input: { date: string; calories?: number; hydrationGoalGlasses?: number; calorieTargetSource?: CalorieTargetSource }): Promise<DailyGoals> {
     const currentTarget = await this.getNutritionTarget(userId);
     const currentHydration = this.hydrationGoals.get(userId) ?? 12;
+    const currentConfigured = this.calorieTargetConfigured.get(userId) ?? false;
+    const currentSource = this.calorieTargetSources.get(userId) ?? "default";
     for (const date of previousDatesInWeek(input.date)) {
       this.ensureDailyGoalSnapshot(userId, date, {
         target: currentTarget,
         hydrationGoalGlasses: currentHydration,
+        calorieTargetConfigured: currentConfigured,
+        calorieTargetSource: currentSource,
       });
     }
 
@@ -170,12 +180,18 @@ export class InMemoryRepository implements AppRepository {
       calories: input.calories ?? currentTarget.calories,
     };
     const nextHydration = input.hydrationGoalGlasses ?? currentHydration;
+    const nextConfigured = input.calories === undefined ? currentConfigured : true;
+    const nextSource = input.calories === undefined ? currentSource : input.calorieTargetSource ?? "manual";
     this.targets.set(userId, nextTarget);
     this.hydrationGoals.set(userId, nextHydration);
+    this.calorieTargetConfigured.set(userId, nextConfigured);
+    this.calorieTargetSources.set(userId, nextSource);
     const goals = {
       date: input.date,
       target: nextTarget,
       hydrationGoalGlasses: nextHydration,
+      calorieTargetConfigured: nextConfigured,
+      calorieTargetSource: nextSource,
     };
     this.dailyGoalSnapshots.set(dailyGoalKey(userId, input.date), goals);
     return goals;
@@ -265,6 +281,8 @@ export class InMemoryRepository implements AppRepository {
       target: goals.target,
       remaining: subtractNutrition(goals.target, consumed),
       hydrationGoalGlasses: goals.hydrationGoalGlasses,
+      calorieTargetConfigured: goals.calorieTargetConfigured,
+      calorieTargetSource: goals.calorieTargetSource,
       meals
     };
   }

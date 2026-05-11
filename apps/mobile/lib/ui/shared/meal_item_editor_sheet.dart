@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../domain/models/nutrition_models.dart';
+import '../../l10n/app_localizations_context.dart';
 import '../core/design_system.dart';
 
 class MealItemEditorSheet extends StatefulWidget {
@@ -44,6 +45,7 @@ class _MealItemEditorSheetState extends State<MealItemEditorSheet> {
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     final textTheme = Theme.of(context).textTheme;
+    final l10n = context.l10n;
     return Padding(
       padding: EdgeInsets.fromLTRB(18, 12, 18, bottomInset + 18),
       child: SingleChildScrollView(
@@ -62,7 +64,7 @@ class _MealItemEditorSheetState extends State<MealItemEditorSheet> {
               ),
             ),
             const SizedBox(height: FreshSpacing.lg),
-            Text('Edit ingredients', style: textTheme.titleLarge),
+            Text(l10n.commonEditIngredients, style: textTheme.titleLarge),
             const SizedBox(height: FreshSpacing.xs),
             Text(
               widget.meal.title,
@@ -74,7 +76,7 @@ class _MealItemEditorSheetState extends State<MealItemEditorSheet> {
             if (_error != null) ...[
               FreshStatusBanner(
                 icon: Icons.error_outline_rounded,
-                title: 'Check ingredient details',
+                title: l10n.commonCheckIngredientDetails,
                 message: _error!,
                 color: FreshColors.coral,
               ),
@@ -105,14 +107,14 @@ class _MealItemEditorSheetState extends State<MealItemEditorSheet> {
                 });
               },
               icon: const Icon(Icons.add_rounded),
-              label: const Text('Add ingredient'),
+              label: Text(l10n.commonAddIngredient),
             ),
             const SizedBox(height: FreshSpacing.md),
             FilledButton.icon(
               key: ValueKey('save_${widget.keyPrefix}_item_edits_button'),
               onPressed: _save,
               icon: const Icon(Icons.check_rounded),
-              label: const Text('Save edits'),
+              label: Text(l10n.commonSaveEdits),
             ),
           ],
         ),
@@ -126,8 +128,7 @@ class _MealItemEditorSheetState extends State<MealItemEditorSheet> {
       final mealItem = item.toMealItem();
       if (mealItem == null) {
         setState(() {
-          _error =
-              'Each ingredient needs a name, amount, unit, calories, and non-negative macros.';
+          _error = context.l10n.commonIngredientDetailsError;
         });
         return;
       }
@@ -135,7 +136,7 @@ class _MealItemEditorSheetState extends State<MealItemEditorSheet> {
     }
     if (edited.isEmpty) {
       setState(() {
-        _error = 'Add at least one ingredient.';
+        _error = context.l10n.commonAddAtLeastOneIngredient;
       });
       return;
     }
@@ -159,6 +160,7 @@ class _IngredientEditorRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return FreshCard(
       padding: const EdgeInsets.all(12),
       shadow: false,
@@ -167,7 +169,7 @@ class _IngredientEditorRow extends StatelessWidget {
           TextField(
             key: ValueKey('${keyPrefix}_item_name_$index'),
             controller: item.nameController,
-            decoration: const InputDecoration(labelText: 'Ingredient'),
+            decoration: InputDecoration(labelText: l10n.commonIngredient),
           ),
           const SizedBox(height: FreshSpacing.sm),
           Row(
@@ -179,7 +181,7 @@ class _IngredientEditorRow extends StatelessWidget {
                   controller: item.quantityController,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Amount'),
+                  decoration: InputDecoration(labelText: l10n.commonAmount),
                 ),
               ),
               const SizedBox(width: FreshSpacing.sm),
@@ -188,7 +190,7 @@ class _IngredientEditorRow extends StatelessWidget {
                 child: TextField(
                   key: ValueKey('${keyPrefix}_item_unit_$index'),
                   controller: item.unitController,
-                  decoration: const InputDecoration(labelText: 'Unit'),
+                  decoration: InputDecoration(labelText: l10n.commonUnit),
                 ),
               ),
               const SizedBox(width: FreshSpacing.sm),
@@ -196,7 +198,7 @@ class _IngredientEditorRow extends StatelessWidget {
                 key: ValueKey('delete_${keyPrefix}_item_$index'),
                 onPressed: onDelete,
                 icon: const Icon(Icons.delete_outline_rounded),
-                tooltip: 'Delete ingredient',
+                tooltip: l10n.commonDeleteIngredient,
               ),
             ],
           ),
@@ -208,7 +210,7 @@ class _IngredientEditorRow extends StatelessWidget {
                   key: ValueKey('${keyPrefix}_item_calories_$index'),
                   controller: item.caloriesController,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Calories'),
+                  decoration: InputDecoration(labelText: l10n.commonCalories),
                 ),
               ),
               const SizedBox(width: FreshSpacing.sm),
@@ -218,7 +220,7 @@ class _IngredientEditorRow extends StatelessWidget {
                   controller: item.proteinController,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Protein'),
+                  decoration: InputDecoration(labelText: l10n.commonProtein),
                 ),
               ),
             ],
@@ -232,7 +234,7 @@ class _IngredientEditorRow extends StatelessWidget {
                   controller: item.carbsController,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Carbs'),
+                  decoration: InputDecoration(labelText: l10n.commonCarbs),
                 ),
               ),
               const SizedBox(width: FreshSpacing.sm),
@@ -242,7 +244,7 @@ class _IngredientEditorRow extends StatelessWidget {
                   controller: item.fatController,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Fat'),
+                  decoration: InputDecoration(labelText: l10n.commonFat),
                 ),
               ),
             ],

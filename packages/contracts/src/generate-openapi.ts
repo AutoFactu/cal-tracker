@@ -5,6 +5,8 @@ import {
   actionDefinitions,
   agentRunRequestSchema,
   agentRunResponseSchema,
+  calorieEstimateRequestSchema,
+  calorieEstimateResponseSchema,
   errorResponseSchema,
   executeActionRequestSchema,
   executeActionResponseSchema,
@@ -57,6 +59,8 @@ const spec = {
       SettingsUpdate: schema("SettingsUpdate", settingsUpdateSchema),
       GoalsUpdate: schema("GoalsUpdate", goalsUpdateSchema),
       GoalsResponse: schema("GoalsResponse", goalsResponseSchema),
+      CalorieEstimateRequest: schema("CalorieEstimateRequest", calorieEstimateRequestSchema),
+      CalorieEstimateResponse: schema("CalorieEstimateResponse", calorieEstimateResponseSchema),
       ExecuteActionRequest: schema("ExecuteActionRequest", executeActionRequestSchema),
       ExecuteActionResponse: schema("ExecuteActionResponse", executeActionResponseSchema),
       AgentRunRequest: schema("AgentRunRequest", agentRunRequestSchema),
@@ -144,6 +148,19 @@ const spec = {
         },
         responses: {
           "200": { description: "Updated daily goals", content: { "application/json": { schema: { $ref: "#/components/schemas/GoalsResponse" } } } }
+        }
+      }
+    },
+    "/v1/goals/calorie-estimate": {
+      post: {
+        operationId: "estimateCalories",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/CalorieEstimateRequest" } } }
+        },
+        responses: {
+          "200": { description: "Estimated calorie target", content: { "application/json": { schema: { $ref: "#/components/schemas/CalorieEstimateResponse" } } } }
         }
       }
     },

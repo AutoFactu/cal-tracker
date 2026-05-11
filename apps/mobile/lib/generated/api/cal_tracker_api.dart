@@ -67,13 +67,20 @@ class CalTrackerApiClient {
     String? date,
     int? calories,
     int? hydrationGoalGlasses,
+    String? calorieTargetSource,
   }) {
     return _put('/v1/goals', {
       if (date != null) 'date': date,
       if (calories != null) 'calories': calories,
       if (hydrationGoalGlasses != null)
         'hydrationGoalGlasses': hydrationGoalGlasses,
+      if (calorieTargetSource != null)
+        'calorieTargetSource': calorieTargetSource,
     });
+  }
+
+  Future<Map<String, Object?>> estimateCalories(Map<String, Object?> body) {
+    return _post('/v1/goals/calorie-estimate', body);
   }
 
   Future<Map<String, Object?>> runAgent(String text) {

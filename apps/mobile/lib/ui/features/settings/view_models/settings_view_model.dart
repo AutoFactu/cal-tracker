@@ -31,6 +31,8 @@ class SettingsViewModel extends ChangeNotifier {
         date: summary.date,
         target: summary.target,
         hydrationGoalGlasses: summary.hydrationGoalGlasses,
+        calorieTargetConfigured: summary.calorieTargetConfigured,
+        calorieTargetSource: summary.calorieTargetSource,
       );
       _error = null;
     } catch (error) {
@@ -44,6 +46,7 @@ class SettingsViewModel extends ChangeNotifier {
   Future<DailyGoals?> updateGoals({
     int? calories,
     int? hydrationGoalGlasses,
+    String? calorieTargetSource,
   }) async {
     _isLoading = true;
     notifyListeners();
@@ -51,6 +54,7 @@ class SettingsViewModel extends ChangeNotifier {
       final goals = await _nutritionRepository.updateDailyGoals(
         calories: calories,
         hydrationGoalGlasses: hydrationGoalGlasses,
+        calorieTargetSource: calorieTargetSource,
       );
       _goals = goals;
       _error = null;

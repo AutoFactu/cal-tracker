@@ -1,5 +1,6 @@
 import {
   agentRunRequestSchema,
+  calorieEstimateRequestSchema,
   executeActionRequestSchema,
   goalsUpdateSchema,
   loginRequestSchema,
@@ -26,6 +27,7 @@ import { readAudioBuffer, validateAudioUpload } from "../stt/audioValidation.js"
 import { AgentService } from "../agent/agentService.js";
 import type { ChatAgentProvider } from "../agent/chatAgentProvider.js";
 import { RemoteChatAgentProvider } from "../agent/chatAgentProvider.js";
+import { estimateCalories } from "../nutrition/calorieEstimator.js";
 
 export function createApp(input: {
   config: AppConfig;
@@ -101,10 +103,15 @@ export function createApp(input: {
     const goals = await repository.updateDailyGoals(user.id, {
       date,
       calories: body.calories,
-      hydrationGoalGlasses: body.hydrationGoalGlasses
+      hydrationGoalGlasses: body.hydrationGoalGlasses,
+      calorieTargetSource: body.calorieTargetSource
     });
     const summary = await repository.getDailySummary(user.id, date);
     return c.json({ goals, summary });
+  });
+  app.post("/v1/goals/calorie-estimate", async (c) => {
+    const body = calorieEstimateRequestSchema.parse(await c.req.json());
+    return c.json(estimateCalories(body));
   });
 
   app.get("/v1/actions", (c) => c.json({ actions: actionExecutor.listActions() }));

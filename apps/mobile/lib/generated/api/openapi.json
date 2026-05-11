@@ -210,6 +210,14 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 40
+          },
+          "calorieTargetSource": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "calculator",
+              "default"
+            ]
           }
         },
         "additionalProperties": false
@@ -255,12 +263,25 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 40
+              },
+              "calorieTargetConfigured": {
+                "type": "boolean"
+              },
+              "calorieTargetSource": {
+                "type": "string",
+                "enum": [
+                  "manual",
+                  "calculator",
+                  "default"
+                ]
               }
             },
             "required": [
               "date",
               "target",
-              "hydrationGoalGlasses"
+              "hydrationGoalGlasses",
+              "calorieTargetConfigured",
+              "calorieTargetSource"
             ],
             "additionalProperties": false
           },
@@ -358,6 +379,17 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 40
+              },
+              "calorieTargetConfigured": {
+                "type": "boolean"
+              },
+              "calorieTargetSource": {
+                "type": "string",
+                "enum": [
+                  "manual",
+                  "calculator",
+                  "default"
+                ]
               },
               "meals": {
                 "type": "array",
@@ -559,6 +591,8 @@
               "target",
               "remaining",
               "hydrationGoalGlasses",
+              "calorieTargetConfigured",
+              "calorieTargetSource",
               "meals"
             ],
             "additionalProperties": false
@@ -566,6 +600,136 @@
         },
         "required": [
           "goals"
+        ],
+        "additionalProperties": false
+      },
+      "CalorieEstimateRequest": {
+        "type": "object",
+        "properties": {
+          "age": {
+            "type": "integer",
+            "minimum": 18,
+            "maximum": 100
+          },
+          "sex": {
+            "type": "string",
+            "enum": [
+              "male",
+              "female"
+            ]
+          },
+          "heightCm": {
+            "type": "number",
+            "minimum": 120,
+            "maximum": 230
+          },
+          "weightKg": {
+            "type": "number",
+            "minimum": 35,
+            "maximum": 250
+          },
+          "activityLevel": {
+            "type": "string",
+            "enum": [
+              "sedentary",
+              "lightly_active",
+              "moderately_active",
+              "very_active",
+              "extra_active"
+            ]
+          },
+          "goal": {
+            "type": "string",
+            "enum": [
+              "lose_fat",
+              "maintain",
+              "gain_muscle",
+              "recomposition"
+            ]
+          },
+          "pace": {
+            "type": "string",
+            "enum": [
+              "slow",
+              "moderate",
+              "aggressive",
+              "lean",
+              "standard"
+            ]
+          }
+        },
+        "required": [
+          "age",
+          "sex",
+          "heightCm",
+          "weightKg",
+          "activityLevel",
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "CalorieEstimateResponse": {
+        "type": "object",
+        "properties": {
+          "bmr": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "maintenanceCalories": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "targetCalories": {
+            "type": "integer",
+            "minimum": 800,
+            "maximum": 10000
+          },
+          "recommendedRange": {
+            "type": "object",
+            "properties": {
+              "min": {
+                "type": "integer",
+                "minimum": 800,
+                "maximum": 10000
+              },
+              "max": {
+                "type": "integer",
+                "minimum": 800,
+                "maximum": 10000
+              }
+            },
+            "required": [
+              "min",
+              "max"
+            ],
+            "additionalProperties": false
+          },
+          "activityFactor": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "adjustmentCalories": {
+            "type": "integer"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "explanation": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "bmr",
+          "maintenanceCalories",
+          "targetCalories",
+          "recommendedRange",
+          "activityFactor",
+          "adjustmentCalories",
+          "warnings",
+          "explanation"
         ],
         "additionalProperties": false
       },
@@ -1111,6 +1275,17 @@
                 "minimum": 1,
                 "maximum": 40
               },
+              "calorieTargetConfigured": {
+                "type": "boolean"
+              },
+              "calorieTargetSource": {
+                "type": "string",
+                "enum": [
+                  "manual",
+                  "calculator",
+                  "default"
+                ]
+              },
               "meals": {
                 "type": "array",
                 "items": {
@@ -1311,6 +1486,8 @@
               "target",
               "remaining",
               "hydrationGoalGlasses",
+              "calorieTargetConfigured",
+              "calorieTargetSource",
               "meals"
             ],
             "additionalProperties": false
@@ -4780,6 +4957,17 @@
                 "minimum": 1,
                 "maximum": 40
               },
+              "calorieTargetConfigured": {
+                "type": "boolean"
+              },
+              "calorieTargetSource": {
+                "type": "string",
+                "enum": [
+                  "manual",
+                  "calculator",
+                  "default"
+                ]
+              },
               "meals": {
                 "type": "array",
                 "items": {
@@ -4980,6 +5168,8 @@
               "target",
               "remaining",
               "hydrationGoalGlasses",
+              "calorieTargetConfigured",
+              "calorieTargetSource",
               "meals"
             ],
             "additionalProperties": false
@@ -6139,6 +6329,38 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GoalsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/goals/calorie-estimate": {
+      "post": {
+        "operationId": "estimateCalories",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalorieEstimateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Estimated calorie target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalorieEstimateResponse"
                 }
               }
             }

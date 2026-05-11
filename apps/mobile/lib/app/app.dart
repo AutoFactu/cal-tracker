@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
@@ -10,12 +11,14 @@ import '../data/services/api_config.dart';
 import '../data/services/audio_recorder_service.dart';
 import '../data/services/secure_token_storage.dart';
 import '../generated/api/cal_tracker_api.dart';
+import '../l10n/generated/app_localizations.dart';
 import '../ui/features/auth/view_models/auth_view_model.dart';
 import '../ui/features/dashboard/view_models/dashboard_view_model.dart';
 import '../ui/features/meal_history/view_models/meal_history_view_model.dart';
 import '../ui/features/meal_templates/view_models/meal_templates_view_model.dart';
 import '../ui/features/settings/view_models/settings_view_model.dart';
 import '../ui/features/voice_log/view_models/voice_log_view_model.dart';
+import 'locale_view_model.dart';
 import 'router.dart';
 import 'theme.dart';
 import 'theme_mode_view_model.dart';
@@ -54,6 +57,11 @@ class CalTrackerBootstrap extends StatelessWidget {
         ),
         ChangeNotifierProvider(
           create: (_) => ThemeModeViewModel(
+            preferencesRepository: preferencesRepository,
+          )..load(),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => LocaleViewModel(
             preferencesRepository: preferencesRepository,
           )..load(),
         ),
@@ -115,9 +123,18 @@ class _CalTrackerAppState extends State<_CalTrackerApp> {
   @override
   Widget build(BuildContext context) {
     final themeMode = context.watch<ThemeModeViewModel>().themeMode;
+    final locale = context.watch<LocaleViewModel>().locale;
     return MaterialApp.router(
-      title: 'Better Calories',
+      onGenerateTitle: (context) => AppLocalizations.of(context).appTitle,
       debugShowCheckedModeBanner: false,
+      locale: locale,
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: LocaleViewModel.supportedLocales,
       theme: buildLightTheme(),
       darkTheme: buildDarkTheme(),
       themeMode: themeMode,

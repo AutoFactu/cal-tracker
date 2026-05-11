@@ -1,0 +1,267 @@
+{
+  "@@locale": "en",
+  "appTitle": "Better Calories",
+  "fallbackUserName": "Cal Tracker",
+  "routeNotFound": "Route not found",
+  "commonCancel": "Cancel",
+  "commonDelete": "Delete",
+  "commonSave": "Save",
+  "commonCreate": "Create",
+  "commonRefresh": "Refresh",
+  "commonTryAgain": "Try again",
+  "commonUpdate": "Update",
+  "commonCalories": "Calories",
+  "commonProtein": "Protein",
+  "commonCarbs": "Carbs",
+  "commonFat": "Fat",
+  "commonIngredient": "Ingredient",
+  "commonAmount": "Amount",
+  "commonUnit": "Unit",
+  "commonMeal": "Meal",
+  "commonMeals": "Meals",
+  "commonRemaining": "Remaining",
+  "commonConsumed": "Consumed",
+  "commonToday": "Today",
+  "commonKcal": "Kcal",
+  "commonAddIngredient": "Add ingredient",
+  "commonEditIngredients": "Edit ingredients",
+  "commonSaveEdits": "Save edits",
+  "commonDeleteIngredient": "Delete ingredient",
+  "commonCheckIngredientDetails": "Check ingredient details",
+  "commonIngredientDetailsError": "Each ingredient needs a name, amount, unit, calories, and non-negative macros.",
+  "commonAddAtLeastOneIngredient": "Add at least one ingredient.",
+  "caloriesValue": "{calories} Kcal",
+  "@caloriesValue": {
+    "placeholders": {
+      "calories": {
+        "type": "int"
+      }
+    }
+  },
+  "macroGramsValue": "{value} g",
+  "@macroGramsValue": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "quantityUnitValue": "{quantity} {unit}",
+  "@quantityUnitValue": {
+    "placeholders": {
+      "quantity": {
+        "type": "String"
+      },
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "navHome": "Home",
+  "navStats": "Stats",
+  "navLog": "Log",
+  "navUsual": "Usual",
+  "navMenu": "Menu",
+  "authNameLabel": "Name",
+  "authEmailLabel": "Email",
+  "authPasswordLabel": "Password",
+  "authCreateAccountButton": "Create account",
+  "authGetStartedButton": "Get Started",
+  "authUseExistingAccountButton": "Use existing account",
+  "authCreateAccountLink": "Create an account",
+  "authSignInFailedTitle": "Sign in failed",
+  "authHeroHeadline": "Track your\ncalories better.",
+  "darkModeSwitchToLight": "Switch to light mode",
+  "darkModeSwitchToDark": "Switch to dark mode",
+  "settingsTitle": "Menu",
+  "settingsSubtitle": "Account and preferences",
+  "settingsMoreTooltip": "More",
+  "settingsCouldNotUpdateGoals": "Could not update goals",
+  "settingsHydrationGoal": "Hydration goal",
+  "settingsHydrationGoalSubtitle": "{glasses} glasses per day",
+  "@settingsHydrationGoalSubtitle": {
+    "placeholders": {
+      "glasses": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsCalorieTarget": "Calorie target",
+  "settingsCalorieTargetSubtitle": "{calories} Kcal daily target",
+  "@settingsCalorieTargetSubtitle": {
+    "placeholders": {
+      "calories": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsGlassesUnit": "glasses",
+  "settingsLogOut": "Log out",
+  "settingsGoalRangeError": "Enter {min}-{max}.",
+  "@settingsGoalRangeError": {
+    "placeholders": {
+      "min": {
+        "type": "int"
+      },
+      "max": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsLanguageTitle": "Language",
+  "settingsLanguageSubtitleEnglish": "English",
+  "settingsLanguageSubtitleSpanish": "Español",
+  "settingsLanguageSheetTitle": "Choose language",
+  "settingsLanguageEnglish": "English",
+  "settingsLanguageSpanish": "Español",
+  "dashboardCouldNotLoadToday": "Could not load today",
+  "dashboardGreetingMorning": "Good morning!",
+  "dashboardGreetingAfternoon": "Good afternoon!",
+  "dashboardGreetingNight": "Good night!",
+  "dashboardDailyProgress": "Your Daily\nProgress",
+  "dashboardTodayCalories": "Today's Calories",
+  "dashboardCaloriesLeft": "left",
+  "dashboardGoalLine": "Target {calories} Kcal, {glasses} glasses",
+  "@dashboardGoalLine": {
+    "placeholders": {
+      "calories": {
+        "type": "int"
+      },
+      "glasses": {
+        "type": "int"
+      }
+    }
+  },
+  "dashboardTodayLower": "today",
+  "dashboardNoMealsLoggedToday": "No meals logged today",
+  "dashboardNoMealsMessage": "Logged meals will appear here.",
+  "dashboardEditIngredientsTooltip": "Edit ingredients",
+  "monthJan": "Jan",
+  "monthFeb": "Feb",
+  "monthMar": "Mar",
+  "monthApr": "Apr",
+  "monthMay": "May",
+  "monthJun": "Jun",
+  "monthJul": "Jul",
+  "monthAug": "Aug",
+  "monthSep": "Sep",
+  "monthOct": "Oct",
+  "monthNov": "Nov",
+  "monthDec": "Dec",
+  "dayMon": "Mon",
+  "dayTue": "Tue",
+  "dayWed": "Wed",
+  "dayThu": "Thu",
+  "dayFri": "Fri",
+  "daySat": "Sat",
+  "daySun": "Sun",
+  "historyTitle": "Stats",
+  "historySubtitle": "Calories and meal history",
+  "historyCouldNotLoadHistory": "Could not load history",
+  "historyLoggedMeals": "Logged meals",
+  "historyMealCount": "{count, plural, =0{0 meals} =1{1 meal} other{{count} meals}}",
+  "@historyMealCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "historyNoMealsLogged": "No meals logged",
+  "historyNoMealsMessage": "Meal details will appear after logging.",
+  "historyDeleteMealTitle": "Delete meal?",
+  "historyTargetCalories": "Target: {calories} Kcal",
+  "@historyTargetCalories": {
+    "placeholders": {
+      "calories": {
+        "type": "int"
+      }
+    }
+  },
+  "historySelectDaySemantics": "Select {label}",
+  "@historySelectDaySemantics": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "templatesTitle": "Usual meals",
+  "templatesSubtitle": "Safe familiar templates",
+  "templatesAddTooltip": "Add usual meal",
+  "templatesExplainer": "Usual meals are trusted meals you can log quickly.",
+  "templatesCouldNotLoad": "Could not load usual meals",
+  "templatesNoUsualMealsYet": "No usual meals yet",
+  "templatesNoUsualMealsMessage": "Saved meals will appear here.",
+  "templatesDeleteUsualMealTitle": "Delete usual meal?",
+  "templatesNewUsualMealTitle": "New usual meal",
+  "templatesTitleLabel": "Title",
+  "templatesAliasesLabel": "Aliases, separated by commas",
+  "templatesNoAliasesYet": "No aliases yet",
+  "voiceTitle": "Log meal",
+  "voiceStartOver": "Start over",
+  "voiceMealFieldLabel": "Meal",
+  "voiceMealFieldHint": "Tell me what you ate",
+  "voiceSubmitMeal": "Submit meal",
+  "voiceTranscribingTitle": "Transcribing...",
+  "voiceTranscribingMessage": "Listening back and preparing the text.",
+  "voiceClarificationTitle": "Needs a little more detail",
+  "voiceClarificationDefault": "Add a bit more detail and submit again.",
+  "voiceFoodMatches": "Food matches",
+  "voiceNoConfidentMatchYet": "No confident match yet",
+  "voiceRecordingTitle": "Recording",
+  "voiceIntakeTitle": "Voice intake",
+  "voiceTapStopWhenDone": "Tap stop when you are done.",
+  "voiceSayMealNaturally": "Say your meal naturally.",
+  "voiceMealFilledWithVoice": "The meal will be filled with your voice.",
+  "voiceStopRecordingTooltip": "Stop recording",
+  "voiceRecordVoiceTooltip": "Record voice",
+  "voiceRecordingIndicator": "Recording. Tap stop when you finish.",
+  "voiceErrorTitle": "Something went wrong",
+  "voiceLoggedMessage": "Logged. You can correct it from history.",
+  "voiceMessageMealLogged": "Meal logged.",
+  "voiceMessageProposalUpdated": "Proposal updated.",
+  "voiceMessageMealProposalCreated": "Meal proposal created.",
+  "voiceTodaySection": "Today",
+  "voiceMealsSection": "Meals",
+  "voiceNutritionMatchesSection": "Nutrition matches",
+  "voiceUsualMealsSection": "Usual meals",
+  "voiceNoMealsYet": "No meals yet",
+  "voiceNoMealsMessage": "Logged meals will appear here.",
+  "voiceItemCount": "{count, plural, =0{0 items} =1{1 item} other{{count} items}}",
+  "@voiceItemCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "voiceStateListening": "Listening",
+  "voiceStateSavingAudio": "Saving audio",
+  "voiceStateWhisperTranscription": "Whisper transcription",
+  "voiceStateTranscriptReady": "Transcript ready",
+  "voiceStateBuildingProposal": "Building proposal",
+  "voiceStateReviewMeal": "Review meal",
+  "voiceStateLogged": "Logged",
+  "voiceStateResultReady": "Result ready",
+  "voiceStateClarification": "Clarification",
+  "voiceStateNeedsAttention": "Needs attention",
+  "voiceStateInput": "Voice or text input",
+  "mealLabelQuestion": "Which type of meal is this?",
+  "mealLabelHelper": "This helps organize your day.",
+  "mealLabelBreakfast": "Breakfast",
+  "mealLabelLunch": "Lunch",
+  "mealLabelDinner": "Dinner",
+  "mealLabelSnack": "Snack",
+  "mealLabelPreWorkout": "Pre-workout",
+  "mealLabelPostWorkout": "Post-workout",
+  "mealLabelOther": "Other",
+  "mealLabelNone": "None",
+  "mealLabelCustomType": "Custom meal type",
+  "mealLabelOtherPlaceholder": "Brunch",
+  "mealLabelSave": "Save label",
+  "mealLabelSkip": "Skip",
+  "mealProposalReadyToLog": "Ready to log",
+  "mealProposalConfirm": "Confirm",
+  "mealConfirmationEmbedded": "Meal confirmation is embedded in the logging flow."
+}

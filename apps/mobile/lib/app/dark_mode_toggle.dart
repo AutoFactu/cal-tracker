@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../l10n/app_localizations_context.dart';
 import '../ui/core/design_system.dart';
 import 'theme_mode_view_model.dart';
 
@@ -16,7 +17,9 @@ class DarkModeToggle extends StatelessWidget {
         final isDarkMode = themeModeViewModel.isDarkMode;
         return FreshIconButton(
           key: toggleKey,
-          tooltip: isDarkMode ? 'Switch to light mode' : 'Switch to dark mode',
+          tooltip: isDarkMode
+              ? context.l10n.darkModeSwitchToLight
+              : context.l10n.darkModeSwitchToDark,
           icon: isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
           onPressed: () => themeModeViewModel.setDarkMode(!isDarkMode),
         );

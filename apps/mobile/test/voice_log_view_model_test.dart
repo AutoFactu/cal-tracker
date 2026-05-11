@@ -28,7 +28,8 @@ void main() {
       mockNutritionRepository = MockNutritionRepository();
       mockAudioRecorderService = MockAudioRecorderService();
       when(() => mockAudioRecorderService.dispose()).thenAnswer((_) async {});
-      when(() => mockAudioRecorderService.stateStream).thenAnswer((_) => const Stream.empty());
+      when(() => mockAudioRecorderService.stateStream)
+          .thenAnswer((_) => const Stream.empty());
       viewModel = VoiceLogViewModel(
         nutritionRepository: mockNutritionRepository,
         audioRecorderService: mockAudioRecorderService,
@@ -47,7 +48,8 @@ void main() {
 
     group('toggleRecording', () {
       test('starts recording when idle', () async {
-        when(() => mockAudioRecorderService.hasPermission()).thenAnswer((_) async => true);
+        when(() => mockAudioRecorderService.hasPermission())
+            .thenAnswer((_) async => true);
         when(() => mockAudioRecorderService.start()).thenAnswer((_) async {});
 
         final states = <VoiceLogState>[];
@@ -60,29 +62,37 @@ void main() {
       });
 
       test('stops recording and transitions to transcriptReady', () async {
-        when(() => mockAudioRecorderService.hasPermission()).thenAnswer((_) async => true);
+        when(() => mockAudioRecorderService.hasPermission())
+            .thenAnswer((_) async => true);
         when(() => mockAudioRecorderService.start()).thenAnswer((_) async {});
-        when(() => mockAudioRecorderService.stop()).thenAnswer((_) async => const RecordedAudio(path: '/tmp/test.m4a', mimeType: 'audio/m4a', sizeBytes: 1024));
-        when(() => mockNutritionRepository.transcribeAudio(any())).thenAnswer((_) async => 'chicken and rice');
+        when(() => mockAudioRecorderService.stop()).thenAnswer((_) async =>
+            const RecordedAudio(
+                path: '/tmp/test.m4a', mimeType: 'audio/m4a', sizeBytes: 1024));
+        when(() => mockNutritionRepository.transcribeAudio(any()))
+            .thenAnswer((_) async => 'chicken and rice');
 
         await viewModel.toggleRecording(); // start
         expect(viewModel.state, VoiceLogState.recording);
 
         // Trigger stop
         await viewModel.toggleRecording();
-        
+
         // Wait for transcribing -> transcriptReady transition
         await Future.delayed(const Duration(milliseconds: 100));
-        
+
         expect(viewModel.state, VoiceLogState.transcriptReady);
         expect(viewModel.transcript, 'chicken and rice');
       });
 
       test('starts a new recording from transcriptReady', () async {
-        when(() => mockAudioRecorderService.hasPermission()).thenAnswer((_) async => true);
+        when(() => mockAudioRecorderService.hasPermission())
+            .thenAnswer((_) async => true);
         when(() => mockAudioRecorderService.start()).thenAnswer((_) async {});
-        when(() => mockAudioRecorderService.stop()).thenAnswer((_) async => const RecordedAudio(path: '/tmp/test.m4a', mimeType: 'audio/m4a', sizeBytes: 1024));
-        when(() => mockNutritionRepository.transcribeAudio(any())).thenAnswer((_) async => 'chicken and rice');
+        when(() => mockAudioRecorderService.stop()).thenAnswer((_) async =>
+            const RecordedAudio(
+                path: '/tmp/test.m4a', mimeType: 'audio/m4a', sizeBytes: 1024));
+        when(() => mockNutritionRepository.transcribeAudio(any()))
+            .thenAnswer((_) async => 'chicken and rice');
 
         await viewModel.toggleRecording();
         await viewModel.toggleRecording();
@@ -95,7 +105,8 @@ void main() {
       });
 
       test('shows error on permission denied', () async {
-        when(() => mockAudioRecorderService.start()).thenThrow(const RecorderException('permission_denied'));
+        when(() => mockAudioRecorderService.start())
+            .thenThrow(const RecorderException('permission_denied'));
 
         await viewModel.toggleRecording();
 
@@ -104,10 +115,14 @@ void main() {
       });
 
       test('shows error on transcription failure', () async {
-        when(() => mockAudioRecorderService.hasPermission()).thenAnswer((_) async => true);
+        when(() => mockAudioRecorderService.hasPermission())
+            .thenAnswer((_) async => true);
         when(() => mockAudioRecorderService.start()).thenAnswer((_) async {});
-        when(() => mockAudioRecorderService.stop()).thenAnswer((_) async => const RecordedAudio(path: '/tmp/test.m4a', mimeType: 'audio/m4a', sizeBytes: 1024));
-        when(() => mockNutritionRepository.transcribeAudio(any())).thenThrow(Exception('network error'));
+        when(() => mockAudioRecorderService.stop()).thenAnswer((_) async =>
+            const RecordedAudio(
+                path: '/tmp/test.m4a', mimeType: 'audio/m4a', sizeBytes: 1024));
+        when(() => mockNutritionRepository.transcribeAudio(any()))
+            .thenThrow(Exception('network error'));
 
         await viewModel.toggleRecording(); // start
         expect(viewModel.state, VoiceLogState.recording);
@@ -120,7 +135,8 @@ void main() {
       });
 
       test('starts a new recording from error', () async {
-        when(() => mockAudioRecorderService.start()).thenThrow(const RecorderException('permission_denied'));
+        when(() => mockAudioRecorderService.start())
+            .thenThrow(const RecorderException('permission_denied'));
 
         await viewModel.toggleRecording();
         expect(viewModel.state, VoiceLogState.error);
@@ -140,10 +156,12 @@ void main() {
           confidence: 0.85,
           requiresConfirmation: true,
           trustedAutoCommitEligible: false,
-          nutrition: NutritionSnapshot(calories: 500, proteinGrams: 30, carbsGrams: 60, fatGrams: 15),
+          nutrition: NutritionSnapshot(
+              calories: 500, proteinGrams: 30, carbsGrams: 60, fatGrams: 15),
           items: [],
         );
-        when(() => mockNutritionRepository.logText('chicken and rice')).thenAnswer(
+        when(() => mockNutritionRepository.logText('chicken and rice'))
+            .thenAnswer(
           (_) async => const AgentRunResult(
             kind: 'proposal',
             proposal: proposal,
@@ -163,10 +181,12 @@ void main() {
           id: 'meal_1',
           title: 'Usual breakfast',
           occurredAt: DateTime.now(),
-          nutrition: const NutritionSnapshot(calories: 400, proteinGrams: 20, carbsGrams: 50, fatGrams: 10),
+          nutrition: const NutritionSnapshot(
+              calories: 400, proteinGrams: 20, carbsGrams: 50, fatGrams: 10),
           items: const [],
         );
-        when(() => mockNutritionRepository.logText('usual breakfast')).thenAnswer(
+        when(() => mockNutritionRepository.logText('usual breakfast'))
+            .thenAnswer(
           (_) async => AgentRunResult(
             kind: 'meal_committed',
             meal: meal,
@@ -181,7 +201,8 @@ void main() {
       });
 
       test('transitions to error on failure', () async {
-        when(() => mockNutritionRepository.logText(any())).thenThrow(Exception('network error'));
+        when(() => mockNutritionRepository.logText(any()))
+            .thenThrow(Exception('network error'));
 
         await viewModel.submitText('test');
 
@@ -195,6 +216,19 @@ void main() {
       });
 
       test('keeps resolver candidate groups on clarification', () async {
+        const bread = MealItem(
+          name: 'Bread',
+          quantity: 100,
+          unit: 'g',
+          calories: 265,
+          proteinGrams: 9,
+          carbsGrams: 49,
+          fatGrams: 3.2,
+          source: 'usda_fdc',
+          canonicalName: 'bread',
+          externalSource: 'usda_fdc',
+          externalId: '501',
+        );
         const groups = [
           FoodCandidateGroup(
             mention: FoodMention(
@@ -205,7 +239,7 @@ void main() {
               confidence: 0.92,
               marketProduct: false,
             ),
-            candidates: [],
+            candidates: [bread],
           ),
         ];
         when(() => mockNutritionRepository.logText('100 gramos de queso'))
@@ -222,6 +256,66 @@ void main() {
         expect(viewModel.state, VoiceLogState.clarificationRequired);
         expect(viewModel.candidateGroups, groups);
       });
+
+      test('creates a proposal after selecting all unresolved candidates',
+          () async {
+        const bread = MealItem(
+          name: 'Bread',
+          quantity: 100,
+          unit: 'g',
+          calories: 265,
+          proteinGrams: 9,
+          carbsGrams: 49,
+          fatGrams: 3.2,
+          source: 'usda_fdc',
+          canonicalName: 'bread',
+          externalSource: 'usda_fdc',
+          externalId: '501',
+        );
+        const group = FoodCandidateGroup(
+          mention: FoodMention(
+            originalText: 'pan',
+            canonicalEnglishName: 'bread',
+            quantity: 100,
+            unit: 'g',
+            confidence: 0.72,
+            marketProduct: false,
+          ),
+          candidates: [bread],
+        );
+        const proposal = MealProposal(
+          id: 'prop_1',
+          title: 'Bread',
+          confidence: 0.85,
+          requiresConfirmation: true,
+          trustedAutoCommitEligible: false,
+          nutrition: NutritionSnapshot(
+              calories: 265, proteinGrams: 9, carbsGrams: 49, fatGrams: 3.2),
+          items: [bread],
+        );
+        when(() => mockNutritionRepository.logText('100 gramos de pan'))
+            .thenAnswer(
+          (_) async => const AgentRunResult(
+            kind: 'clarification_required',
+            message: 'I could not confidently match every ingredient.',
+            candidateGroups: [group],
+          ),
+        );
+        when(() => mockNutritionRepository.createProposalFromItems(
+              phrase: '100 gramos de pan',
+              items: [bread],
+            )).thenAnswer((_) async => proposal);
+
+        await viewModel.submitText('100 gramos de pan');
+        await viewModel.selectCandidate(group, bread);
+
+        expect(viewModel.state, VoiceLogState.proposalReady);
+        expect(viewModel.proposal, proposal);
+        verify(() => mockNutritionRepository.createProposalFromItems(
+              phrase: '100 gramos de pan',
+              items: [bread],
+            )).called(1);
+      });
     });
 
     group('commitProposal', () {
@@ -232,25 +326,29 @@ void main() {
           confidence: 0.85,
           requiresConfirmation: true,
           trustedAutoCommitEligible: false,
-          nutrition: NutritionSnapshot(calories: 500, proteinGrams: 30, carbsGrams: 60, fatGrams: 15),
+          nutrition: NutritionSnapshot(
+              calories: 500, proteinGrams: 30, carbsGrams: 60, fatGrams: 15),
           items: [],
         );
         final meal = Meal(
           id: 'meal_1',
           title: 'Chicken and rice',
           occurredAt: DateTime.now(),
-          nutrition: const NutritionSnapshot(calories: 500, proteinGrams: 30, carbsGrams: 60, fatGrams: 15),
+          nutrition: const NutritionSnapshot(
+              calories: 500, proteinGrams: 30, carbsGrams: 60, fatGrams: 15),
           items: const [],
         );
 
-        when(() => mockNutritionRepository.logText('chicken and rice')).thenAnswer(
+        when(() => mockNutritionRepository.logText('chicken and rice'))
+            .thenAnswer(
           (_) async => const AgentRunResult(
             kind: 'proposal',
             proposal: proposal,
             message: 'Meal proposal created.',
           ),
         );
-        when(() => mockNutritionRepository.commitProposal('prop_1')).thenAnswer((_) async => meal);
+        when(() => mockNutritionRepository.commitProposal('prop_1',
+            mealLabel: null)).thenAnswer((_) async => meal);
 
         await viewModel.submitText('chicken and rice');
         expect(viewModel.state, VoiceLogState.proposalReady);
@@ -261,6 +359,50 @@ void main() {
         expect(viewModel.state, VoiceLogState.autoCommitted);
         expect(viewModel.autoCommittedMeal, meal);
         expect(viewModel.proposal, isNull);
+      });
+
+      test('commits proposal with selected meal label', () async {
+        const proposal = MealProposal(
+          id: 'prop_1',
+          title: 'Chicken and rice',
+          confidence: 0.85,
+          requiresConfirmation: true,
+          trustedAutoCommitEligible: false,
+          nutrition: NutritionSnapshot(
+              calories: 500, proteinGrams: 30, carbsGrams: 60, fatGrams: 15),
+          items: [],
+        );
+        final meal = Meal(
+          id: 'meal_1',
+          title: 'Chicken and rice',
+          occurredAt: DateTime.now(),
+          mealLabel: MealLabel.breakfast,
+          nutrition: const NutritionSnapshot(
+              calories: 500, proteinGrams: 30, carbsGrams: 60, fatGrams: 15),
+          items: const [],
+        );
+
+        when(() => mockNutritionRepository.logText('chicken and rice'))
+            .thenAnswer(
+          (_) async => const AgentRunResult(
+            kind: 'proposal',
+            proposal: proposal,
+            message: 'Meal proposal created.',
+          ),
+        );
+        when(() => mockNutritionRepository.commitProposal(
+              'prop_1',
+              mealLabel: MealLabel.breakfast,
+            )).thenAnswer((_) async => meal);
+
+        await viewModel.submitText('chicken and rice');
+        await viewModel.commitProposal(mealLabel: MealLabel.breakfast);
+
+        expect(viewModel.autoCommittedMeal?.mealLabel?.label, 'Breakfast');
+        verify(() => mockNutritionRepository.commitProposal(
+              'prop_1',
+              mealLabel: MealLabel.breakfast,
+            )).called(1);
       });
 
       test('does nothing when no proposal exists', () async {
@@ -356,7 +498,8 @@ void main() {
         viewModel.updateTranscript('test');
 
         // Simulate error state
-        when(() => mockNutritionRepository.logText(any())).thenThrow(Exception('error'));
+        when(() => mockNutritionRepository.logText(any()))
+            .thenThrow(Exception('error'));
         await viewModel.submitText();
         expect(viewModel.state, VoiceLogState.error);
 

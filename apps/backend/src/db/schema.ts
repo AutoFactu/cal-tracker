@@ -39,6 +39,9 @@ export const nutritionTargets = pgTable("nutrition_targets", {
   carbsGrams: numeric("carbs_grams", { precision: 10, scale: 2 }).notNull(),
   fatGrams: numeric("fat_grams", { precision: 10, scale: 2 }).notNull(),
   hydrationGoalGlasses: integer("hydration_goal_glasses").notNull().default(12),
+  calorieTargetConfigured: boolean("calorie_target_configured").notNull().default(false),
+  calorieTargetSource: text("calorie_target_source").notNull().default("default"),
+  calorieTargetConfiguredAt: timestamp("calorie_target_configured_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
 
@@ -50,6 +53,9 @@ export const dailyGoalSnapshots = pgTable("daily_goal_snapshots", {
   carbsGrams: numeric("carbs_grams", { precision: 10, scale: 2 }).notNull(),
   fatGrams: numeric("fat_grams", { precision: 10, scale: 2 }).notNull(),
   hydrationGoalGlasses: integer("hydration_goal_glasses").notNull().default(12),
+  calorieTargetConfigured: boolean("calorie_target_configured").notNull().default(false),
+  calorieTargetSource: text("calorie_target_source").notNull().default("default"),
+  calorieTargetConfiguredAt: timestamp("calorie_target_configured_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 }, (table) => [

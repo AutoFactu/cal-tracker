@@ -44,4 +44,45 @@ class DashboardViewModel extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  Future<bool> updateCalorieTarget(int calories,
+      {String source = 'manual'}) async {
+    _isLoading = true;
+    notifyListeners();
+    try {
+      await _nutritionRepository.updateDailyGoals(
+        calories: calories,
+        calorieTargetSource: source,
+      );
+      _summary = await _nutritionRepository.getDailySummary();
+      _error = null;
+      return true;
+    } catch (error) {
+      _error = error.toString();
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<CalorieEstimate> estimateCalories({
+    required int age,
+    required String sex,
+    required double heightCm,
+    required double weightKg,
+    required String activityLevel,
+    required String goal,
+    String? pace,
+  }) {
+    return _nutritionRepository.estimateCalories(
+      age: age,
+      sex: sex,
+      heightCm: heightCm,
+      weightKg: weightKg,
+      activityLevel: activityLevel,
+      goal: goal,
+      pace: pace,
+    );
+  }
 }

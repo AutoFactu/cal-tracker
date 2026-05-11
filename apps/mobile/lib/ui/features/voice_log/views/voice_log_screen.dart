@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../../domain/models/nutrition_models.dart';
+import '../../../../l10n/app_localizations_context.dart';
+import '../../../../l10n/generated/app_localizations.dart';
+import '../../../../l10n/meal_label_localizations.dart';
 import '../../../core/content_frame.dart';
 import '../../../core/design_system.dart';
 import '../view_models/voice_log_view_model.dart';
@@ -40,6 +43,7 @@ class _VoiceLogScreenState extends State<VoiceLogScreen> {
   @override
   Widget build(BuildContext context) {
     final viewModel = context.watch<VoiceLogViewModel>();
+    final l10n = context.l10n;
     if (_textController.text != viewModel.transcript) {
       _textController.value = TextEditingValue(
         text: viewModel.transcript,
@@ -62,8 +66,8 @@ class _VoiceLogScreenState extends State<VoiceLogScreen> {
     }
 
     return ContentFrame(
-      title: 'Log meal',
-      subtitle: _stateLabel(viewModel.state),
+      title: l10n.voiceTitle,
+      subtitle: _stateLabel(viewModel.state, l10n),
       actions: [
         if (viewModel.transcript.isNotEmpty ||
             viewModel.proposal != null ||
@@ -71,7 +75,7 @@ class _VoiceLogScreenState extends State<VoiceLogScreen> {
           FreshIconButton(
             key: const ValueKey('voice_log_start_over_button'),
             icon: Icons.refresh_rounded,
-            tooltip: 'Start over',
+            tooltip: l10n.voiceStartOver,
             onPressed: viewModel.clearResult,
           ),
       ],
@@ -88,10 +92,10 @@ class _VoiceLogScreenState extends State<VoiceLogScreen> {
               focusNode: _textFieldFocusNode,
               minLines: 3,
               maxLines: 6,
-              decoration: const InputDecoration(
-                labelText: 'Meal',
-                hintText: 'Tell me what you ate',
-                prefixIcon: Icon(Icons.restaurant_rounded),
+              decoration: InputDecoration(
+                labelText: l10n.voiceMealFieldLabel,
+                hintText: l10n.voiceMealFieldHint,
+                prefixIcon: const Icon(Icons.restaurant_rounded),
               ),
               onChanged: viewModel.updateTranscript,
               enabled: viewModel.state != VoiceLogState.transcribing &&
@@ -107,10 +111,10 @@ class _VoiceLogScreenState extends State<VoiceLogScreen> {
             const SizedBox(height: FreshSpacing.md),
           ],
           if (viewModel.state == VoiceLogState.transcribing) ...[
-            const FreshStatusBanner(
+            FreshStatusBanner(
               icon: Icons.graphic_eq_rounded,
-              title: 'Transcribing...',
-              message: 'Listening back and preparing the text.',
+              title: l10n.voiceTranscribingTitle,
+              message: l10n.voiceTranscribingMessage,
               color: FreshColors.water,
             ),
             const SizedBox(height: FreshSpacing.md),
@@ -137,9 +141,8 @@ class _VoiceLogScreenState extends State<VoiceLogScreen> {
           if (viewModel.state == VoiceLogState.clarificationRequired) ...[
             FreshStatusBanner(
               icon: Icons.help_outline_rounded,
-              title: 'Needs a little more detail',
-              message: viewModel.message ??
-                  'I am not sure what you would like to do. Could you rephrase?',
+              title: l10n.voiceClarificationTitle,
+              message: viewModel.message ?? l10n.voiceClarificationDefault,
               color: FreshColors.orange,
             ),
             const SizedBox(height: FreshSpacing.md),
@@ -159,7 +162,9 @@ class _VoiceLogScreenState extends State<VoiceLogScreen> {
           ],
           if (viewModel.state == VoiceLogState.resultReady &&
               viewModel.message != null) ...[
-            _InfoBanner(message: viewModel.message!),
+            _InfoBanner(
+              message: _localizedVoiceMessage(context, viewModel.message!),
+            ),
             const SizedBox(height: FreshSpacing.md),
           ],
           if (viewModel.summary != null) ...[
@@ -236,7 +241,7 @@ class _VoiceLogScreenState extends State<VoiceLogScreen> {
       onPressed: canSubmit && !viewModel.isLoading
           ? () => viewModel.submitText(_textController.text)
           : null,
-      label: const Text('Submit meal'),
+      label: Text(context.l10n.voiceSubmitMeal),
     );
   }
 }
@@ -259,12 +264,13 @@ class _ResolverClarificationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final l10n = context.l10n;
     return FreshCard(
       key: const ValueKey('resolver_clarification_card'),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const FreshSectionTitle(title: 'Food matches'),
+          FreshSectionTitle(title: l10n.voiceFoodMatches),
           const SizedBox(height: FreshSpacing.sm),
           for (final group in groups) ...[
             Text(
@@ -293,7 +299,7 @@ class _ResolverClarificationCard extends StatelessWidget {
             ],
             if (group.candidates.isEmpty)
               Text(
-                'No confident match yet',
+                l10n.voiceNoConfidentMatchYet,
                 style:
                     textTheme.bodyMedium?.copyWith(color: FreshColors.inkMuted),
               )
@@ -333,6 +339,7 @@ class _CandidateMealLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final l10n = context.l10n;
     final subtitle = candidate.externalSource ?? candidate.source;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -374,7 +381,7 @@ class _CandidateMealLine extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${candidate.calories} Kcal',
+                  l10n.caloriesValue(candidate.calories),
                   style: textTheme.labelLarge?.copyWith(
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),
@@ -425,6 +432,7 @@ class _VoiceCaptureCard extends StatelessWidget {
         viewModel.state == VoiceLogState.transcribing ||
         viewModel.state == VoiceLogState.agentRunning;
     final textTheme = Theme.of(context).textTheme;
+    final l10n = context.l10n;
     final limeCardTextColor = FreshPalette.dark.limeWash;
     return FreshCard(
       color: isRecording
@@ -451,7 +459,9 @@ class _VoiceCaptureCard extends StatelessWidget {
                     ),
                     const SizedBox(width: FreshSpacing.sm),
                     Text(
-                      isRecording ? 'Recording' : 'Voice intake',
+                      isRecording
+                          ? l10n.voiceRecordingTitle
+                          : l10n.voiceIntakeTitle,
                       style: textTheme.bodyMedium?.copyWith(
                         color:
                             isRecording ? FreshColors.ink : limeCardTextColor,
@@ -462,8 +472,8 @@ class _VoiceCaptureCard extends StatelessWidget {
                 const SizedBox(height: FreshSpacing.md),
                 Text(
                   isRecording
-                      ? 'Tap stop when you are done.'
-                      : 'Say your meal naturally.',
+                      ? l10n.voiceTapStopWhenDone
+                      : l10n.voiceSayMealNaturally,
                   style: textTheme.titleLarge?.copyWith(
                     color: isRecording ? null : limeCardTextColor,
                     fontWeight: FontWeight.w700,
@@ -472,7 +482,7 @@ class _VoiceCaptureCard extends StatelessWidget {
                 ),
                 const SizedBox(height: FreshSpacing.sm),
                 Text(
-                  'The meal will be filled with your voice.',
+                  l10n.voiceMealFilledWithVoice,
                   style: textTheme.bodyMedium?.copyWith(
                     color:
                         isRecording ? FreshColors.inkSoft : limeCardTextColor,
@@ -486,7 +496,9 @@ class _VoiceCaptureCard extends StatelessWidget {
             dimension: 76,
             child: IconButton(
               key: const ValueKey('mic_button'),
-              tooltip: isRecording ? 'Stop recording' : 'Record voice',
+              tooltip: isRecording
+                  ? l10n.voiceStopRecordingTooltip
+                  : l10n.voiceRecordVoiceTooltip,
               onPressed: isDisabled ? null : viewModel.toggleRecording,
               icon: Icon(isRecording ? Icons.stop_rounded : Icons.mic_rounded),
               style: IconButton.styleFrom(
@@ -515,7 +527,7 @@ class _InfoBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return FreshStatusBanner(
       icon: Icons.info_outline_rounded,
-      title: 'Update',
+      title: context.l10n.commonUpdate,
       message: message,
       color: FreshColors.water,
     );
@@ -534,7 +546,7 @@ class _RecordingIndicator extends StatelessWidget {
     return FreshStatusBanner(
       icon: Icons.fiber_manual_record_rounded,
       title: '$minutes:$seconds',
-      message: 'Recording voice input from the emulator microphone.',
+      message: context.l10n.voiceRecordingIndicator,
       color: FreshColors.coral,
     );
   }
@@ -550,13 +562,13 @@ class _ErrorBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return FreshStatusBanner(
       icon: Icons.error_outline_rounded,
-      title: 'Something went wrong',
+      title: context.l10n.voiceErrorTitle,
       message: message,
       color: FreshColors.coral,
       action: TextButton.icon(
         onPressed: onRetry,
         icon: const Icon(Icons.refresh_rounded),
-        label: const Text('Try again'),
+        label: Text(context.l10n.commonTryAgain),
       ),
     );
   }
@@ -572,7 +584,7 @@ class _LoggedMealBanner extends StatelessWidget {
     return FreshStatusBanner(
       icon: Icons.check_rounded,
       title: title,
-      message: 'Logged. You can correct it from history.',
+      message: context.l10n.voiceLoggedMessage,
       color: FreshColors.limeDeep,
     );
   }
@@ -585,28 +597,29 @@ class _SummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return FreshCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const FreshSectionTitle(title: 'Today'),
+          FreshSectionTitle(title: l10n.voiceTodaySection),
           const SizedBox(height: FreshSpacing.md),
           Row(
             children: [
               Expanded(
                 child: _MetricBlock(
-                  label: 'Consumed',
+                  label: l10n.commonConsumed,
                   value: '${summary.consumed.calories}',
-                  unit: 'Kcal',
+                  unit: l10n.commonKcal,
                   color: FreshColors.lime,
                 ),
               ),
               const SizedBox(width: FreshSpacing.md),
               Expanded(
                 child: _MetricBlock(
-                  label: 'Remaining',
+                  label: l10n.commonRemaining,
                   value: '${summary.remaining.calories}',
-                  unit: 'Kcal',
+                  unit: l10n.commonKcal,
                   color: FreshColors.water,
                 ),
               ),
@@ -625,23 +638,24 @@ class _MealsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return FreshCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const FreshSectionTitle(title: 'Meals'),
+          FreshSectionTitle(title: l10n.voiceMealsSection),
           const SizedBox(height: FreshSpacing.sm),
           if (meals.isEmpty)
-            const FreshEmptyState(
+            FreshEmptyState(
               icon: Icons.restaurant_rounded,
-              title: 'No meals yet',
-              message: 'Logged meals will appear here.',
+              title: l10n.voiceNoMealsYet,
+              message: l10n.voiceNoMealsMessage,
             )
           else
             for (final meal in meals)
               _MealLine(
                 title: meal.title,
-                subtitle: '${meal.items.length} items',
+                subtitle: l10n.voiceItemCount(meal.items.length),
                 calories: meal.nutrition.calories,
               ),
         ],
@@ -657,16 +671,20 @@ class _NutritionItemsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return FreshCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const FreshSectionTitle(title: 'Nutrition matches'),
+          FreshSectionTitle(title: l10n.voiceNutritionMatchesSection),
           const SizedBox(height: FreshSpacing.sm),
           for (final item in items)
             _MealLine(
               title: item.name,
-              subtitle: '${_formatQuantity(item.quantity)} ${item.unit}',
+              subtitle: l10n.quantityUnitValue(
+                _formatQuantity(item.quantity),
+                item.unit,
+              ),
               calories: item.calories,
             ),
         ],
@@ -682,11 +700,12 @@ class _TemplatesCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return FreshCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const FreshSectionTitle(title: 'Usual meals'),
+          FreshSectionTitle(title: l10n.voiceUsualMealsSection),
           const SizedBox(height: FreshSpacing.sm),
           for (final template in templates)
             _MealLine(
@@ -707,26 +726,27 @@ class _RemainingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return FreshCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const FreshSectionTitle(title: 'Remaining'),
+          FreshSectionTitle(title: l10n.commonRemaining),
           const SizedBox(height: FreshSpacing.md),
           Row(
             children: [
               Expanded(
                 child: _MetricBlock(
-                  label: 'Calories',
+                  label: l10n.commonCalories,
                   value: '${remaining.calories}',
-                  unit: 'Kcal',
+                  unit: l10n.commonKcal,
                   color: FreshColors.lime,
                 ),
               ),
               const SizedBox(width: FreshSpacing.md),
               Expanded(
                 child: _MetricBlock(
-                  label: 'Protein',
+                  label: l10n.commonProtein,
                   value: _formatQuantity(remaining.proteinGrams),
                   unit: 'g',
                   color: FreshColors.orange,
@@ -776,6 +796,7 @@ class _MealLabelSheetState extends State<_MealLabelSheet> {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final l10n = context.l10n;
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 16, 20, 20 + bottomInset),
       child: Column(
@@ -795,12 +816,12 @@ class _MealLabelSheetState extends State<_MealLabelSheet> {
           ),
           const SizedBox(height: FreshSpacing.lg),
           Text(
-            'Which type of meal is this?',
+            l10n.mealLabelQuestion,
             style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: FreshSpacing.sm),
           Text(
-            'This helps your Home screen make today easier to scan.',
+            l10n.mealLabelHelper,
             style: textTheme.bodyMedium?.copyWith(color: FreshColors.inkMuted),
           ),
           const SizedBox(height: FreshSpacing.lg),
@@ -811,13 +832,13 @@ class _MealLabelSheetState extends State<_MealLabelSheet> {
               for (final label in _fixedLabels)
                 ChoiceChip(
                   key: ValueKey('meal_label_${label.type}_option'),
-                  label: Text(label.label),
+                  label: Text(localizedMealLabel(l10n, label)),
                   selected: false,
                   onSelected: (_) => _select(label),
                 ),
               ChoiceChip(
                 key: const ValueKey('meal_label_other_option'),
-                label: const Text('Other'),
+                label: Text(l10n.mealLabelOther),
                 selected: _showOther,
                 onSelected: (_) => setState(() => _showOther = true),
               ),
@@ -830,10 +851,10 @@ class _MealLabelSheetState extends State<_MealLabelSheet> {
               controller: _otherController,
               autofocus: true,
               maxLength: 40,
-              decoration: const InputDecoration(
-                labelText: 'Custom meal type',
-                hintText: 'Brunch',
-                prefixIcon: Icon(Icons.edit_rounded),
+              decoration: InputDecoration(
+                labelText: l10n.mealLabelCustomType,
+                hintText: l10n.mealLabelOtherPlaceholder,
+                prefixIcon: const Icon(Icons.edit_rounded),
               ),
               onChanged: (_) => setState(() {}),
             ),
@@ -844,7 +865,7 @@ class _MealLabelSheetState extends State<_MealLabelSheet> {
                   ? null
                   : () => _select(MealLabel.other(_otherController.text)),
               icon: const Icon(Icons.check_rounded),
-              label: const Text('Save label'),
+              label: Text(l10n.mealLabelSave),
             ),
           ],
           const SizedBox(height: FreshSpacing.md),
@@ -853,14 +874,14 @@ class _MealLabelSheetState extends State<_MealLabelSheet> {
               TextButton(
                 key: const ValueKey('meal_label_cancel_button'),
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
+                child: Text(l10n.commonCancel),
               ),
               const Spacer(),
               TextButton(
                 key: const ValueKey('meal_label_skip_button'),
                 onPressed: () =>
                     Navigator.of(context).pop(const _MealLabelSelection(null)),
-                child: const Text('Skip'),
+                child: Text(l10n.mealLabelSkip),
               ),
             ],
           ),
@@ -888,6 +909,7 @@ class _ProposalCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final l10n = context.l10n;
     return FreshCard(
       radius: FreshRadii.xl,
       child: Column(
@@ -907,7 +929,7 @@ class _ProposalCard extends StatelessWidget {
                   children: [
                     Text(proposal.title, style: textTheme.titleLarge),
                     Text(
-                      'Ready to log',
+                      l10n.mealProposalReadyToLog,
                       style: textTheme.bodyMedium
                           ?.copyWith(color: FreshColors.inkMuted),
                     ),
@@ -924,9 +946,9 @@ class _ProposalCard extends StatelessWidget {
           ),
           const SizedBox(height: FreshSpacing.lg),
           _MetricBlock(
-            label: 'Calories',
+            label: l10n.commonCalories,
             value: '${proposal.nutrition.calories}',
-            unit: 'Kcal',
+            unit: l10n.commonKcal,
             color: FreshColors.lime,
           ),
           const SizedBox(height: FreshSpacing.md),
@@ -934,7 +956,7 @@ class _ProposalCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
               child: Text(
-                '${item.name} ${_formatQuantity(item.quantity)} ${item.unit}',
+                '${item.name} ${l10n.quantityUnitValue(_formatQuantity(item.quantity), item.unit)}',
                 style: textTheme.bodyMedium,
               ),
             ),
@@ -946,14 +968,14 @@ class _ProposalCard extends StatelessWidget {
                   key: const ValueKey('confirm_proposal_button'),
                   onPressed: onConfirm,
                   icon: const Icon(Icons.check_rounded),
-                  label: const Text('Confirm'),
+                  label: Text(l10n.mealProposalConfirm),
                 ),
               ),
               const SizedBox(width: FreshSpacing.md),
               FreshIconButton(
                 key: const ValueKey('edit_proposal_button'),
                 icon: Icons.edit_rounded,
-                tooltip: 'Edit ingredients',
+                tooltip: l10n.commonEditIngredients,
                 onPressed: onEdit,
               ),
             ],
@@ -996,6 +1018,7 @@ class _ProposalEditorSheetState extends State<_ProposalEditorSheet> {
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     final textTheme = Theme.of(context).textTheme;
+    final l10n = context.l10n;
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.fromLTRB(18, 12, 18, bottomInset + 18),
@@ -1015,7 +1038,7 @@ class _ProposalEditorSheetState extends State<_ProposalEditorSheet> {
                 ),
               ),
               const SizedBox(height: FreshSpacing.lg),
-              Text('Edit ingredients', style: textTheme.titleLarge),
+              Text(l10n.commonEditIngredients, style: textTheme.titleLarge),
               const SizedBox(height: FreshSpacing.md),
               for (var index = 0; index < _items.length; index++) ...[
                 _EditableIngredientRow(
@@ -1040,13 +1063,13 @@ class _ProposalEditorSheetState extends State<_ProposalEditorSheet> {
                   });
                 },
                 icon: const Icon(Icons.add_rounded),
-                label: const Text('Add ingredient'),
+                label: Text(l10n.commonAddIngredient),
               ),
               const SizedBox(height: FreshSpacing.md),
               FilledButton(
                 key: const ValueKey('save_proposal_edits_button'),
                 onPressed: _save,
-                child: const Text('Save edits'),
+                child: Text(l10n.commonSaveEdits),
               ),
             ],
           ),
@@ -1085,6 +1108,7 @@ class _EditableIngredientRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return FreshCard(
       padding: const EdgeInsets.all(12),
       shadow: false,
@@ -1093,7 +1117,7 @@ class _EditableIngredientRow extends StatelessWidget {
           TextField(
             key: ValueKey('proposal_item_name_$index'),
             controller: item.nameController,
-            decoration: const InputDecoration(labelText: 'Ingredient'),
+            decoration: InputDecoration(labelText: l10n.commonIngredient),
           ),
           const SizedBox(height: FreshSpacing.sm),
           Row(
@@ -1104,7 +1128,7 @@ class _EditableIngredientRow extends StatelessWidget {
                   controller: item.quantityController,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Quantity'),
+                  decoration: InputDecoration(labelText: l10n.commonAmount),
                 ),
               ),
               const SizedBox(width: FreshSpacing.sm),
@@ -1113,7 +1137,7 @@ class _EditableIngredientRow extends StatelessWidget {
                 child: TextField(
                   key: ValueKey('proposal_item_unit_$index'),
                   controller: item.unitController,
-                  decoration: const InputDecoration(labelText: 'Unit'),
+                  decoration: InputDecoration(labelText: l10n.commonUnit),
                 ),
               ),
               const SizedBox(width: FreshSpacing.sm),
@@ -1121,7 +1145,7 @@ class _EditableIngredientRow extends StatelessWidget {
                 key: ValueKey('delete_proposal_item_$index'),
                 onPressed: onDelete,
                 icon: const Icon(Icons.delete_outline_rounded),
-                tooltip: 'Delete ingredient',
+                tooltip: l10n.commonDeleteIngredient,
               ),
             ],
           ),
@@ -1277,7 +1301,7 @@ class _MealLine extends StatelessWidget {
             ),
           ),
           Text(
-            '$calories Kcal',
+            context.l10n.caloriesValue(calories),
             style: textTheme.labelLarge?.copyWith(
               fontFeatures: const [FontFeature.tabularFigures()],
             ),
@@ -1295,18 +1319,28 @@ String _formatQuantity(double value) {
 
 double _roundMacro(double value) => (value * 10).roundToDouble() / 10;
 
-String _stateLabel(VoiceLogState state) {
+String _stateLabel(VoiceLogState state, AppLocalizations l10n) {
   return switch (state) {
-    VoiceLogState.recording => 'Listening',
-    VoiceLogState.stopping => 'Saving audio',
-    VoiceLogState.transcribing => 'Whisper transcription',
-    VoiceLogState.transcriptReady => 'Transcript ready',
-    VoiceLogState.agentRunning => 'Building proposal',
-    VoiceLogState.proposalReady => 'Review meal',
-    VoiceLogState.autoCommitted => 'Logged',
-    VoiceLogState.resultReady => 'Result ready',
-    VoiceLogState.clarificationRequired => 'Clarification',
-    VoiceLogState.error => 'Needs attention',
-    _ => 'Voice or text input',
+    VoiceLogState.recording => l10n.voiceStateListening,
+    VoiceLogState.stopping => l10n.voiceStateSavingAudio,
+    VoiceLogState.transcribing => l10n.voiceStateWhisperTranscription,
+    VoiceLogState.transcriptReady => l10n.voiceStateTranscriptReady,
+    VoiceLogState.agentRunning => l10n.voiceStateBuildingProposal,
+    VoiceLogState.proposalReady => l10n.voiceStateReviewMeal,
+    VoiceLogState.autoCommitted => l10n.voiceStateLogged,
+    VoiceLogState.resultReady => l10n.voiceStateResultReady,
+    VoiceLogState.clarificationRequired => l10n.voiceStateClarification,
+    VoiceLogState.error => l10n.voiceStateNeedsAttention,
+    _ => l10n.voiceStateInput,
+  };
+}
+
+String _localizedVoiceMessage(BuildContext context, String message) {
+  final l10n = context.l10n;
+  return switch (message) {
+    'Meal logged.' => l10n.voiceMessageMealLogged,
+    'Proposal updated.' => l10n.voiceMessageProposalUpdated,
+    'Meal proposal created.' => l10n.voiceMessageMealProposalCreated,
+    _ => message,
   };
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../../data/services/app_preferences_repository.dart';
+import '../../../../l10n/app_localizations_context.dart';
 import '../../../core/design_system.dart';
 import '../view_models/auth_view_model.dart';
 
@@ -54,6 +55,7 @@ class _AuthScreenState extends State<AuthScreen> {
   Widget build(BuildContext context) {
     final viewModel = context.watch<AuthViewModel>();
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final l10n = context.l10n;
     return Scaffold(
       backgroundColor: FreshColors.screen,
       body: SafeArea(
@@ -81,9 +83,9 @@ class _AuthScreenState extends State<AuthScreen> {
                           TextField(
                             key: const ValueKey('display_name_field'),
                             controller: _nameController,
-                            decoration: const InputDecoration(
-                              labelText: 'Name',
-                              prefixIcon: Icon(Icons.person_outline),
+                            decoration: InputDecoration(
+                              labelText: l10n.authNameLabel,
+                              prefixIcon: const Icon(Icons.person_outline),
                             ),
                           ),
                           const SizedBox(height: FreshSpacing.md),
@@ -92,9 +94,10 @@ class _AuthScreenState extends State<AuthScreen> {
                           key: const ValueKey('email_field'),
                           controller: _emailController,
                           keyboardType: TextInputType.emailAddress,
-                          decoration: const InputDecoration(
-                            labelText: 'Email',
-                            prefixIcon: Icon(Icons.alternate_email_rounded),
+                          decoration: InputDecoration(
+                            labelText: l10n.authEmailLabel,
+                            prefixIcon:
+                                const Icon(Icons.alternate_email_rounded),
                           ),
                         ),
                         const SizedBox(height: FreshSpacing.md),
@@ -102,9 +105,9 @@ class _AuthScreenState extends State<AuthScreen> {
                           key: const ValueKey('password_field'),
                           controller: _passwordController,
                           obscureText: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Password',
-                            prefixIcon: Icon(Icons.lock_outline_rounded),
+                          decoration: InputDecoration(
+                            labelText: l10n.authPasswordLabel,
+                            prefixIcon: const Icon(Icons.lock_outline_rounded),
                           ),
                         ),
                         const SizedBox(height: FreshSpacing.lg),
@@ -120,7 +123,10 @@ class _AuthScreenState extends State<AuthScreen> {
                               : const Icon(
                                   Icons.keyboard_double_arrow_right_rounded),
                           label: Text(
-                              _registerMode ? 'Create account' : 'Get Started'),
+                            _registerMode
+                                ? l10n.authCreateAccountButton
+                                : l10n.authGetStartedButton,
+                          ),
                         ),
                         TextButton(
                           key: const ValueKey('auth_toggle_mode_button'),
@@ -128,15 +134,15 @@ class _AuthScreenState extends State<AuthScreen> {
                               setState(() => _registerMode = !_registerMode),
                           child: Text(
                             _registerMode
-                                ? 'Use existing account'
-                                : 'Create an account',
+                                ? l10n.authUseExistingAccountButton
+                                : l10n.authCreateAccountLink,
                           ),
                         ),
                         if (viewModel.error != null) ...[
                           const SizedBox(height: FreshSpacing.sm),
                           FreshStatusBanner(
                             icon: Icons.error_outline_rounded,
-                            title: 'Sign in failed',
+                            title: l10n.authSignInFailedTitle,
                             message: viewModel.error!,
                             color: FreshColors.coral,
                           ),
@@ -188,7 +194,7 @@ class _AuthTopBar extends StatelessWidget {
         ),
         const SizedBox(width: FreshSpacing.sm),
         Text(
-          'Better Calories',
+          context.l10n.appTitle,
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
@@ -211,8 +217,8 @@ class _HeroHeadline extends StatelessWidget {
     return RichText(
       text: TextSpan(
         style: style,
-        children: const [
-          TextSpan(text: 'Track your\ncalories better.'),
+        children: [
+          TextSpan(text: context.l10n.authHeroHeadline),
         ],
       ),
     );

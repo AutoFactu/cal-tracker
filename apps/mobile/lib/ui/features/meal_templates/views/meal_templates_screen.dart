@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../../domain/models/nutrition_models.dart';
+import '../../../../l10n/app_localizations_context.dart';
 import '../../../core/content_frame.dart';
 import '../../../core/design_system.dart';
 import '../view_models/meal_templates_view_model.dart';
@@ -25,20 +26,21 @@ class _MealTemplatesScreenState extends State<MealTemplatesScreen> {
   @override
   Widget build(BuildContext context) {
     final viewModel = context.watch<MealTemplatesViewModel>();
+    final l10n = context.l10n;
     final limeCardTextColor = FreshPalette.dark.limeWash;
     return ContentFrame(
-      title: 'Usual meals',
-      subtitle: 'Safe familiar templates',
+      title: l10n.templatesTitle,
+      subtitle: l10n.templatesSubtitle,
       actions: [
         FreshIconButton(
           onPressed: viewModel.load,
           icon: Icons.refresh_rounded,
-          tooltip: 'Refresh',
+          tooltip: l10n.commonRefresh,
         ),
         FreshIconButton(
           onPressed: () => _showCreateTemplateDialog(context, viewModel),
           icon: Icons.add_rounded,
-          tooltip: 'Add usual meal',
+          tooltip: l10n.templatesAddTooltip,
           backgroundColor: FreshColors.lime,
         ),
       ],
@@ -58,7 +60,7 @@ class _MealTemplatesScreenState extends State<MealTemplatesScreen> {
                 const SizedBox(width: FreshSpacing.md),
                 Expanded(
                   child: Text(
-                    'Templates keep recurring meals fast while preserving confirmation controls.',
+                    l10n.templatesExplainer,
                     style: Theme.of(context)
                         .textTheme
                         .titleMedium
@@ -76,17 +78,17 @@ class _MealTemplatesScreenState extends State<MealTemplatesScreen> {
           if (viewModel.error != null) ...[
             FreshStatusBanner(
               icon: Icons.error_outline_rounded,
-              title: 'Could not load usual meals',
+              title: l10n.templatesCouldNotLoad,
               message: viewModel.error!,
               color: FreshColors.coral,
             ),
             const SizedBox(height: FreshSpacing.md),
           ],
           if (viewModel.templates.isEmpty)
-            const FreshEmptyState(
+            FreshEmptyState(
               icon: Icons.restaurant_menu_rounded,
-              title: 'No usual meals yet',
-              message: 'Create one after you confirm a meal you repeat often.',
+              title: l10n.templatesNoUsualMealsYet,
+              message: l10n.templatesNoUsualMealsMessage,
             )
           else
             for (final template in viewModel.templates)
@@ -127,16 +129,16 @@ class _MealTemplatesScreenState extends State<MealTemplatesScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete usual meal?'),
+        title: Text(context.l10n.templatesDeleteUsualMealTitle),
         content: Text(template.title),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.commonCancel),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
+            child: Text(context.l10n.commonDelete),
           ),
         ],
       ),
@@ -167,8 +169,9 @@ class _CreateTemplateDialogState extends State<_CreateTemplateDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return AlertDialog(
-      title: const Text('New usual meal'),
+      title: Text(l10n.templatesNewUsualMealTitle),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -176,25 +179,24 @@ class _CreateTemplateDialogState extends State<_CreateTemplateDialog> {
             key: const ValueKey('template_title_field'),
             controller: _titleController,
             autofocus: true,
-            decoration: const InputDecoration(labelText: 'Title'),
+            decoration: InputDecoration(labelText: l10n.templatesTitleLabel),
           ),
           const SizedBox(height: FreshSpacing.md),
           TextField(
             key: const ValueKey('template_aliases_field'),
             controller: _aliasesController,
-            decoration:
-                const InputDecoration(labelText: 'Aliases, comma-separated'),
+            decoration: InputDecoration(labelText: l10n.templatesAliasesLabel),
           ),
         ],
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text(l10n.commonCancel),
         ),
         FilledButton(
           onPressed: _submit,
-          child: const Text('Create'),
+          child: Text(l10n.commonCreate),
         ),
       ],
     );
@@ -234,6 +236,7 @@ class _TemplateCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final l10n = context.l10n;
     return FreshCard(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -253,7 +256,7 @@ class _TemplateCard extends StatelessWidget {
                     Text(template.title, style: textTheme.titleMedium),
                     Text(
                       template.aliases.isEmpty
-                          ? 'No aliases yet'
+                          ? l10n.templatesNoAliasesYet
                           : template.aliases.join(', '),
                       style: textTheme.bodyMedium
                           ?.copyWith(color: FreshColors.inkMuted),
@@ -275,16 +278,16 @@ class _TemplateCard extends StatelessWidget {
             children: [
               Expanded(
                 child: _NutritionPill(
-                  label: 'Calories',
+                  label: l10n.commonCalories,
                   value: '${template.nutrition.calories}',
-                  unit: 'Kcal',
+                  unit: l10n.commonKcal,
                   color: FreshColors.lime,
                 ),
               ),
               const SizedBox(width: FreshSpacing.sm),
               Expanded(
                 child: _NutritionPill(
-                  label: 'Protein',
+                  label: l10n.commonProtein,
                   value: _formatQuantity(template.nutrition.proteinGrams),
                   unit: 'g',
                   color: FreshColors.mint,
@@ -299,7 +302,7 @@ class _TemplateCard extends StatelessWidget {
               onPressed: onDelete,
               icon: const Icon(Icons.delete_outline_rounded,
                   color: FreshColors.coral),
-              label: const Text('Delete'),
+              label: Text(l10n.commonDelete),
             ),
           ),
         ],

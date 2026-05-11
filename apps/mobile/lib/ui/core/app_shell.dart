@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../l10n/app_localizations_context.dart';
 import 'design_system.dart';
 
 class AppShell extends StatelessWidget {
@@ -11,6 +12,7 @@ class AppShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = context.freshPalette;
+    final items = _items(context);
     return LayoutBuilder(
       builder: (context, constraints) {
         final selectedIndex = _selectedIndex(context);
@@ -21,6 +23,7 @@ class AppShell extends StatelessWidget {
             body: Row(
               children: [
                 _FreshSideNav(
+                  items: items,
                   selectedIndex: selectedIndex,
                   onSelected: (index) => _go(context, index),
                 ),
@@ -33,6 +36,7 @@ class AppShell extends StatelessWidget {
           backgroundColor: palette.screen,
           body: child,
           bottomNavigationBar: _FreshBottomNav(
+            items: items,
             selectedIndex: selectedIndex,
             onSelected: (index) => _go(context, index),
           ),
@@ -66,10 +70,12 @@ class AppShell extends StatelessWidget {
 
 class _FreshBottomNav extends StatelessWidget {
   const _FreshBottomNav({
+    required this.items,
     required this.selectedIndex,
     required this.onSelected,
   });
 
+  final List<_NavItem> items;
   final int selectedIndex;
   final ValueChanged<int> onSelected;
 
@@ -85,12 +91,12 @@ class _FreshBottomNav extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             _NavButton(
-              item: _items[0],
+              item: items[0],
               selected: selectedIndex == 0,
               onTap: () => onSelected(0),
             ),
             _NavButton(
-              item: _items[1],
+              item: items[1],
               selected: selectedIndex == 1,
               onTap: () => onSelected(1),
             ),
@@ -99,12 +105,12 @@ class _FreshBottomNav extends StatelessWidget {
               onTap: () => onSelected(2),
             ),
             _NavButton(
-              item: _items[3],
+              item: items[3],
               selected: selectedIndex == 3,
               onTap: () => onSelected(3),
             ),
             _NavButton(
-              item: _items[4],
+              item: items[4],
               selected: selectedIndex == 4,
               onTap: () => onSelected(4),
             ),
@@ -117,10 +123,12 @@ class _FreshBottomNav extends StatelessWidget {
 
 class _FreshSideNav extends StatelessWidget {
   const _FreshSideNav({
+    required this.items,
     required this.selectedIndex,
     required this.onSelected,
   });
 
+  final List<_NavItem> items;
   final int selectedIndex;
   final ValueChanged<int> onSelected;
 
@@ -138,11 +146,11 @@ class _FreshSideNav extends StatelessWidget {
             children: [
               const _BrandMark(compact: true),
               const SizedBox(height: FreshSpacing.xl),
-              for (var index = 0; index < _items.length; index++)
+              for (var index = 0; index < items.length; index++)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   child: _NavButton(
-                    item: _items[index],
+                    item: items[index],
                     selected: selectedIndex == index,
                     vertical: true,
                     onTap: () => onSelected(index),
@@ -190,6 +198,7 @@ class _NavButton extends StatelessWidget {
       ),
     );
     return InkWell(
+      key: ValueKey('nav_${item.keyName}_button'),
       borderRadius: BorderRadius.circular(FreshRadii.lg),
       onTap: onTap,
       child: SizedBox(
@@ -222,6 +231,7 @@ class _CenterNavButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = context.freshPalette;
     return InkWell(
+      key: const ValueKey('nav_log_button'),
       customBorder: const CircleBorder(),
       onTap: onTap,
       child: Container(
@@ -265,16 +275,20 @@ class _BrandMark extends StatelessWidget {
 }
 
 class _NavItem {
-  const _NavItem(this.icon, this.label);
+  const _NavItem(this.icon, this.label, this.keyName);
 
   final IconData icon;
   final String label;
+  final String keyName;
 }
 
-const _items = [
-  _NavItem(Icons.home_outlined, 'Home'),
-  _NavItem(Icons.bar_chart_rounded, 'Stats'),
-  _NavItem(Icons.mic_none_rounded, 'Log'),
-  _NavItem(Icons.star_border_rounded, 'Usual'),
-  _NavItem(Icons.grid_view_rounded, 'Menu'),
-];
+List<_NavItem> _items(BuildContext context) {
+  final l10n = context.l10n;
+  return [
+    _NavItem(Icons.home_outlined, l10n.navHome, 'home'),
+    _NavItem(Icons.bar_chart_rounded, l10n.navStats, 'stats'),
+    _NavItem(Icons.mic_none_rounded, l10n.navLog, 'log'),
+    _NavItem(Icons.star_border_rounded, l10n.navUsual, 'usual'),
+    _NavItem(Icons.grid_view_rounded, l10n.navMenu, 'menu'),
+  ];
+}

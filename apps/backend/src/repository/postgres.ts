@@ -1,5 +1,5 @@
 import postgres, { type Sql } from "postgres";
-import { defaultUserScopes, type DailyGoals, type Meal, type MealItem, type MealLabel, type MealProposal, type MealTemplate, type NutritionSnapshot, type PermissionScope } from "@cal-tracker/contracts";
+import { defaultUserScopes, type CalorieTargetSource, type DailyGoals, type Meal, type MealItem, type MealLabel, type MealProposal, type MealTemplate, type NutritionSnapshot, type PermissionScope } from "@cal-tracker/contracts";
 import { newId } from "../utils/ids.js";
 import { normalizeText } from "../utils/normalize.js";
 import { subtractNutrition, sumNutrition } from "../utils/nutrition.js";
@@ -29,8 +29,11 @@ export class PostgresRepository implements AppRepository {
     `;
     await this.sql`INSERT INTO user_credentials (user_id, password_hash) VALUES (${row.id}, ${input.passwordHash})`;
     await this.sql`
-      INSERT INTO nutrition_targets (user_id, calories, protein_grams, carbs_grams, fat_grams, hydration_goal_glasses)
-      VALUES (${row.id}, 2200, 160, 240, 70, 12)
+      INSERT INTO nutrition_targets (
+        user_id, calories, protein_grams, carbs_grams, fat_grams, hydration_goal_glasses,
+        calorie_target_configured, calorie_target_source
+      )
+      VALUES (${row.id}, 2200, 160, 240, 70, 12, false, 'default')
     `;
     const user = this.mapUser(row, input.passwordHash, input.scopes);
     return user;
@@ -254,10 +257,12 @@ export class PostgresRepository implements AppRepository {
     const current = await this.getCurrentGoals(userId);
     const [inserted] = await this.sql`
       INSERT INTO daily_goal_snapshots (
-        user_id, target_date, calories, protein_grams, carbs_grams, fat_grams, hydration_goal_glasses
+        user_id, target_date, calories, protein_grams, carbs_grams, fat_grams, hydration_goal_glasses,
+        calorie_target_configured, calorie_target_source, calorie_target_configured_at
       )
       VALUES (
-        ${userId}, ${date}, ${current.target.calories}, ${current.target.proteinGrams}, ${current.target.carbsGrams}, ${current.target.fatGrams}, ${current.hydrationGoalGlasses}
+        ${userId}, ${date}, ${current.target.calories}, ${current.target.proteinGrams}, ${current.target.carbsGrams}, ${current.target.fatGrams}, ${current.hydrationGoalGlasses},
+        ${current.calorieTargetConfigured}, ${current.calorieTargetSource}, ${current.calorieTargetConfiguredAt ?? null}
       )
       ON CONFLICT (user_id, target_date) DO NOTHING
       RETURNING *
@@ -271,16 +276,18 @@ export class PostgresRepository implements AppRepository {
     return mapDailyGoals(row);
   }
 
-  async updateDailyGoals(userId: string, input: { date: string; calories?: number; hydrationGoalGlasses?: number }): Promise<DailyGoals> {
+  async updateDailyGoals(userId: string, input: { date: string; calories?: number; hydrationGoalGlasses?: number; calorieTargetSource?: CalorieTargetSource }): Promise<DailyGoals> {
     return this.sql.begin(async (tx) => {
       const current = await this.getCurrentGoals(userId, tx);
       for (const snapshotDate of previousDatesInWeek(input.date)) {
         await tx`
           INSERT INTO daily_goal_snapshots (
-            user_id, target_date, calories, protein_grams, carbs_grams, fat_grams, hydration_goal_glasses
+            user_id, target_date, calories, protein_grams, carbs_grams, fat_grams, hydration_goal_glasses,
+            calorie_target_configured, calorie_target_source, calorie_target_configured_at
           )
           VALUES (
-            ${userId}, ${snapshotDate}, ${current.target.calories}, ${current.target.proteinGrams}, ${current.target.carbsGrams}, ${current.target.fatGrams}, ${current.hydrationGoalGlasses}
+            ${userId}, ${snapshotDate}, ${current.target.calories}, ${current.target.proteinGrams}, ${current.target.carbsGrams}, ${current.target.fatGrams}, ${current.hydrationGoalGlasses},
+            ${current.calorieTargetConfigured}, ${current.calorieTargetSource}, ${current.calorieTargetConfiguredAt ?? null}
           )
           ON CONFLICT (user_id, target_date) DO NOTHING
         `;
@@ -291,28 +298,48 @@ export class PostgresRepository implements AppRepository {
         calories: input.calories ?? current.target.calories
       };
       const nextHydration = input.hydrationGoalGlasses ?? current.hydrationGoalGlasses;
+      const calorieTargetWasUpdated = input.calories !== undefined;
+      const nextConfigured = calorieTargetWasUpdated ? true : current.calorieTargetConfigured;
+      const nextSource = calorieTargetWasUpdated ? input.calorieTargetSource ?? "manual" : current.calorieTargetSource;
+      const nextConfiguredAt = calorieTargetWasUpdated ? new Date().toISOString() : current.calorieTargetConfiguredAt;
       await tx`
-        INSERT INTO nutrition_targets (user_id, calories, protein_grams, carbs_grams, fat_grams, hydration_goal_glasses, updated_at)
-        VALUES (${userId}, ${nextTarget.calories}, ${nextTarget.proteinGrams}, ${nextTarget.carbsGrams}, ${nextTarget.fatGrams}, ${nextHydration}, now())
+        INSERT INTO nutrition_targets (
+          user_id, calories, protein_grams, carbs_grams, fat_grams, hydration_goal_glasses,
+          calorie_target_configured, calorie_target_source, calorie_target_configured_at, updated_at
+        )
+        VALUES (
+          ${userId}, ${nextTarget.calories}, ${nextTarget.proteinGrams}, ${nextTarget.carbsGrams}, ${nextTarget.fatGrams}, ${nextHydration},
+          ${nextConfigured}, ${nextSource}, ${nextConfiguredAt ?? null}, now()
+        )
         ON CONFLICT (user_id) DO UPDATE
         SET calories = EXCLUDED.calories,
             protein_grams = EXCLUDED.protein_grams,
             carbs_grams = EXCLUDED.carbs_grams,
             fat_grams = EXCLUDED.fat_grams,
             hydration_goal_glasses = EXCLUDED.hydration_goal_glasses,
+            calorie_target_configured = EXCLUDED.calorie_target_configured,
+            calorie_target_source = EXCLUDED.calorie_target_source,
+            calorie_target_configured_at = EXCLUDED.calorie_target_configured_at,
             updated_at = now()
       `;
       const [row] = await tx`
         INSERT INTO daily_goal_snapshots (
-          user_id, target_date, calories, protein_grams, carbs_grams, fat_grams, hydration_goal_glasses, updated_at
+          user_id, target_date, calories, protein_grams, carbs_grams, fat_grams, hydration_goal_glasses,
+          calorie_target_configured, calorie_target_source, calorie_target_configured_at, updated_at
         )
-        VALUES (${userId}, ${input.date}, ${nextTarget.calories}, ${nextTarget.proteinGrams}, ${nextTarget.carbsGrams}, ${nextTarget.fatGrams}, ${nextHydration}, now())
+        VALUES (
+          ${userId}, ${input.date}, ${nextTarget.calories}, ${nextTarget.proteinGrams}, ${nextTarget.carbsGrams}, ${nextTarget.fatGrams}, ${nextHydration},
+          ${nextConfigured}, ${nextSource}, ${nextConfiguredAt ?? null}, now()
+        )
         ON CONFLICT (user_id, target_date) DO UPDATE
         SET calories = EXCLUDED.calories,
             protein_grams = EXCLUDED.protein_grams,
             carbs_grams = EXCLUDED.carbs_grams,
             fat_grams = EXCLUDED.fat_grams,
             hydration_goal_glasses = EXCLUDED.hydration_goal_glasses,
+            calorie_target_configured = EXCLUDED.calorie_target_configured,
+            calorie_target_source = EXCLUDED.calorie_target_source,
+            calorie_target_configured_at = EXCLUDED.calorie_target_configured_at,
             updated_at = now()
         RETURNING *
       `;
@@ -416,6 +443,8 @@ export class PostgresRepository implements AppRepository {
       target: goals.target,
       remaining: subtractNutrition(goals.target, consumed),
       hydrationGoalGlasses: goals.hydrationGoalGlasses,
+      calorieTargetConfigured: goals.calorieTargetConfigured,
+      calorieTargetSource: goals.calorieTargetSource,
       meals
     };
   }
@@ -566,17 +595,23 @@ export class PostgresRepository implements AppRepository {
     return row ? this.mapTemplate(row) : null;
   }
 
-  private async getCurrentGoals(userId: string, sqlClient: Sql | any = this.sql): Promise<Omit<DailyGoals, "date">> {
+  private async getCurrentGoals(userId: string, sqlClient: Sql | any = this.sql): Promise<Omit<DailyGoals, "date"> & { calorieTargetConfiguredAt?: string }> {
     const [row] = await sqlClient`SELECT * FROM nutrition_targets WHERE user_id = ${userId}`;
     if (!row) {
       return {
         target: { calories: 2200, proteinGrams: 160, carbsGrams: 240, fatGrams: 70 },
-        hydrationGoalGlasses: 12
+        hydrationGoalGlasses: 12,
+        calorieTargetConfigured: false,
+        calorieTargetSource: "default",
+        calorieTargetConfiguredAt: undefined
       };
     }
     return {
       target: mapNutrition(row),
-      hydrationGoalGlasses: Number(row.hydration_goal_glasses ?? 12)
+      hydrationGoalGlasses: Number(row.hydration_goal_glasses ?? 12),
+      calorieTargetConfigured: Boolean(row.calorie_target_configured),
+      calorieTargetSource: parseCalorieTargetSource(row.calorie_target_source),
+      calorieTargetConfiguredAt: row.calorie_target_configured_at ? toIso(row.calorie_target_configured_at) : undefined
     };
   }
 
@@ -716,8 +751,14 @@ function mapDailyGoals(row: Record<string, unknown>): DailyGoals {
   return {
     date: toDateOnly(row.target_date),
     target: mapNutrition(row),
-    hydrationGoalGlasses: Number(row.hydration_goal_glasses ?? 12)
+    hydrationGoalGlasses: Number(row.hydration_goal_glasses ?? 12),
+    calorieTargetConfigured: Boolean(row.calorie_target_configured),
+    calorieTargetSource: parseCalorieTargetSource(row.calorie_target_source)
   };
+}
+
+function parseCalorieTargetSource(value: unknown): CalorieTargetSource {
+  return value === "manual" || value === "calculator" || value === "default" ? value : "default";
 }
 
 function mapMealLabel(row: Record<string, unknown>): MealLabel | null {

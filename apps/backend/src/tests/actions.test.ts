@@ -174,6 +174,62 @@ describe("action loop", () => {
     expect(todayAfter.output.summary.hydrationGoalGlasses).toBe(14);
   });
 
+  it("starts new users without a configured calorie target and marks calories configured when saved", async () => {
+    const { request } = buildTestApp();
+    const auth = await registerAndAuth(request);
+    const today = dateOffset(0);
+
+    const initialSummary = await request(
+      `http://localhost/v1/summary/daily?date=${today}`,
+      { headers: auth.authHeader },
+    ).then(
+      (response) =>
+        response.json() as Promise<{
+          output: {
+            summary: {
+              calorieTargetConfigured: boolean;
+              calorieTargetSource: string;
+              target: { calories: number };
+            };
+          };
+        }>,
+    );
+
+    expect(initialSummary.output.summary.target.calories).toBe(2200);
+    expect(initialSummary.output.summary.calorieTargetConfigured).toBe(false);
+    expect(initialSummary.output.summary.calorieTargetSource).toBe("default");
+
+    const update = await request("http://localhost/v1/goals", {
+      method: "PUT",
+      headers: auth.authHeader,
+      body: JSON.stringify({
+        date: today,
+        calories: 1900,
+        calorieTargetSource: "calculator",
+      }),
+    });
+    expect(update.status).toBe(200);
+
+    const updatedSummary = await request(
+      `http://localhost/v1/summary/daily?date=${today}`,
+      { headers: auth.authHeader },
+    ).then(
+      (response) =>
+        response.json() as Promise<{
+          output: {
+            summary: {
+              calorieTargetConfigured: boolean;
+              calorieTargetSource: string;
+              target: { calories: number };
+            };
+          };
+        }>,
+    );
+    expect(updatedSummary.output.summary.target.calories).toBe(1900);
+    expect(updatedSummary.output.summary.calorieTargetConfigured).toBe(true);
+    expect(updatedSummary.output.summary.calorieTargetSource).toBe("calculator");
+  });
+
   it("commits optional meal labels and exposes them in summaries", async () => {
     const { request } = buildTestApp();
     const auth = await registerAndAuth(request);

@@ -30,8 +30,10 @@ void main() {
         minimumBytes: 1,
       );
       when(() => mockRecorder.dispose()).thenAnswer((_) async {});
-      when(() => mockRecorder.isEncoderSupported(AudioEncoder.aacLc)).thenAnswer((_) async => true);
-      when(() => mockRecorder.isEncoderSupported(AudioEncoder.wav)).thenAnswer((_) async => true);
+      when(() => mockRecorder.isEncoderSupported(AudioEncoder.aacLc))
+          .thenAnswer((_) async => true);
+      when(() => mockRecorder.isEncoderSupported(AudioEncoder.wav))
+          .thenAnswer((_) async => true);
 
       // Mock path_provider platform channel
       tempDir = Directory.systemTemp.createTempSync('audio_test').path;
@@ -48,7 +50,8 @@ void main() {
     tearDown(() async {
       await service.dispose();
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(const MethodChannel('plugins.flutter.io/path_provider'), null);
+          .setMockMethodCallHandler(
+              const MethodChannel('plugins.flutter.io/path_provider'), null);
     });
 
     test('hasPermission delegates to recorder', () async {
@@ -57,9 +60,11 @@ void main() {
       expect(result, isTrue);
     });
 
-    test('start recording emits recording state and sets currentPath', () async {
+    test('start recording emits recording state and sets currentPath',
+        () async {
       when(() => mockRecorder.hasPermission()).thenAnswer((_) async => true);
-      when(() => mockRecorder.start(any(), path: any(named: 'path'))).thenAnswer((_) async {});
+      when(() => mockRecorder.start(any(), path: any(named: 'path')))
+          .thenAnswer((_) async {});
 
       final futureState = service.stateStream.first;
       await service.start();
@@ -71,17 +76,20 @@ void main() {
 
     test('start without permission throws RecorderException', () async {
       when(() => mockRecorder.hasPermission()).thenAnswer((_) async => false);
-      when(() => mockRecorder.start(any(), path: any(named: 'path'))).thenAnswer((_) async {});
+      when(() => mockRecorder.start(any(), path: any(named: 'path')))
+          .thenAnswer((_) async {});
 
       expect(
         () => service.start(),
-        throwsA(isA<RecorderException>().having((e) => e.code, 'code', 'permission_denied')),
+        throwsA(isA<RecorderException>()
+            .having((e) => e.code, 'code', 'permission_denied')),
       );
     });
 
     test('stop returns path and clears currentPath', () async {
       when(() => mockRecorder.hasPermission()).thenAnswer((_) async => true);
-      when(() => mockRecorder.start(any(), path: any(named: 'path'))).thenAnswer((_) async {});
+      when(() => mockRecorder.start(any(), path: any(named: 'path')))
+          .thenAnswer((_) async {});
 
       await service.start();
       expect(service.currentPath, isNotNull);
@@ -97,7 +105,8 @@ void main() {
 
     test('cancel deletes file and emits idle state', () async {
       when(() => mockRecorder.hasPermission()).thenAnswer((_) async => true);
-      when(() => mockRecorder.start(any(), path: any(named: 'path'))).thenAnswer((_) async {});
+      when(() => mockRecorder.start(any(), path: any(named: 'path')))
+          .thenAnswer((_) async {});
       when(() => mockRecorder.stop()).thenAnswer((_) async => null);
 
       await service.start();

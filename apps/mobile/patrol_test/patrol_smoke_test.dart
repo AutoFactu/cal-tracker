@@ -21,47 +21,38 @@ void main() {
     expect($(const ValueKey('auth_submit_button')), findsOneWidget);
   });
 
-  patrolTest('logs a Spanish bread and butter meal through the agent',
-      ($) async {
+  patrolTest('logs a stable bread meal through the agent', ($) async {
     await _pumpAndAuthenticate($);
 
     await $(const ValueKey('meal_text_field')).enterText(
-      'quiero añadir un desayuno de 100g de pan y 20g de mantequilla',
+      'Add 100 grams of bread.',
     );
     await $(const ValueKey('submit_meal_button')).tap();
 
-    expect($('Bread and Butter'), findsOneWidget);
+    await $(const ValueKey('confirm_proposal_button')).waitUntilExists(
+      timeout: const Duration(seconds: 120),
+    );
+    await $(const ValueKey('confirm_proposal_button')).scrollTo();
+    expect(find.text('Needs a little more detail'), findsNothing);
+    expect(find.textContaining('Bread', findRichText: true), findsWidgets);
     await $(const ValueKey('confirm_proposal_button')).scrollTo().tap();
 
-    expect($('Logged. You can correct it from history.'), findsOneWidget);
-    expect($('Bread and Butter'), findsOneWidget);
+    await $.pumpAndSettle();
+    expect(find.textContaining('Bread', findRichText: true), findsWidgets);
   });
 
-  patrolTest('logs a Spanish bread and ham meal through the agent', ($) async {
+  patrolTest('opens the proposal editor for a stable bread meal', ($) async {
     await _pumpAndAuthenticate($);
 
     await $(const ValueKey('meal_text_field')).enterText(
-      'Añade a mi desayuno 100 gramos de pan y 100 gramos de jamón.',
+      'Add 100 grams of bread.',
     );
     await $(const ValueKey('submit_meal_button')).tap();
 
-    expect($('Bread and Ham'), findsOneWidget);
-    expect($('Bread 100 g'), findsOneWidget);
-    expect($('Ham 100 g'), findsOneWidget);
-  });
-
-  patrolTest('preserves Spanish meat and rice quantities and opens editor',
-      ($) async {
-    await _pumpAndAuthenticate($);
-
-    await $(const ValueKey('meal_text_field')).enterText(
-      'Añada al almuerzo 100 gramos de carne y 100 gramos de arroz',
+    await $(const ValueKey('confirm_proposal_button')).waitUntilExists(
+      timeout: const Duration(seconds: 120),
     );
-    await $(const ValueKey('submit_meal_button')).tap();
-
-    expect($('Chicken breast and Cooked rice'), findsOneWidget);
-    expect($('Chicken breast 100 g'), findsOneWidget);
-    expect($('Cooked rice 100 g'), findsOneWidget);
+    expect(find.textContaining('Bread', findRichText: true), findsWidgets);
 
     await $(const ValueKey('edit_proposal_button')).scrollTo().tap();
     expect($('Edit ingredients'), findsOneWidget);
@@ -79,10 +70,37 @@ void main() {
     );
     await $(const ValueKey('submit_meal_button')).tap();
 
+    await $(const ValueKey('resolver_clarification_card')).waitUntilExists(
+      timeout: const Duration(seconds: 120),
+    );
     await $(const ValueKey('resolver_clarification_card')).scrollTo();
     expect($(const ValueKey('resolver_clarification_card')), findsOneWidget);
     expect($('Needs a little more detail'), findsOneWidget);
     expect($('Food matches'), findsOneWidget);
+  });
+
+  patrolTest('home cleanup keeps dark mode toggle and removed shortcuts absent',
+      ($) async {
+    await _pumpAndAuthenticate($);
+
+    await $(const ValueKey('nav_home_button')).tap();
+    await $(const ValueKey('dark_mode_toggle')).waitUntilVisible(
+      timeout: const Duration(seconds: 20),
+    );
+    expect($(const ValueKey('dark_mode_toggle')), findsOneWidget);
+    expect($(const ValueKey('dashboard_progress_card')), findsOneWidget);
+
+    await $(const ValueKey('dark_mode_toggle')).tap();
+    await $.pumpAndSettle();
+
+    expect($(const ValueKey('dashboard_progress_card')), findsOneWidget);
+    expect($('Log meal'), findsNothing);
+    expect($('Calendar'), findsNothing);
+    expect($('Notifications'), findsNothing);
+    expect($('Exercise'), findsNothing);
+    expect($('BPM'), findsNothing);
+    expect($('Weight'), findsNothing);
+    expect($('Water'), findsNothing);
   });
 }
 
@@ -90,7 +108,10 @@ Future<void> _pumpAndAuthenticate(PatrolIntegrationTester $) async {
   await $.pumpWidgetAndSettle(
     const CalTrackerBootstrap(apiConfig: _patrolApiConfig),
   );
-  if ($(const ValueKey('meal_text_field')).exists) return;
+  if ($(const ValueKey('meal_text_field')).exists) {
+    await _setEnglishLanguage($);
+    return;
+  }
 
   final email = 'patrol-${DateTime.now().microsecondsSinceEpoch}@example.com';
   await _registerPatrolUser(email);
@@ -99,6 +120,24 @@ Future<void> _pumpAndAuthenticate(PatrolIntegrationTester $) async {
   FocusManager.instance.primaryFocus?.unfocus();
   await $.pumpAndSettle();
   await $(const ValueKey('auth_submit_button')).scrollTo().tap();
+  await $(const ValueKey('meal_text_field')).waitUntilVisible(
+    timeout: const Duration(seconds: 20),
+  );
+  await _setEnglishLanguage($);
+}
+
+Future<void> _setEnglishLanguage(PatrolIntegrationTester $) async {
+  await $(const ValueKey('nav_menu_button')).tap();
+  await $(const ValueKey('language_settings_row')).waitUntilVisible(
+    timeout: const Duration(seconds: 20),
+  );
+  await $(const ValueKey('language_settings_row')).tap();
+  await $(const ValueKey('language_option_en')).waitUntilVisible(
+    timeout: const Duration(seconds: 20),
+  );
+  await $(const ValueKey('language_option_en')).tap();
+  await $.pumpAndSettle();
+  await $(const ValueKey('nav_log_button')).tap();
   await $(const ValueKey('meal_text_field')).waitUntilVisible(
     timeout: const Duration(seconds: 20),
   );

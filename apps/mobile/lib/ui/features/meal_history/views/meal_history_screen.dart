@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../../domain/models/nutrition_models.dart';
+import '../../../../l10n/app_localizations_context.dart';
+import '../../../../l10n/generated/app_localizations.dart';
 import '../../../core/content_frame.dart';
 import '../../../core/design_system.dart';
 import '../../../shared/meal_item_editor_sheet.dart';
@@ -27,13 +29,14 @@ class _MealHistoryScreenState extends State<MealHistoryScreen> {
   Widget build(BuildContext context) {
     final viewModel = context.watch<MealHistoryViewModel>();
     final palette = context.freshPalette;
+    final l10n = context.l10n;
     return ContentFrame(
-      title: 'Stats',
-      subtitle: 'Calories and meal history',
+      title: l10n.historyTitle,
+      subtitle: l10n.historySubtitle,
       actions: [
         FreshIconButton(
           icon: Icons.refresh_rounded,
-          tooltip: 'Refresh',
+          tooltip: l10n.commonRefresh,
           onPressed: viewModel.load,
         ),
       ],
@@ -47,7 +50,7 @@ class _MealHistoryScreenState extends State<MealHistoryScreen> {
           if (viewModel.error != null) ...[
             FreshStatusBanner(
               icon: Icons.error_outline_rounded,
-              title: 'Could not load history',
+              title: l10n.historyCouldNotLoadHistory,
               message: viewModel.error!,
               color: FreshColors.coral,
             ),
@@ -60,9 +63,9 @@ class _MealHistoryScreenState extends State<MealHistoryScreen> {
           ),
           const SizedBox(height: FreshSpacing.lg),
           FreshSectionTitle(
-            title: 'Logged meals',
+            title: l10n.historyLoggedMeals,
             trailing: Text(
-              '${viewModel.meals.length} meals',
+              l10n.historyMealCount(viewModel.meals.length),
               style: Theme.of(context).textTheme.labelLarge?.copyWith(
                 color: palette.inkMuted,
                 fontFeatures: const [FontFeature.tabularFigures()],
@@ -71,10 +74,10 @@ class _MealHistoryScreenState extends State<MealHistoryScreen> {
           ),
           const SizedBox(height: FreshSpacing.md),
           if (viewModel.meals.isEmpty)
-            const FreshEmptyState(
+            FreshEmptyState(
               icon: Icons.history_rounded,
-              title: 'No meals logged',
-              message: 'Meals for the selected day will appear here.',
+              title: l10n.historyNoMealsLogged,
+              message: l10n.historyNoMealsMessage,
             )
           else
             for (final meal in viewModel.meals)
@@ -95,6 +98,7 @@ class _MealHistoryScreenState extends State<MealHistoryScreen> {
     MealHistoryViewModel viewModel,
     Meal meal,
   ) async {
+    final l10n = context.l10n;
     final action = await showModalBottomSheet<String>(
       context: context,
       builder: (context) => SafeArea(
@@ -114,13 +118,13 @@ class _MealHistoryScreenState extends State<MealHistoryScreen> {
               const SizedBox(height: FreshSpacing.lg),
               _SheetAction(
                 icon: Icons.edit_rounded,
-                title: 'Edit ingredients',
+                title: l10n.commonEditIngredients,
                 onTap: () => Navigator.of(context).pop('edit'),
               ),
               const SizedBox(height: FreshSpacing.sm),
               _SheetAction(
                 icon: Icons.delete_outline_rounded,
-                title: 'Delete',
+                title: l10n.commonDelete,
                 color: FreshColors.coral,
                 onTap: () => Navigator.of(context).pop('delete'),
               ),
@@ -163,16 +167,16 @@ class _MealHistoryScreenState extends State<MealHistoryScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete meal?'),
+        title: Text(context.l10n.historyDeleteMealTitle),
         content: Text(meal.title),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.commonCancel),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
+            child: Text(context.l10n.commonDelete),
           ),
         ],
       ),
@@ -205,13 +209,16 @@ class _CaloriesChartCard extends StatelessWidget {
               target: _defaultTarget,
               remaining: _defaultTarget,
               hydrationGoalGlasses: 12,
+              calorieTargetConfigured: true,
+              calorieTargetSource: 'manual',
               meals: const [],
             )
           : summaries.last,
     );
     final total = selectedSummary.consumed.calories;
     final target = selectedSummary.target.calories;
-    final bars = _weeklyBars(summaries, selectedDate);
+    final l10n = context.l10n;
+    final bars = _weeklyBars(summaries, selectedDate, l10n);
     final textTheme = Theme.of(context).textTheme;
     final palette = context.freshPalette;
     return FreshCard(
@@ -220,7 +227,7 @@ class _CaloriesChartCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Calories', style: textTheme.titleMedium),
+          Text(l10n.commonCalories, style: textTheme.titleMedium),
           const SizedBox(height: FreshSpacing.xs),
           Wrap(
             crossAxisAlignment: WrapCrossAlignment.end,
@@ -236,12 +243,12 @@ class _CaloriesChartCard extends StatelessWidget {
               ),
               Padding(
                 padding: const EdgeInsets.only(bottom: 11),
-                child: Text('Kcal', style: textTheme.titleMedium),
+                child: Text(l10n.commonKcal, style: textTheme.titleMedium),
               ),
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(
-                  'Target: $target Kcal',
+                  l10n.historyTargetCalories(target),
                   style: textTheme.bodyMedium?.copyWith(color: palette.inkSoft),
                 ),
               ),
@@ -286,7 +293,7 @@ class _ChartBar extends StatelessWidget {
     return Semantics(
       button: true,
       selected: bar.active,
-      label: 'Select ${bar.label}',
+      label: context.l10n.historySelectDaySemantics(bar.label),
       child: GestureDetector(
         key: ValueKey('stats_day_${bar.date}'),
         onTap: onTap,
@@ -392,7 +399,7 @@ class _HistoryMealCard extends StatelessWidget {
             ),
           ),
           Text(
-            '${meal.nutrition.calories} Kcal',
+            context.l10n.caloriesValue(meal.nutrition.calories),
             style: textTheme.titleMedium?.copyWith(
               fontFeatures: const [FontFeature.tabularFigures()],
             ),
@@ -449,8 +456,20 @@ class _BarData {
   final bool active;
 }
 
-List<_BarData> _weeklyBars(List<DailySummary> summaries, String selectedDate) {
-  const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+List<_BarData> _weeklyBars(
+  List<DailySummary> summaries,
+  String selectedDate,
+  AppLocalizations l10n,
+) {
+  final labels = [
+    l10n.dayMon,
+    l10n.dayTue,
+    l10n.dayWed,
+    l10n.dayThu,
+    l10n.dayFri,
+    l10n.daySat,
+    l10n.daySun,
+  ];
   return [
     for (var index = 0; index < labels.length; index++) ...[
       if (index < summaries.length)

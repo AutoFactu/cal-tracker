@@ -10,10 +10,14 @@ export const nutritionSnapshotSchema = z.object({
   fatGrams: z.number().nonnegative()
 });
 
+export const calorieTargetSourceSchema = z.enum(["manual", "calculator", "default"]);
+
 export const dailyGoalsSchema = z.object({
   date: z.string(),
   target: nutritionSnapshotSchema,
-  hydrationGoalGlasses: z.number().int().min(1).max(40)
+  hydrationGoalGlasses: z.number().int().min(1).max(40),
+  calorieTargetConfigured: z.boolean(),
+  calorieTargetSource: calorieTargetSourceSchema
 });
 
 export const foodResolutionProvenanceSchema = z.object({
@@ -132,6 +136,8 @@ export const dailySummarySchema = z.object({
   target: nutritionSnapshotSchema,
   remaining: nutritionSnapshotSchema,
   hydrationGoalGlasses: z.number().int().min(1).max(40),
+  calorieTargetConfigured: z.boolean(),
+  calorieTargetSource: calorieTargetSourceSchema,
   meals: z.array(mealSchema)
 });
 
@@ -145,6 +151,7 @@ export const mealTemplateSchema = z.object({
 });
 
 export type NutritionSnapshot = z.infer<typeof nutritionSnapshotSchema>;
+export type CalorieTargetSource = z.infer<typeof calorieTargetSourceSchema>;
 export type DailyGoals = z.infer<typeof dailyGoalsSchema>;
 export type FoodResolutionProvenance = z.infer<typeof foodResolutionProvenanceSchema>;
 export type FoodPortionChoice = z.infer<typeof foodPortionChoiceSchema>;

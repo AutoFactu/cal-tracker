@@ -11,6 +11,7 @@ class AppPreferencesRepository {
   static const _themeModeDark = 'dark';
   static const _themeModeSystem = 'system';
   static const _authHeroIndexKey = 'auth_hero_index';
+  static const _localeCodeKey = 'app_locale';
 
   final AppPreferencesStorage _storage;
 
@@ -30,6 +31,14 @@ class AppPreferencesRepository {
       ThemeMode.light => _themeModeLight,
     };
     return _storage.writeString(_themeModeKey, value);
+  }
+
+  Future<String?> loadLocaleCode() {
+    return _storage.readString(_localeCodeKey);
+  }
+
+  Future<void> saveLocaleCode(String code) {
+    return _storage.writeString(_localeCodeKey, code);
   }
 
   Future<int> nextAuthHeroIndex({int count = 5}) async {

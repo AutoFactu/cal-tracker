@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
+import '../l10n/app_localizations_context.dart';
 import '../ui/core/design_system.dart';
+import '../ui/core/app_shell.dart';
 import '../ui/features/auth/view_models/auth_view_model.dart';
 import '../ui/features/auth/views/auth_screen.dart';
 import '../ui/features/dashboard/views/dashboard_screen.dart';
@@ -10,7 +12,6 @@ import '../ui/features/meal_history/views/meal_history_screen.dart';
 import '../ui/features/meal_templates/views/meal_templates_screen.dart';
 import '../ui/features/settings/views/settings_screen.dart';
 import '../ui/features/voice_log/views/voice_log_screen.dart';
-import '../ui/core/app_shell.dart';
 import 'theme.dart';
 
 GoRouter buildRouter(AuthViewModel authViewModel) {
@@ -54,7 +55,8 @@ GoRouter buildRouter(AuthViewModel authViewModel) {
       ),
     ],
     errorBuilder: (context, state) => Scaffold(
-      body: Center(child: Text(state.error?.message ?? 'Route not found')),
+      body: Center(
+          child: Text(state.error?.message ?? context.l10n.routeNotFound)),
     ),
   );
 }

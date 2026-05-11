@@ -10,11 +10,67 @@ import 'package:patrol/patrol.dart';
 const _patrolApiConfig = ApiConfig(baseUrl: 'http://10.0.2.2:3000');
 
 void main() {
+  patrolTest('sets first calorie target from the Home setup prompt', ($) async {
+    final user = await _createPatrolUser('home-goal-setup');
+    await _login($, user);
+
+    await $(const ValueKey('nav_home_button')).tap();
+    await $(const ValueKey('dashboard_progress_card')).waitUntilVisible(
+      timeout: const Duration(seconds: 20),
+    );
+    expect($('??'), findsNothing);
+
+    await $(const ValueKey('dashboard_progress_card')).tap();
+    await $(const ValueKey('dashboard_calorie_target_field')).enterText('1900');
+    await $(const ValueKey('dashboard_save_calorie_target_button')).tap();
+
+    await $('1900').waitUntilVisible(
+      timeout: const Duration(seconds: 20),
+    );
+  });
+
+  patrolTest('uses calorie calculator estimate before saving Home target',
+      ($) async {
+    final user = await _createPatrolUser('home-calculator');
+    await _login($, user);
+
+    await $(const ValueKey('nav_home_button')).tap();
+    await $(const ValueKey('dashboard_progress_card')).tap();
+    await $(const ValueKey('calorie_calculator_link')).tap();
+    await $('Basic profile').waitUntilVisible(
+      timeout: const Duration(seconds: 20),
+    );
+    await $.pumpAndSettle();
+
+    await $(const ValueKey('calorie_wizard_age_field')).enterText('35');
+    await $(const ValueKey('calorie_wizard_sex_female')).tap();
+    await $(const ValueKey('calorie_wizard_height_cm_field')).enterText('165');
+    await $(const ValueKey('calorie_wizard_weight_kg_field')).enterText('70');
+    await $(const ValueKey('calorie_wizard_next_button')).tap();
+
+    await $(const ValueKey('calorie_wizard_activity_lightly_active')).tap();
+    await $(const ValueKey('calorie_wizard_next_button')).tap();
+
+    await $(const ValueKey('calorie_wizard_goal_lose_fat')).tap();
+    await $(const ValueKey('calorie_wizard_pace_moderate')).tap();
+    await $(const ValueKey('calorie_wizard_next_button')).tap();
+
+    await $(const ValueKey('calorie_wizard_target_value')).waitUntilVisible(
+      timeout: const Duration(seconds: 20),
+    );
+    await $(const ValueKey('calorie_wizard_use_estimate_button')).tap();
+    await $(const ValueKey('dashboard_save_calorie_target_button')).tap();
+
+    await $('1620').waitUntilVisible(
+      timeout: const Duration(seconds: 20),
+    );
+  });
+
   patrolTest('edits goals from Menu and updates Home immediately', ($) async {
     final user = await _createPatrolUser('goals-menu');
     await _login($, user);
 
-    await $('Menu').tap();
+    await $(const ValueKey('nav_menu_button')).tap();
     await $(const ValueKey('calorie_target_row')).waitUntilVisible(
       timeout: const Duration(seconds: 20),
     );
@@ -33,8 +89,8 @@ void main() {
       timeout: const Duration(seconds: 20),
     );
 
-    await $('Home').tap();
-    await $('Target 2300 Kcal, 15 glasses').waitUntilVisible(
+    await $(const ValueKey('nav_home_button')).tap();
+    await $('2300').waitUntilVisible(
       timeout: const Duration(seconds: 20),
     );
   });
@@ -50,12 +106,12 @@ void main() {
     );
     await _login($, user);
 
-    await $('Home').tap();
-    await $('Target 2450 Kcal, 13 glasses').waitUntilVisible(
+    await $(const ValueKey('nav_home_button')).tap();
+    await $('2450').waitUntilVisible(
       timeout: const Duration(seconds: 20),
     );
 
-    await $('Stats').tap();
+    await $(const ValueKey('nav_stats_button')).tap();
     await $('Target: 2450 Kcal').waitUntilVisible(
       timeout: const Duration(seconds: 20),
     );
@@ -95,7 +151,7 @@ void main() {
     );
 
     await _login($, user);
-    await $('Stats').tap();
+    await $(const ValueKey('nav_stats_button')).tap();
     await $('Target: 2400 Kcal').waitUntilVisible(
       timeout: const Duration(seconds: 20),
     );
@@ -122,6 +178,24 @@ Future<void> _login(PatrolIntegrationTester $, _PatrolUser user) async {
   FocusManager.instance.primaryFocus?.unfocus();
   await $.pumpAndSettle();
   await $(const ValueKey('auth_submit_button')).scrollTo().tap();
+  await $(const ValueKey('nav_log_button')).waitUntilVisible(
+    timeout: const Duration(seconds: 20),
+  );
+  await _setEnglishLanguage($);
+}
+
+Future<void> _setEnglishLanguage(PatrolIntegrationTester $) async {
+  await $(const ValueKey('nav_menu_button')).tap();
+  await $(const ValueKey('language_settings_row')).waitUntilVisible(
+    timeout: const Duration(seconds: 20),
+  );
+  await $(const ValueKey('language_settings_row')).tap();
+  await $(const ValueKey('language_option_en')).waitUntilVisible(
+    timeout: const Duration(seconds: 20),
+  );
+  await $(const ValueKey('language_option_en')).tap();
+  await $.pumpAndSettle();
+  await $(const ValueKey('nav_log_button')).tap();
   await $(const ValueKey('meal_text_field')).waitUntilVisible(
     timeout: const Duration(seconds: 20),
   );
@@ -156,17 +230,19 @@ Future<void> _putGoals({
   required int calories,
   required int hydrationGoalGlasses,
 }) async {
-  final response = await http.put(
-    Uri.parse('${_patrolApiConfig.baseUrl}/v1/goals'),
-    headers: {
-      'authorization': 'Bearer $accessToken',
-      'content-type': 'application/json',
-    },
-    body: jsonEncode({
-      'date': date,
-      'calories': calories,
-      'hydrationGoalGlasses': hydrationGoalGlasses,
-    }),
+  final uri = Uri.parse('${_patrolApiConfig.baseUrl}/v1/goals');
+  final headers = {
+    'authorization': 'Bearer $accessToken',
+    'content-type': 'application/json',
+  };
+  final body = jsonEncode({
+    'date': date,
+    'calories': calories,
+    'hydrationGoalGlasses': hydrationGoalGlasses,
+  });
+  final response = await _sendWithRetry(
+    () => http.put(uri, headers: headers, body: body),
+    'PUT $uri',
   );
   if (response.statusCode != 200) {
     throw StateError(
@@ -176,9 +252,11 @@ Future<void> _putGoals({
 }
 
 Future<void> _getDailySummary(String accessToken, String date) async {
-  final response = await http.get(
-    Uri.parse('${_patrolApiConfig.baseUrl}/v1/summary/daily?date=$date'),
-    headers: {'authorization': 'Bearer $accessToken'},
+  final uri =
+      Uri.parse('${_patrolApiConfig.baseUrl}/v1/summary/daily?date=$date');
+  final response = await _sendWithRetry(
+    () => http.get(uri, headers: {'authorization': 'Bearer $accessToken'}),
+    'GET $uri',
   );
   if (response.statusCode != 200) {
     throw StateError(
@@ -255,16 +333,34 @@ Future<http.Response> _postJson(
   required Map<String, String> headers,
   required Object body,
 }) async {
+  return _sendWithRetry(
+    () => http.post(uri, headers: headers, body: body),
+    'POST $uri',
+  );
+}
+
+Future<http.Response> _sendWithRetry(
+  Future<http.Response> Function() request,
+  String description,
+) async {
   Object? lastError;
+  http.Response? lastRetryableResponse;
   for (var attempt = 0; attempt < 8; attempt++) {
     try {
-      return await http.post(uri, headers: headers, body: body);
+      final response = await request();
+      if (response.statusCode < 500) {
+        return response;
+      }
+      lastRetryableResponse = response;
     } catch (error) {
       lastError = error;
-      await Future<void>.delayed(const Duration(seconds: 1));
     }
+    await Future<void>.delayed(const Duration(seconds: 1));
   }
-  throw StateError('Failed to POST $uri: $lastError');
+  if (lastRetryableResponse != null) {
+    return lastRetryableResponse;
+  }
+  throw StateError('Failed to $description: $lastError');
 }
 
 String _formatDateOnly(DateTime value) {

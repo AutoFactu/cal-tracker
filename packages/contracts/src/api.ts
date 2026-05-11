@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  calorieTargetSourceSchema,
   dailyGoalsSchema,
   dailySummarySchema,
   foodCandidateSchema,
@@ -83,16 +84,44 @@ export const settingsUpdateSchema = z.object({
 export const goalsUpdateSchema = z.object({
   date: z.string().optional(),
   calories: z.number().int().min(800).max(10000).optional(),
-  hydrationGoalGlasses: z.number().int().min(1).max(40).optional()
+  hydrationGoalGlasses: z.number().int().min(1).max(40).optional(),
+  calorieTargetSource: calorieTargetSourceSchema.optional()
 }).refine(
   (value) => value.calories !== undefined || value.hydrationGoalGlasses !== undefined,
   "calories or hydrationGoalGlasses is required"
 );
 
+export const calorieEstimateRequestSchema = z.object({
+  age: z.number().int().min(18).max(100),
+  sex: z.enum(["male", "female"]),
+  heightCm: z.number().min(120).max(230),
+  weightKg: z.number().min(35).max(250),
+  activityLevel: z.enum(["sedentary", "lightly_active", "moderately_active", "very_active", "extra_active"]),
+  goal: z.enum(["lose_fat", "maintain", "gain_muscle", "recomposition"]),
+  pace: z.enum(["slow", "moderate", "aggressive", "lean", "standard"]).optional()
+});
+
+export const calorieEstimateResponseSchema = z.object({
+  bmr: z.number().int().positive(),
+  maintenanceCalories: z.number().int().positive(),
+  targetCalories: z.number().int().min(800).max(10000),
+  recommendedRange: z.object({
+    min: z.number().int().min(800).max(10000),
+    max: z.number().int().min(800).max(10000)
+  }),
+  activityFactor: z.number().positive(),
+  adjustmentCalories: z.number().int(),
+  warnings: z.array(z.string()),
+  explanation: z.string()
+});
+
 export const goalsResponseSchema = z.object({
   goals: dailyGoalsSchema,
   summary: dailySummarySchema.optional()
 });
+
+export type CalorieEstimateRequest = z.infer<typeof calorieEstimateRequestSchema>;
+export type CalorieEstimateResponse = z.infer<typeof calorieEstimateResponseSchema>;
 
 export const dashboardResponseSchema = z.object({
   summary: dailySummarySchema

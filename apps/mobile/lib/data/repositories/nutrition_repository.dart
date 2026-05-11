@@ -160,13 +160,36 @@ class NutritionRepository {
     String? date,
     int? calories,
     int? hydrationGoalGlasses,
+    String? calorieTargetSource,
   }) async {
     final json = await _apiClient.updateDailyGoals(
       date: date ?? DateTime.now().toIso8601String().substring(0, 10),
       calories: calories,
       hydrationGoalGlasses: hydrationGoalGlasses,
+      calorieTargetSource: calorieTargetSource,
     );
     return DailyGoals.fromJson(json['goals'] as Map<String, Object?>);
+  }
+
+  Future<CalorieEstimate> estimateCalories({
+    required int age,
+    required String sex,
+    required double heightCm,
+    required double weightKg,
+    required String activityLevel,
+    required String goal,
+    String? pace,
+  }) async {
+    final json = await _apiClient.estimateCalories({
+      'age': age,
+      'sex': sex,
+      'heightCm': heightCm,
+      'weightKg': weightKg,
+      'activityLevel': activityLevel,
+      'goal': goal,
+      if (pace != null) 'pace': pace,
+    });
+    return CalorieEstimate.fromJson(json);
   }
 
   Future<List<Meal>> getMealHistory() async {

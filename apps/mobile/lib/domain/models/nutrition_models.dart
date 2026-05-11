@@ -26,11 +26,15 @@ class DailyGoals {
     required this.date,
     required this.target,
     required this.hydrationGoalGlasses,
+    required this.calorieTargetConfigured,
+    required this.calorieTargetSource,
   });
 
   final String date;
   final NutritionSnapshot target;
   final int hydrationGoalGlasses;
+  final bool calorieTargetConfigured;
+  final String calorieTargetSource;
 
   factory DailyGoals.fromJson(Map<String, Object?> json) {
     return DailyGoals(
@@ -39,6 +43,49 @@ class DailyGoals {
           NutritionSnapshot.fromJson(json['target'] as Map<String, Object?>),
       hydrationGoalGlasses:
           (json['hydrationGoalGlasses'] as num? ?? 12).toInt(),
+      calorieTargetConfigured: json['calorieTargetConfigured'] as bool? ?? true,
+      calorieTargetSource: json['calorieTargetSource'] as String? ?? 'manual',
+    );
+  }
+}
+
+class CalorieEstimate {
+  const CalorieEstimate({
+    required this.bmr,
+    required this.maintenanceCalories,
+    required this.targetCalories,
+    required this.recommendedRangeMin,
+    required this.recommendedRangeMax,
+    required this.activityFactor,
+    required this.adjustmentCalories,
+    required this.warnings,
+    required this.explanation,
+  });
+
+  final int bmr;
+  final int maintenanceCalories;
+  final int targetCalories;
+  final int recommendedRangeMin;
+  final int recommendedRangeMax;
+  final double activityFactor;
+  final int adjustmentCalories;
+  final List<String> warnings;
+  final String explanation;
+
+  factory CalorieEstimate.fromJson(Map<String, Object?> json) {
+    final range = json['recommendedRange'] as Map<String, Object?>;
+    return CalorieEstimate(
+      bmr: (json['bmr'] as num).toInt(),
+      maintenanceCalories: (json['maintenanceCalories'] as num).toInt(),
+      targetCalories: (json['targetCalories'] as num).toInt(),
+      recommendedRangeMin: (range['min'] as num).toInt(),
+      recommendedRangeMax: (range['max'] as num).toInt(),
+      activityFactor: (json['activityFactor'] as num).toDouble(),
+      adjustmentCalories: (json['adjustmentCalories'] as num).toInt(),
+      warnings: (json['warnings'] as List<Object?>? ?? const [])
+          .map((value) => value.toString())
+          .toList(),
+      explanation: json['explanation'] as String? ?? '',
     );
   }
 }
@@ -418,6 +465,8 @@ class DailySummary {
     required this.target,
     required this.remaining,
     required this.hydrationGoalGlasses,
+    required this.calorieTargetConfigured,
+    required this.calorieTargetSource,
     required this.meals,
   });
 
@@ -426,6 +475,8 @@ class DailySummary {
   final NutritionSnapshot target;
   final NutritionSnapshot remaining;
   final int hydrationGoalGlasses;
+  final bool calorieTargetConfigured;
+  final String calorieTargetSource;
   final List<Meal> meals;
 
   factory DailySummary.fromJson(Map<String, Object?> json) {
@@ -439,6 +490,8 @@ class DailySummary {
           NutritionSnapshot.fromJson(json['remaining'] as Map<String, Object?>),
       hydrationGoalGlasses:
           (json['hydrationGoalGlasses'] as num? ?? 12).toInt(),
+      calorieTargetConfigured: json['calorieTargetConfigured'] as bool? ?? true,
+      calorieTargetSource: json['calorieTargetSource'] as String? ?? 'manual',
       meals: (json['meals'] as List<Object?>)
           .cast<Map<String, Object?>>()
           .map(Meal.fromJson)

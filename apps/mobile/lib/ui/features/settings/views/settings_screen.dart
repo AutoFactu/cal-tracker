@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../../app/locale_view_model.dart';
+import '../../../../l10n/app_localizations_context.dart';
 import '../../../core/content_frame.dart';
 import '../../../core/design_system.dart';
 import '../../auth/view_models/auth_view_model.dart';
@@ -28,14 +30,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthViewModel>();
     final settings = context.watch<SettingsViewModel>();
+    final locale = context.watch<LocaleViewModel>();
+    final l10n = context.l10n;
     final user = auth.user;
     final goals = settings.goals;
     final limeCardTextColor = FreshPalette.dark.limeWash;
     return ContentFrame(
-      title: 'Menu',
-      subtitle: 'Account and preferences',
-      actions: const [
-        FreshIconButton(icon: Icons.more_horiz_rounded, tooltip: 'More'),
+      title: l10n.settingsTitle,
+      subtitle: l10n.settingsSubtitle,
+      actions: [
+        FreshIconButton(
+          icon: Icons.more_horiz_rounded,
+          tooltip: l10n.settingsMoreTooltip,
+        ),
       ],
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -64,7 +71,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        user?.displayName ?? 'Cal Tracker',
+                        user?.displayName ?? l10n.fallbackUserName,
                         style: Theme.of(context)
                             .textTheme
                             .titleLarge
@@ -92,7 +99,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           if (settings.error != null) ...[
             FreshStatusBanner(
               icon: Icons.error_outline_rounded,
-              title: 'Could not update goals',
+              title: l10n.settingsCouldNotUpdateGoals,
               message: settings.error!,
               color: FreshColors.coral,
             ),
@@ -102,16 +109,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             key: const ValueKey('hydration_goal_row'),
             icon: Icons.water_drop_rounded,
             color: FreshColors.water,
-            title: 'Hydration goal',
-            subtitle: '${goals?.hydrationGoalGlasses ?? 12} glasses per day',
+            title: l10n.settingsHydrationGoal,
+            subtitle: l10n.settingsHydrationGoalSubtitle(
+              goals?.hydrationGoalGlasses ?? 12,
+            ),
             onTap: settings.isLoading
                 ? null
                 : () => _editGoal(
                       context,
-                      title: 'Hydration goal',
+                      title: l10n.settingsHydrationGoal,
                       fieldKey: const ValueKey('hydration_goal_field'),
                       initialValue: goals?.hydrationGoalGlasses ?? 12,
-                      unit: 'glasses',
+                      unit: l10n.settingsGlassesUnit,
                       minValue: 1,
                       maxValue: 40,
                       onSave: (value) => context
@@ -124,16 +133,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             key: const ValueKey('calorie_target_row'),
             icon: Icons.flag_rounded,
             color: FreshColors.orange,
-            title: 'Calorie target',
-            subtitle: '${goals?.target.calories ?? 2200} Kcal daily target',
+            title: l10n.settingsCalorieTarget,
+            subtitle: l10n.settingsCalorieTargetSubtitle(
+              goals?.target.calories ?? 2200,
+            ),
             onTap: settings.isLoading
                 ? null
                 : () => _editGoal(
                       context,
-                      title: 'Calorie target',
+                      title: l10n.settingsCalorieTarget,
                       fieldKey: const ValueKey('calorie_target_field'),
                       initialValue: goals?.target.calories ?? 2200,
-                      unit: 'Kcal',
+                      unit: l10n.commonKcal,
                       minValue: 800,
                       maxValue: 10000,
                       onSave: (value) => context
@@ -141,11 +152,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           .updateGoals(calories: value),
                     ),
           ),
+          const SizedBox(height: FreshSpacing.md),
+          _SettingsGoalRow(
+            key: const ValueKey('language_settings_row'),
+            icon: Icons.translate_rounded,
+            color: FreshColors.mint,
+            title: l10n.settingsLanguageTitle,
+            subtitle: locale.localeCode == 'es'
+                ? l10n.settingsLanguageSubtitleSpanish
+                : l10n.settingsLanguageSubtitleEnglish,
+            onTap: () => _showLanguageSheet(context),
+          ),
           const SizedBox(height: FreshSpacing.xl),
           OutlinedButton.icon(
             onPressed: auth.logout,
             icon: const Icon(Icons.logout_rounded),
-            label: const Text('Log out'),
+            label: Text(l10n.settingsLogOut),
           ),
         ],
       ),
@@ -182,6 +204,92 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context.read<DashboardViewModel>().load(),
       context.read<MealHistoryViewModel>().load(),
     ]);
+  }
+
+  Future<void> _showLanguageSheet(BuildContext context) {
+    return showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      builder: (sheetContext) {
+        final l10n = sheetContext.l10n;
+        final localeViewModel = sheetContext.watch<LocaleViewModel>();
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: sheetContext.freshPalette.rule,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: FreshSpacing.lg),
+              Text(
+                l10n.settingsLanguageSheetTitle,
+                style: Theme.of(sheetContext).textTheme.titleLarge,
+              ),
+              const SizedBox(height: FreshSpacing.md),
+              _LanguageOption(
+                key: const ValueKey('language_option_en'),
+                title: l10n.settingsLanguageEnglish,
+                selected: localeViewModel.localeCode == 'en',
+                onTap: () async {
+                  await localeViewModel.setLocaleCode('en');
+                  if (sheetContext.mounted) Navigator.of(sheetContext).pop();
+                },
+              ),
+              const SizedBox(height: FreshSpacing.sm),
+              _LanguageOption(
+                key: const ValueKey('language_option_es'),
+                title: l10n.settingsLanguageSpanish,
+                selected: localeViewModel.localeCode == 'es',
+                onTap: () async {
+                  await localeViewModel.setLocaleCode('es');
+                  if (sheetContext.mounted) Navigator.of(sheetContext).pop();
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _LanguageOption extends StatelessWidget {
+  const _LanguageOption({
+    super.key,
+    required this.title,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String title;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return FreshCard(
+      padding: const EdgeInsets.all(16),
+      onTap: onTap,
+      shadow: false,
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(title, style: Theme.of(context).textTheme.titleMedium),
+          ),
+          if (selected)
+            Icon(Icons.check_rounded, color: context.freshPalette.limeDeep),
+        ],
+      ),
+    );
   }
 }
 
@@ -308,7 +416,7 @@ class _GoalEditSheetState extends State<_GoalEditSheet> {
           FilledButton(
             key: const ValueKey('save_goal_button'),
             onPressed: _submit,
-            child: const Text('Save'),
+            child: Text(context.l10n.commonSave),
           ),
         ],
       ),
@@ -319,7 +427,10 @@ class _GoalEditSheetState extends State<_GoalEditSheet> {
     final value = int.tryParse(_controller.text.trim());
     if (value == null || value < widget.minValue || value > widget.maxValue) {
       setState(() {
-        _error = 'Enter ${widget.minValue}-${widget.maxValue}.';
+        _error = context.l10n.settingsGoalRangeError(
+          widget.minValue,
+          widget.maxValue,
+        );
       });
       return;
     }
