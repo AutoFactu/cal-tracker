@@ -178,6 +178,7 @@ export class AgentService {
         usage: extractTokenUsage(decision.rawResponse),
         reasoningTokens: extractReasoningTokens(decision.rawResponse),
         providerTimingsMs: decision.timingsMs,
+        providerRouting: decision.providerRouting,
         modelInteraction: decision.interaction,
         resultKind: mapped.kind,
         timingsMs: {
@@ -204,6 +205,7 @@ export class AgentService {
         usage: extractTokenUsage(decision.rawResponse),
         reasoningTokens: extractReasoningTokens(decision.rawResponse),
         providerTimingsMs: decision.timingsMs,
+        providerRouting: decision.providerRouting,
         modelInteraction: decision.interaction,
         resultKind: mapped.kind,
         timingsMs: {
@@ -231,6 +233,7 @@ export class AgentService {
         usage: extractTokenUsage(decision.rawResponse),
         reasoningTokens: extractReasoningTokens(decision.rawResponse),
         providerTimingsMs: decision.timingsMs,
+        providerRouting: decision.providerRouting,
         modelInteraction: decision.interaction,
         resultKind: mapped.kind,
         timingsMs: {
@@ -267,6 +270,7 @@ export class AgentService {
         usage: extractTokenUsage(decision.rawResponse),
         reasoningTokens: extractReasoningTokens(decision.rawResponse),
         providerTimingsMs: decision.timingsMs,
+        providerRouting: decision.providerRouting,
         modelInteraction: decision.interaction,
         actionInstrumentation: result.instrumentation,
         actionCallId: result.actionCallId,
@@ -288,6 +292,7 @@ export class AgentService {
         usage: extractTokenUsage(decision.rawResponse),
         reasoningTokens: extractReasoningTokens(decision.rawResponse),
         providerTimingsMs: decision.timingsMs,
+        providerRouting: decision.providerRouting,
         modelInteraction: decision.interaction,
         error: summarizeError(error),
         timingsMs: {
@@ -339,6 +344,7 @@ export class AgentService {
         ? extractReasoningTokens(input.decision.rawResponse)
         : undefined,
       providerTimingsMs: input.decision?.timingsMs,
+      providerRouting: input.decision?.providerRouting,
       modelInteraction: input.decision?.interaction,
       actionInstrumentation: result.instrumentation,
       actionCallId: result.actionCallId,

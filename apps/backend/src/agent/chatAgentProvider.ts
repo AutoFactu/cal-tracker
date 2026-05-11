@@ -49,6 +49,7 @@ export type AgentToolDecision = {
   toolCalls: AgentToolCall[];
   rawResponse: unknown;
   timingsMs?: AgentProviderTimings;
+  providerRouting?: OpenRouterProviderRouting;
   interaction?: {
     messages: AgentMessage[];
     assistantContent?: string;
@@ -66,11 +67,26 @@ export interface ChatAgentProvider {
   }): Promise<AgentToolDecision>;
 }
 
+export type OpenRouterProviderRouting = {
+  sort: "price" | "throughput" | "latency";
+  preferred_max_latency: {
+    p50: number;
+    p90: number;
+    p99: number;
+  };
+  preferred_min_throughput: {
+    p50: number;
+    p90: number;
+  };
+  require_parameters: boolean;
+};
+
 export class RemoteChatAgentProvider implements ChatAgentProvider {
   constructor(
     private readonly apiKey: string,
     private readonly baseUrl: string = "https://openrouter.ai/api/v1",
-    private readonly timeoutMs = 10000
+    private readonly timeoutMs = 10000,
+    private readonly providerRouting: OpenRouterProviderRouting = defaultOpenRouterProviderRouting(),
   ) {}
 
   async runWithTools(input: {
@@ -95,6 +111,7 @@ export class RemoteChatAgentProvider implements ChatAgentProvider {
         tool_choice: "auto",
         stream: true,
         stream_options: { include_usage: true },
+        provider: this.providerRouting,
       }),
     });
 
@@ -133,8 +150,10 @@ export class RemoteChatAgentProvider implements ChatAgentProvider {
         ],
         usage: streamed.usage,
         timingsMs: streamed.timingsMs,
+        providerRouting: this.providerRouting,
       },
       timingsMs: streamed.timingsMs,
+      providerRouting: this.providerRouting,
       interaction: {
         messages: input.messages,
         assistantContent: streamed.assistantContent || undefined,
@@ -143,6 +162,22 @@ export class RemoteChatAgentProvider implements ChatAgentProvider {
       },
     };
   }
+}
+
+export function defaultOpenRouterProviderRouting(): OpenRouterProviderRouting {
+  return {
+    sort: "latency",
+    preferred_max_latency: {
+      p50: 0.6,
+      p90: 1.5,
+      p99: 3,
+    },
+    preferred_min_throughput: {
+      p50: 80,
+      p90: 40,
+    },
+    require_parameters: true,
+  };
 }
 
 type StreamedToolCall = {

@@ -42,7 +42,24 @@ export function createApp(input: {
   const app = new Hono<{ Variables: { authUser: StoredUser; traceId: string } }>();
   const { config, repository, authService, actionExecutor, sttProvider, agentProvider, runLogger } = input;
 
-  const resolvedAgentProvider = agentProvider ?? new RemoteChatAgentProvider(config.OPENROUTER_API_KEY);
+  const resolvedAgentProvider = agentProvider ?? new RemoteChatAgentProvider(
+    config.OPENROUTER_API_KEY,
+    "https://openrouter.ai/api/v1",
+    10000,
+    {
+      sort: config.OPENROUTER_PROVIDER_SORT,
+      preferred_max_latency: {
+        p50: config.OPENROUTER_PROVIDER_MAX_LATENCY_P50,
+        p90: config.OPENROUTER_PROVIDER_MAX_LATENCY_P90,
+        p99: config.OPENROUTER_PROVIDER_MAX_LATENCY_P99,
+      },
+      preferred_min_throughput: {
+        p50: config.OPENROUTER_PROVIDER_MIN_THROUGHPUT_P50,
+        p90: config.OPENROUTER_PROVIDER_MIN_THROUGHPUT_P90,
+      },
+      require_parameters: config.OPENROUTER_PROVIDER_REQUIRE_PARAMETERS,
+    },
+  );
   const agentService = new AgentService(resolvedAgentProvider, actionExecutor, config.OPENROUTER_MODEL, runLogger);
 
   app.use("*", requestIdMiddleware);
