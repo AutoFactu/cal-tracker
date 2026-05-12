@@ -7,11 +7,11 @@ import '../view_models/auth_view_model.dart';
 
 const _brandIconAsset = 'assets/images/brand_icon.png';
 const _heroAssets = [
-  'assets/images/login/auth_hero_01.webp',
-  'assets/images/login/auth_hero_02.webp',
-  'assets/images/login/auth_hero_03.webp',
-  'assets/images/login/auth_hero_04.webp',
-  'assets/images/login/auth_hero_05.webp',
+  'assets/images/login/cropped/auth_hero_01.webp',
+  'assets/images/login/cropped/auth_hero_02.webp',
+  'assets/images/login/cropped/auth_hero_03.webp',
+  'assets/images/login/cropped/auth_hero_04.webp',
+  'assets/images/login/cropped/auth_hero_05.webp',
 ];
 
 class AuthScreen extends StatefulWidget {
@@ -384,24 +384,21 @@ class _LoginHeroImage extends StatelessWidget {
   final double progress;
 
   static final AlignmentTween _alignmentTween = AlignmentTween(
-    begin: const Alignment(0.34, -0.38),
-    end: const Alignment(-0.34, -0.38),
+    begin: Alignment.bottomRight,
+    end: Alignment.bottomLeft,
   );
 
   @override
   Widget build(BuildContext context) {
     final alignment = _alignmentTween.transform(progress);
-    return Transform.scale(
-      scale: 1.10,
-      child: Image.asset(
-        assetPath,
-        key: ValueKey('login_hero_image_$index'),
-        fit: BoxFit.cover,
-        alignment: alignment,
-        filterQuality: FilterQuality.high,
-        width: double.infinity,
-        height: double.infinity,
-      ),
+    return Image.asset(
+      assetPath,
+      key: ValueKey('login_hero_image_$index'),
+      fit: BoxFit.cover,
+      alignment: alignment,
+      filterQuality: FilterQuality.high,
+      width: double.infinity,
+      height: double.infinity,
     );
   }
 }
