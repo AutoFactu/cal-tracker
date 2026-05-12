@@ -142,7 +142,10 @@ class _Avatar extends StatelessWidget {
         border: Border.all(color: palette.surface, width: 3),
       ),
       clipBehavior: Clip.antiAlias,
-      child: Image.asset('assets/images/leaf_accent.webp', fit: BoxFit.cover),
+      child: Image.asset(
+        'assets/images/icons/protein_icon.png',
+        fit: BoxFit.cover,
+      ),
     );
   }
 }
@@ -460,7 +463,8 @@ class _MacroSummaryRow extends StatelessWidget {
       children: [
         Expanded(
           child: _MacroSummaryPill(
-            icon: Icons.bakery_dining_rounded,
+            assetPath: 'assets/images/icons/carbs_icon.png',
+            iconKey: const ValueKey('dashboard_macro_carbs_icon'),
             label: l10n.commonCarbs,
             value: hasConfiguredTarget
                 ? _macroRatio(
@@ -474,7 +478,8 @@ class _MacroSummaryRow extends StatelessWidget {
         const SizedBox(width: FreshSpacing.sm),
         Expanded(
           child: _MacroSummaryPill(
-            icon: Icons.local_drink_rounded,
+            assetPath: 'assets/images/icons/protein_icon.png',
+            iconKey: const ValueKey('dashboard_macro_protein_icon'),
             label: l10n.localeName.startsWith('es') ? 'Proteínas' : 'Proteins',
             value: hasConfiguredTarget
                 ? _macroRatio(
@@ -488,7 +493,8 @@ class _MacroSummaryRow extends StatelessWidget {
         const SizedBox(width: FreshSpacing.sm),
         Expanded(
           child: _MacroSummaryPill(
-            icon: Icons.egg_alt_rounded,
+            assetPath: 'assets/images/icons/fats_icon.png',
+            iconKey: const ValueKey('dashboard_macro_fats_icon'),
             label: l10n.localeName.startsWith('es') ? 'Grasas' : 'Fats',
             value: hasConfiguredTarget
                 ? _macroRatio(
@@ -506,13 +512,15 @@ class _MacroSummaryRow extends StatelessWidget {
 
 class _MacroSummaryPill extends StatelessWidget {
   const _MacroSummaryPill({
-    required this.icon,
+    required this.assetPath,
+    required this.iconKey,
     required this.label,
     required this.value,
     required this.color,
   });
 
-  final IconData icon;
+  final String assetPath;
+  final Key iconKey;
   final String label;
   final String value;
   final Color color;
@@ -536,7 +544,16 @@ class _MacroSummaryPill extends StatelessWidget {
                 color: color.withValues(alpha: 0.2),
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, size: 17, color: palette.ink),
+              clipBehavior: Clip.antiAlias,
+              child: ClipOval(
+                child: Image.asset(
+                  assetPath,
+                  key: iconKey,
+                  fit: BoxFit.cover,
+                  filterQuality: FilterQuality.medium,
+                  excludeFromSemantics: true,
+                ),
+              ),
             ),
             const SizedBox(width: 7),
             Expanded(

@@ -55,6 +55,18 @@ void main() {
     expect(find.byKey(DarkModeToggle.toggleKey), findsOneWidget);
     expect(
         find.byKey(const ValueKey('dashboard_progress_card')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('dashboard_macro_carbs_icon')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('dashboard_macro_protein_icon')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('dashboard_macro_fats_icon')),
+      findsOneWidget,
+    );
     expect(find.byKey(const ValueKey('dashboard_goal_line')), findsNothing);
     expect(find.text('Calendar'), findsNothing);
     expect(find.text('Notifications'), findsNothing);
