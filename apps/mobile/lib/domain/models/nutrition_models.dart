@@ -269,7 +269,9 @@ class FoodPortionChoice {
 class FoodMention {
   const FoodMention({
     required this.originalText,
-    required this.canonicalEnglishName,
+    String? canonicalName,
+    this.canonicalEnglishName,
+    this.language,
     required this.quantity,
     required this.unit,
     required this.confidence,
@@ -280,10 +282,12 @@ class FoodMention {
     this.portionDescriptor,
     this.brand,
     this.barcode,
-  });
+  }) : canonicalName = canonicalName ?? canonicalEnglishName ?? originalText;
 
   final String originalText;
-  final String canonicalEnglishName;
+  final String canonicalName;
+  final String? canonicalEnglishName;
+  final String? language;
   final double quantity;
   final String unit;
   final double confidence;
@@ -296,9 +300,14 @@ class FoodMention {
   final String? barcode;
 
   factory FoodMention.fromJson(Map<String, Object?> json) {
+    final originalText = json['originalText'] as String;
+    final canonicalName = json['canonicalName'] as String?;
+    final canonicalEnglishName = json['canonicalEnglishName'] as String?;
     return FoodMention(
-      originalText: json['originalText'] as String,
-      canonicalEnglishName: json['canonicalEnglishName'] as String,
+      originalText: originalText,
+      canonicalName: canonicalName ?? canonicalEnglishName ?? originalText,
+      canonicalEnglishName: canonicalEnglishName,
+      language: json['language'] as String?,
       quantity: (json['quantity'] as num).toDouble(),
       unit: json['unit'] as String,
       confidence: (json['confidence'] as num).toDouble(),

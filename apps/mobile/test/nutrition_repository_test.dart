@@ -26,7 +26,9 @@ void main() {
             {
               'mention': {
                 'originalText': 'queso',
+                'canonicalName': 'queso',
                 'canonicalEnglishName': 'cheese',
+                'language': 'es',
                 'quantity': 100,
                 'unit': 'g',
                 'confidence': 0.92,
@@ -56,6 +58,11 @@ void main() {
       final result = await repository.logText('100 gramos de queso');
 
       expect(result.candidateGroups, hasLength(1));
+      expect(result.candidateGroups!.single.mention.canonicalName, 'queso');
+      expect(
+        result.candidateGroups!.single.mention.canonicalEnglishName,
+        'cheese',
+      );
       expect(result.candidateGroups!.single.candidates, hasLength(10));
       expect(
         result.candidateGroups!.single.candidates[9].name,

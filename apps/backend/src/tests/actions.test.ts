@@ -441,7 +441,9 @@ describe("action loop", () => {
             mentions: [
               {
                 originalText: "100 gramos de pollo",
+                canonicalName: "pollo",
                 canonicalEnglishName: "chicken breast",
+                language: "es",
                 quantity: 100,
                 unit: "g",
                 rawUnitText: "gramos",
@@ -451,7 +453,9 @@ describe("action loop", () => {
               },
               {
                 originalText: "100 gramos de arroz",
+                canonicalName: "arroz",
                 canonicalEnglishName: "rice",
+                language: "es",
                 quantity: 100,
                 unit: "g",
                 rawUnitText: "gramos",
@@ -470,7 +474,7 @@ describe("action loop", () => {
     const body = (await proposalResponse.json()) as {
       output: {
         proposal: {
-          items: { name: string; quantity: number }[];
+          items: { name: string; canonicalName?: string; quantity: number }[];
         };
         instrumentation: {
           inputMode: string;
@@ -489,6 +493,12 @@ describe("action loop", () => {
       expect.arrayContaining([
         expect.objectContaining({ name: "Chicken breast", quantity: 100 }),
         expect.objectContaining({ name: "Cooked rice", quantity: 100 }),
+      ]),
+    );
+    expect(body.output.proposal.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ canonicalName: "pollo" }),
+        expect.objectContaining({ canonicalName: "arroz" }),
       ]),
     );
   });

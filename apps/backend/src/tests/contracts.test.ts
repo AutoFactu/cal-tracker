@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   actionDefinitions,
   actionById,
+  foodMentionSchema,
   mealItemSchema,
   searchNutritionDatabaseOutputSchema,
 } from "@cal-tracker/contracts";
@@ -83,5 +84,30 @@ describe("contracts", () => {
         ],
       }).candidateGroups,
     ).toHaveLength(1);
+  });
+
+  it("accepts language-aware food mentions while preserving legacy mentions", () => {
+    expect(
+      foodMentionSchema.parse({
+        originalText: "pan",
+        canonicalName: "pan",
+        language: "es",
+        quantity: 100,
+        unit: "g",
+        confidence: 0.95,
+        marketProduct: false,
+      }).canonicalName,
+    ).toBe("pan");
+
+    expect(
+      foodMentionSchema.parse({
+        originalText: "bread",
+        canonicalEnglishName: "bread",
+        quantity: 100,
+        unit: "g",
+        confidence: 0.95,
+        marketProduct: false,
+      }).canonicalEnglishName,
+    ).toBe("bread");
   });
 });

@@ -66,6 +66,42 @@ const localCandidateSymbol = Symbol("localCandidate");
 type MealItemWithResolvedGrams = MealItem & { [resolvedGramsSymbol]?: number };
 type MealItemWithLocalMarker = MealItem & { [localCandidateSymbol]?: boolean };
 
+function canonicalNameForMention(mention: FoodMention): string {
+  return normalizeFoodName(
+    mention.canonicalName ??
+      mention.canonicalEnglishName ??
+      mention.originalText,
+  );
+}
+
+function canonicalEnglishFallbackName(mention: FoodMention): string | undefined {
+  if (!mention.canonicalEnglishName) return undefined;
+  const fallback = normalizeFoodName(mention.canonicalEnglishName);
+  return fallback && fallback !== canonicalNameForMention(mention)
+    ? fallback
+    : undefined;
+}
+
+function searchQueriesForMention(mention: FoodMention): string[] {
+  const queries = [
+    canonicalNameForMention(mention),
+    canonicalEnglishFallbackName(mention),
+  ].filter((query): query is string => Boolean(query));
+  return [...new Set(queries)];
+}
+
+function mentionForSearchQuery(
+  mention: FoodMention,
+  query: string,
+): FoodMention {
+  if (query === canonicalNameForMention(mention)) return mention;
+  return {
+    ...mention,
+    canonicalName: query,
+    canonicalEnglishName: query,
+  };
+}
+
 export class FoodResolver {
   constructor(
     private readonly extractor: FoodTextExtractor,
@@ -126,9 +162,11 @@ export class FoodResolver {
     query: string,
     barcode?: string,
   ): Promise<FoodSearchResult> {
+    const canonicalName = normalizeFoodName(query);
     const mention: FoodMention = {
       originalText: query,
-      canonicalEnglishName: normalizeFoodName(query),
+      canonicalName,
+      canonicalEnglishName: canonicalName,
       quantity: 100,
       unit: "g",
       rawUnitText: "g",
@@ -250,6 +288,7 @@ function servingGramsForMealItem(item: MealItem): number {
   if (item.unit === "g") return item.quantity;
   const fallbackPortion = seededFallbackPortionForMention({
     originalText: item.originalText ?? item.name,
+    canonicalName: item.canonicalName ?? item.name,
     canonicalEnglishName: item.canonicalName ?? item.name,
     quantity: item.quantity,
     unit: item.unit,
@@ -295,9 +334,11 @@ export class OpenRouterFoodTextExtractor implements FoodTextExtractor {
               content: [
                 "Extract foods from meal text as strict JSON.",
                 "For every food, preserve the user's exact food phrase in originalText.",
-                "Translate each food name into a generic English USDA FoodData Central search term in canonicalEnglishName.",
+                "Normalize each food name in the same language as the meal text in canonicalName.",
+                "Include language as an ISO 639-1 code when clear.",
+                "Optionally include canonicalEnglishName as an English fallback search term, but do not replace canonicalName with English unless the user wrote English.",
                 "Use common generic food names, not brands, recipes, or nutrition estimates.",
-                'Return {"mentions":[{"originalText":"...","canonicalEnglishName":"...","quantity":100,"unit":"g","rawUnitText":"grams","unitKind":"metric","portionDescriptorRaw":"extra large","portionDescriptor":"extra large","confidence":0.9,"marketProduct":false}]}',
+                'Return {"mentions":[{"originalText":"...","canonicalName":"...","canonicalEnglishName":"...","language":"es","quantity":100,"unit":"g","rawUnitText":"grams","unitKind":"metric","portionDescriptorRaw":"extra large","portionDescriptor":"extra large","confidence":0.9,"marketProduct":false}]}',
                 "Use the text only to parse quantity, raw unit, and food name; do not decide whether a non-metric unit is valid.",
                 "Use grams when the user gives gram quantities.",
                 "Use household for explicit measures like cup, tbsp, slice, breast, or egg.",
@@ -357,20 +398,32 @@ export class LocalFoodDataProvider implements FoodDataProvider {
     userId: string,
     mention: FoodMention,
   ): Promise<FoodProviderResolution> {
-    const foods = await this.searchFoods(userId, mention);
-    let compatibleFoods = foods
-      .filter((food) => cachedFoodIsCompatible(food, mention))
-      .sort((a, b) =>
-        (b.finalScore ?? 0) - (a.finalScore ?? 0) ||
-        localFoodPriority(a, mention) - localFoodPriority(b, mention),
-      );
+    let foods: Array<FoodItemRecord & Partial<FoodSearchCandidate>> = [];
+    let compatibleFoods: Array<FoodItemRecord & Partial<FoodSearchCandidate>> =
+      [];
+    let scoringMention = mention;
+    for (const query of searchQueriesForMention(mention)) {
+      const searchMention = mentionForSearchQuery(mention, query);
+      const queryFoods = await this.searchFoods(userId, mention, query);
+      const queryCompatibleFoods = queryFoods
+        .filter((food) => cachedFoodIsCompatible(food, searchMention))
+        .sort((a, b) =>
+          (b.finalScore ?? 0) - (a.finalScore ?? 0) ||
+          localFoodPriority(a, searchMention) -
+            localFoodPriority(b, searchMention),
+        );
+      foods = queryFoods;
+      compatibleFoods = queryCompatibleFoods;
+      scoringMention = searchMention;
+      if (compatibleFoods.length > 0) break;
+    }
     if (
       compatibleFoods.length === 0 &&
       this.options.embeddingProvider &&
       !hasMarketProductIntent(mention)
     ) {
       compatibleFoods = (await this.repository.searchFoodsHybrid(userId, {
-        query: mention.canonicalEnglishName,
+        query: canonicalNameForMention(mention),
         barcode: mention.barcode,
         excludeBranded: true,
         limit: 50,
@@ -380,6 +433,7 @@ export class LocalFoodDataProvider implements FoodDataProvider {
           (a, b) =>
             localFoodPriority(a, mention) - localFoodPriority(b, mention),
         );
+      scoringMention = mention;
     }
     const items: MealItem[] = [];
     let reason: FoodCandidateGroup["reason"] | undefined;
@@ -391,10 +445,10 @@ export class LocalFoodDataProvider implements FoodDataProvider {
         food.externalId,
       );
       const item = itemFromFood(food, mention, {
-          confidence: localConfidence(food, mention),
-          source: food.source,
-          portionOptions: localPortionOptions,
-          allowSeededPortionFallback: this.options.allowSeededPortionFallback,
+        confidence: localConfidence(food, scoringMention),
+        source: food.source,
+        portionOptions: localPortionOptions,
+        allowSeededPortionFallback: this.options.allowSeededPortionFallback,
       });
       if (item) {
         item.lexicalScore = food.lexicalScore ?? item.lexicalScore;
@@ -430,17 +484,18 @@ export class LocalFoodDataProvider implements FoodDataProvider {
   private async searchFoods(
     userId: string,
     mention: FoodMention,
+    query = canonicalNameForMention(mention),
   ): Promise<Array<FoodItemRecord & Partial<FoodSearchCandidate>>> {
     if (!mention.barcode && this.options.embeddingProvider) {
       try {
         const model = await this.repository.getActiveEmbeddingModel();
         if (model) {
           const embedding = (await this.options.embeddingProvider.embed([
-            mention.canonicalEnglishName,
+            query,
           ])).data[0]?.embedding;
           if (embedding) {
             return await this.repository.searchFoodsHybrid(userId, {
-              query: mention.canonicalEnglishName,
+              query,
               barcode: mention.barcode,
               embedding,
               embeddingModelId: model.id,
@@ -454,7 +509,7 @@ export class LocalFoodDataProvider implements FoodDataProvider {
       }
     }
     return this.repository.searchFoodsHybrid(userId, {
-      query: mention.canonicalEnglishName,
+      query,
       barcode: mention.barcode,
       excludeBranded: !hasMarketProductIntent(mention),
       limit: 50,
@@ -531,24 +586,28 @@ export class OpenFoodFactsFoodDataProvider implements FoodDataProvider {
   private async searchFirst(
     mention: FoodMention,
   ): Promise<OpenFoodFactsProduct | null> {
-    const url = new URL(`${this.baseUrl}/cgi/search.pl`);
-    url.searchParams.set(
-      "search_terms",
-      [mention.brand, mention.canonicalEnglishName].filter(Boolean).join(" "),
-    );
-    url.searchParams.set("search_simple", "1");
-    url.searchParams.set("action", "process");
-    url.searchParams.set("json", "1");
-    url.searchParams.set("page_size", "1");
-    const response = await fetch(url, {
-      signal: timeoutSignal(this.timeoutMs),
-      headers: { "User-Agent": this.userAgent },
-    });
-    if (!response.ok) return null;
-    const json = (await response.json()) as {
-      products?: OpenFoodFactsProduct[];
-    };
-    return json.products?.[0] ?? null;
+    for (const query of searchQueriesForMention(mention)) {
+      const url = new URL(`${this.baseUrl}/cgi/search.pl`);
+      url.searchParams.set(
+        "search_terms",
+        [mention.brand, query].filter(Boolean).join(" "),
+      );
+      url.searchParams.set("search_simple", "1");
+      url.searchParams.set("action", "process");
+      url.searchParams.set("json", "1");
+      url.searchParams.set("page_size", "1");
+      const response = await fetch(url, {
+        signal: timeoutSignal(this.timeoutMs),
+        headers: { "User-Agent": this.userAgent },
+      });
+      if (!response.ok) continue;
+      const json = (await response.json()) as {
+        products?: OpenFoodFactsProduct[];
+      };
+      const product = json.products?.[0];
+      if (product) return product;
+    }
+    return null;
   }
 }
 
@@ -573,69 +632,85 @@ export class UsdaFoodDataProvider implements FoodDataProvider {
           ? "unsupported_unit"
           : undefined,
       };
-    const url = new URL(`${this.baseUrl}/foods/search`);
-    url.searchParams.set("api_key", this.apiKey);
-    url.searchParams.set("query", mention.canonicalEnglishName);
-    url.searchParams.set("pageSize", "25");
-    url.searchParams.set("dataType", "Foundation,SR Legacy");
-    const response = await fetch(url, {
-      signal: timeoutSignal(this.timeoutMs),
-    });
-    if (!response.ok) return { items: [] };
-    let json: { foods?: UsdaFood[] };
-    try {
-      json = (await response.json()) as { foods?: UsdaFood[] };
-    } catch {
-      return { items: [] };
-    }
-    const items: MealItem[] = [];
     let reason: FoodCandidateGroup["reason"] | undefined;
     let portionChoices: FoodPortionChoice[] | undefined;
-    const scoredFoods = (json.foods ?? [])
-      .map((food) => ({ food, score: scoreUsdaCandidate(food, mention) }))
-      .filter(
-        (entry): entry is { food: UsdaFood; score: UsdaCandidateScore } =>
-          Boolean(entry.score),
-      )
-      .sort((a, b) => b.score.confidence - a.score.confidence);
-    for (const { food, score } of scoredFoods) {
-      const foodWithNutrition = hasUsdaNutrition(food)
-        ? food
-        : ((await this.fetchFoodDetail(food.fdcId)) ?? food);
-      let portionOptions: PortionOption[] | undefined;
-      let portionResolution: PortionResolution | undefined;
-      if (requiresPortionValidation(mention)) {
-        portionOptions = await this.fetchPortionOptions(food.fdcId);
-        portionResolution = resolvePortionForMention(mention, portionOptions);
-        if (portionResolution.reason) {
-          reason ??= portionResolution.reason;
-          portionChoices ??= portionResolution.choices;
-        }
-      }
-      const item = mapUsdaFood(
-        foodWithNutrition,
-        mention,
-        portionOptions,
-        portionResolution?.portion,
-        score,
-      );
-      if (item) {
-        items.push(item);
+    for (const query of searchQueriesForMention(mention)) {
+      const searchMention = mentionForSearchQuery(mention, query);
+      const url = new URL(`${this.baseUrl}/foods/search`);
+      url.searchParams.set("api_key", this.apiKey);
+      url.searchParams.set("query", query);
+      url.searchParams.set("pageSize", "25");
+      url.searchParams.set("dataType", "Foundation,SR Legacy");
+      const response = await fetch(url, {
+        signal: timeoutSignal(this.timeoutMs),
+      });
+      if (!response.ok) continue;
+      let json: { foods?: UsdaFood[] };
+      try {
+        json = (await response.json()) as { foods?: UsdaFood[] };
+      } catch {
         continue;
       }
-      if (
-        requiresPortionValidation(mention) &&
-        hasUsdaNutrition(foodWithNutrition)
-      ) {
-        reason ??= portionResolution?.reason ?? "unsupported_unit";
-        portionChoices ??= portionResolution?.choices;
+      const items: MealItem[] = [];
+      const scoredFoods = (json.foods ?? [])
+        .map((food) => ({
+          food,
+          score: scoreUsdaCandidate(food, searchMention),
+        }))
+        .filter(
+          (entry): entry is { food: UsdaFood; score: UsdaCandidateScore } =>
+            Boolean(entry.score),
+        )
+        .sort((a, b) => b.score.confidence - a.score.confidence);
+      for (const { food, score } of scoredFoods) {
+        const foodWithNutrition = hasUsdaNutrition(food)
+          ? food
+          : ((await this.fetchFoodDetail(food.fdcId)) ?? food);
+        let portionOptions: PortionOption[] | undefined;
+        let portionResolution: PortionResolution | undefined;
+        if (requiresPortionValidation(mention)) {
+          portionOptions = await this.fetchPortionOptions(food.fdcId);
+          portionResolution = resolvePortionForMention(
+            mention,
+            portionOptions,
+          );
+          if (portionResolution.reason) {
+            reason ??= portionResolution.reason;
+            portionChoices ??= portionResolution.choices;
+          }
+        }
+        const item = mapUsdaFood(
+          foodWithNutrition,
+          mention,
+          portionOptions,
+          portionResolution?.portion,
+          score,
+        );
+        if (item) {
+          items.push(item);
+          continue;
+        }
+        if (
+          requiresPortionValidation(mention) &&
+          hasUsdaNutrition(foodWithNutrition)
+        ) {
+          reason ??= portionResolution?.reason ?? "unsupported_unit";
+          portionChoices ??= portionResolution?.choices;
+        }
+      }
+      items.sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+      if (items.length > 0) {
+        return {
+          items,
+          reason: undefined,
+          portionOptions: undefined,
+        };
       }
     }
-    items.sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
     return {
-      items,
-      reason: items.length === 0 ? reason : undefined,
-      portionOptions: items.length === 0 ? portionChoices : undefined,
+      items: [],
+      reason,
+      portionOptions: portionChoices,
     };
   }
 
@@ -730,6 +805,7 @@ function extractCountMentions(text: string): FoodMention[] {
       originalText: [match[1], portionDescriptorRaw, foodText]
         .filter(Boolean)
         .join(" "),
+      canonicalName: canonical,
       canonicalEnglishName: canonical,
       quantity,
       unit: normalizeUnit(foodText, canonical),
@@ -752,10 +828,11 @@ function buildMention(
   unitKind: UnitKind,
   originalText = foodText,
 ): FoodMention {
-  const canonicalEnglishName = normalizeFoodName(foodText);
+  const canonicalName = normalizeFoodName(foodText);
   return {
     originalText,
-    canonicalEnglishName,
+    canonicalName,
+    canonicalEnglishName: canonicalName,
     quantity,
     unit,
     rawUnitText,
@@ -804,7 +881,7 @@ function itemFromFood(
     ...item,
     source: options.source,
     originalText: mention.originalText,
-    canonicalName: mention.canonicalEnglishName,
+    canonicalName: canonicalNameForMention(mention),
     externalSource: food.externalSource,
     externalId: food.externalId,
     sourceUrl: food.sourceUrl,
@@ -857,8 +934,9 @@ function localConfidence(food: FoodItemRecord, mention: FoodMention): number {
     return Math.min(0.99, roundTwo(score.confidence + localCorpusBoost));
   }
   const canonical = normalizeText(food.canonicalName ?? food.normalizedName);
-  if (canonical === normalizeText(mention.canonicalEnglishName)) return 0.96;
-  if (food.normalizedName === normalizeText(mention.canonicalEnglishName))
+  const mentionCanonical = canonicalNameForMention(mention);
+  if (canonical === mentionCanonical) return 0.96;
+  if (food.normalizedName === mentionCanonical)
     return 0.94;
   return 0.78;
 }
@@ -887,15 +965,16 @@ function mapOpenFoodFactsProduct(
     !isNumber(fatGrams)
   )
     return null;
+  const canonicalName = canonicalNameForMention(mention);
   const base: FoodItemRecord = {
-    id: product.code ?? mention.canonicalEnglishName,
+    id: product.code ?? canonicalName,
     name:
       product.product_name ||
       product.product_name_en ||
       product.brands ||
-      mention.canonicalEnglishName,
-    normalizedName: normalizeText(mention.canonicalEnglishName),
-    canonicalName: mention.canonicalEnglishName,
+      canonicalName,
+    normalizedName: normalizeText(canonicalName),
+    canonicalName,
     brand: product.brands,
     barcode: product.code,
     source: "openfoodfacts",
@@ -933,12 +1012,13 @@ function mapUsdaFood(
     !isNumber(fatGrams)
   )
     return null;
-  const description = food.description ?? mention.canonicalEnglishName;
+  const canonicalName = canonicalNameForMention(mention);
+  const description = food.description ?? canonicalName;
   const base: FoodItemRecord = {
     id: String(food.fdcId),
     name: titleCase(description),
-    normalizedName: normalizeText(mention.canonicalEnglishName),
-    canonicalName: mention.canonicalEnglishName,
+    normalizedName: normalizeText(canonicalName),
+    canonicalName,
     source: "usda_fdc",
     externalSource: "usda_fdc",
     externalId: String(food.fdcId),
@@ -972,7 +1052,8 @@ export function scoreUsdaCandidate(
   food: Pick<UsdaFood, "description" | "dataType">,
   mention: FoodMention,
 ): UsdaCandidateScore | null {
-  const canonicalTokens = meaningfulFoodTokens(mention.canonicalEnglishName);
+  const canonicalName = canonicalNameForMention(mention);
+  const canonicalTokens = meaningfulFoodTokens(canonicalName);
   if (canonicalTokens.length === 0) return null;
 
   const description = food.description ?? "";
@@ -986,9 +1067,9 @@ export function scoreUsdaCandidate(
   if (matchedTokenCount !== canonicalTokens.length) return null;
 
   const normalizedDescription = normalizeText(description);
-  const normalizedCanonical = normalizeText(mention.canonicalEnglishName);
+  const normalizedCanonical = normalizeText(canonicalName);
   const inputTokenSet = new Set([
-    ...meaningfulFoodTokens(mention.canonicalEnglishName),
+    ...meaningfulFoodTokens(canonicalName),
     ...meaningfulFoodTokens(mention.originalText),
   ]);
   const segments = description
@@ -1179,6 +1260,8 @@ function parseMention(input: unknown): FoodMention | null {
   const value = input as Record<string, unknown>;
   const originalText =
     typeof value.originalText === "string" ? value.originalText : undefined;
+  const canonicalName =
+    typeof value.canonicalName === "string" ? value.canonicalName : undefined;
   const canonicalEnglishName =
     typeof value.canonicalEnglishName === "string"
       ? value.canonicalEnglishName
@@ -1186,8 +1269,18 @@ function parseMention(input: unknown): FoodMention | null {
   const quantity =
     typeof value.quantity === "number" ? value.quantity : undefined;
   const unit = typeof value.unit === "string" ? value.unit : undefined;
-  if (!originalText || !canonicalEnglishName || !quantity || !unit) return null;
-  const normalizedCanonical = normalizeText(canonicalEnglishName);
+  if (
+    !originalText ||
+    (!canonicalName && !canonicalEnglishName) ||
+    !quantity ||
+    !unit
+  )
+    return null;
+  const normalizedCanonical = normalizeFoodName(
+    canonicalName ?? canonicalEnglishName!,
+  );
+  const normalizedCanonicalEnglish =
+    canonicalEnglishName ? normalizeFoodName(canonicalEnglishName) : undefined;
   const rawUnitText =
     typeof value.rawUnitText === "string" ? value.rawUnitText : unit;
   const unitKind = parseUnitKind(
@@ -1207,7 +1300,9 @@ function parseMention(input: unknown): FoodMention | null {
   );
   return {
     originalText,
-    canonicalEnglishName: normalizedCanonical,
+    canonicalName: normalizedCanonical,
+    canonicalEnglishName: normalizedCanonicalEnglish,
+    language: typeof value.language === "string" ? value.language : undefined,
     quantity:
       unitKind === "metric"
         ? normalizeQuantity(quantity, rawUnitText)
@@ -1306,7 +1401,7 @@ function unitKindForMention(mention: FoodMention): UnitKind {
     inferUnitKind(
       mention.rawUnitText ?? mention.unit,
       mention.unit,
-      mention.canonicalEnglishName,
+      canonicalNameForMention(mention),
     )
   );
 }
@@ -1362,7 +1457,9 @@ function resolvedGrams(item: MealItem): number | undefined {
 function mergeDuplicateMentions(mentions: FoodMention[]): FoodMention[] {
   const deduped = new Map<string, FoodMention>();
   for (const mention of mentions) {
-    const key = `${mention.canonicalEnglishName}:${mention.quantity}:${mention.unit}:${mention.portionDescriptor ?? ""}`;
+    const key = `${canonicalNameForMention(mention)}:${mention.quantity}:${
+      mention.unit
+    }:${mention.portionDescriptor ?? ""}`;
     if (!deduped.has(key)) deduped.set(key, mention);
   }
   return [...deduped.values()];
@@ -1699,7 +1796,7 @@ function seededFallbackPortionForMention(
 ): PortionOption | undefined {
   return findMatchingPortion(
     mention,
-    seededPortionFallbacks.get(normalizeText(mention.canonicalEnglishName)) ??
+    seededPortionFallbacks.get(canonicalNameForMention(mention)) ??
       [],
   );
 }
@@ -1777,7 +1874,7 @@ function findExplicitUnitPortion(
   const unitKind = unitKindForMention(mention);
   const desired = normalizeText(mention.unit);
   const raw = normalizeText(mention.rawUnitText ?? mention.unit);
-  const canonical = normalizeText(mention.canonicalEnglishName);
+  const canonical = canonicalNameForMention(mention);
   const foodAliases = aliasesForCanonical(canonical);
 
   return portions.find((portion) => {
@@ -1815,9 +1912,10 @@ function portionChoicesForMention(
     if (seen.has(key)) continue;
     seen.add(key);
     const totalGrams = roundOne(mention.quantity * portion.gramWeight);
+    const canonicalName = canonicalNameForMention(mention);
     const label =
       portion.kind === "household" || portion.kind === "piece_shape"
-        ? `${formatQuantity(mention.quantity)} ${unit} ${mention.canonicalEnglishName}`
+        ? `${formatQuantity(mention.quantity)} ${unit} ${canonicalName}`
         : `${formatQuantity(mention.quantity)} ${unit}`;
     choices.push({
       label,
@@ -1827,7 +1925,7 @@ function portionChoicesForMention(
       totalGrams,
       kind: portion.kind,
       portionDescriptor: portion.size ?? portion.shape,
-      canonicalFoodName: mention.canonicalEnglishName,
+      canonicalFoodName: canonicalName,
       sourceDescription: portion.sourceDescription,
       externalSource: "usda_fdc",
       externalFoodId: portion.externalFoodId,
@@ -1841,7 +1939,7 @@ function portionChoicesForMention(
       unit: "g",
       gramWeight: 1,
       kind: "metric",
-      canonicalFoodName: mention.canonicalEnglishName,
+      canonicalFoodName: canonicalNameForMention(mention),
     });
   }
   return choices;
@@ -1869,7 +1967,7 @@ function portionDisplayUnit(
 function baseCountUnit(mention: FoodMention): string {
   const normalized = normalizeText(mention.unit);
   if (normalized && normalized !== "g") return normalized;
-  return normalizeText(mention.canonicalEnglishName);
+  return canonicalNameForMention(mention);
 }
 
 function pluralizeUnit(unit: string, quantity: number): string {

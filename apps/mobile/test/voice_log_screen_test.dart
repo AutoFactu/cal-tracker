@@ -210,6 +210,62 @@ void main() {
         findsOneWidget,
       );
     });
+
+    testWidgets('shows proposal item canonical names in request language', (
+      tester,
+    ) async {
+      final proposal = MealProposal(
+        id: 'prop_pan',
+        title: 'Pan',
+        confidence: 0.82,
+        requiresConfirmation: true,
+        trustedAutoCommitEligible: false,
+        nutrition: const NutritionSnapshot(
+          calories: 265,
+          proteinGrams: 9,
+          carbsGrams: 49,
+          fatGrams: 3,
+        ),
+        items: [
+          _mealItem(
+            name: 'Bread, white, commercially prepared',
+            canonicalName: 'pan',
+            calories: 265,
+            externalId: '501',
+          ),
+        ],
+      );
+      when(() => nutritionRepository.logText('100 gramos de pan')).thenAnswer(
+        (_) async => AgentRunResult(
+          kind: 'proposal',
+          message: 'Meal proposal created.',
+          proposal: proposal,
+        ),
+      );
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider<VoiceLogViewModel>.value(
+          value: viewModel,
+          child: MaterialApp(
+            theme: buildTheme(),
+            home: const MealCreateScreen(),
+          ),
+        ),
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey('meal_text_field')),
+        '100 gramos de pan',
+      );
+      await tester.tap(find.byKey(const ValueKey('submit_meal_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('pan 100 g'), findsOneWidget);
+      expect(
+        find.textContaining('Bread, white, commercially prepared'),
+        findsNothing,
+      );
+    });
   });
 }
 
@@ -234,6 +290,7 @@ MealItem _mealItem({
   required String name,
   required int calories,
   required String externalId,
+  String? canonicalName,
 }) {
   return MealItem(
     name: name,
@@ -246,6 +303,7 @@ MealItem _mealItem({
     source: 'open_food_facts',
     externalSource: 'Open Food Facts',
     externalId: externalId,
+    canonicalName: canonicalName,
     license: 'CC BY-SA',
     confidence: 0.91,
     resolvedGrams: 100,

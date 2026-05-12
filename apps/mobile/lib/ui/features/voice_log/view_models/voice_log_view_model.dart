@@ -634,7 +634,7 @@ class VoiceLogViewModel extends ChangeNotifier {
   }
 
   bool _resolvedItemMatchesGroup(MealItem item, FoodCandidateGroup group) {
-    return item.canonicalName == group.mention.canonicalEnglishName &&
+    return item.canonicalName == group.mention.canonicalName &&
         item.quantity == group.mention.quantity &&
         item.unit == group.mention.unit;
   }
@@ -664,7 +664,7 @@ class VoiceLogViewModel extends ChangeNotifier {
     final mention = group.mention;
     return [
       mention.originalText,
-      mention.canonicalEnglishName,
+      mention.canonicalName,
       mention.quantity.toStringAsFixed(3),
       mention.unit,
     ].join('|');

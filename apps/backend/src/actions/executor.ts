@@ -718,20 +718,32 @@ function unsupportedUnitClarification(
   );
   if (!group) return undefined;
   const mention = group.mention;
+  const canonicalName = canonicalNameForMention(mention);
   if (group.reason === "ambiguous_portion") {
-    return `Which ${mention.canonicalEnglishName} portion did you mean?`;
+    return `Which ${canonicalName} portion did you mean?`;
   }
   const unit = mention.rawUnitText ?? mention.unit;
   const unitAlreadyNamesFood =
-    normalizeText(unit) === normalizeText(mention.canonicalEnglishName);
+    normalizeText(unit) === normalizeText(canonicalName);
   const phrase =
-    `${mention.quantity} ${unit}${unitAlreadyNamesFood ? "" : ` ${mention.canonicalEnglishName}`}`
+    `${mention.quantity} ${unit}${unitAlreadyNamesFood ? "" : ` ${canonicalName}`}`
       .replace(/\s+/g, " ")
       .trim();
   const alternatives = group.portionOptions?.length
     ? " Choose one of the supported portions or use grams."
     : "";
-  return `I could not validate "${phrase}" as a supported portion.${alternatives || ` Please use grams, cups, or another serving size for ${mention.canonicalEnglishName}.`}`;
+  return `I could not validate "${phrase}" as a supported portion.${
+    alternatives ||
+    ` Please use grams, cups, or another serving size for ${canonicalName}.`
+  }`;
+}
+
+function canonicalNameForMention(mention: FoodMention): string {
+  return normalizeText(
+    mention.canonicalName ??
+      mention.canonicalEnglishName ??
+      mention.originalText,
+  );
 }
 
 function inferTitle(text: string, items: MealItem[]): string {

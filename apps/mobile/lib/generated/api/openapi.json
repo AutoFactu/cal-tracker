@@ -2350,9 +2350,18 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "canonicalName": {
+                          "type": "string",
+                          "minLength": 1
+                        },
                         "canonicalEnglishName": {
                           "type": "string",
                           "minLength": 1
+                        },
+                        "language": {
+                          "type": "string",
+                          "minLength": 2,
+                          "maxLength": 16
                         },
                         "quantity": {
                           "type": "number",
@@ -2401,7 +2410,6 @@
                       },
                       "required": [
                         "originalText",
-                        "canonicalEnglishName",
                         "quantity",
                         "unit",
                         "confidence"
@@ -3042,9 +3050,18 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "canonicalName": {
+                      "type": "string",
+                      "minLength": 1
+                    },
                     "canonicalEnglishName": {
                       "type": "string",
                       "minLength": 1
+                    },
+                    "language": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 16
                     },
                     "quantity": {
                       "type": "number",
@@ -3093,7 +3110,6 @@
                   },
                   "required": [
                     "originalText",
-                    "canonicalEnglishName",
                     "quantity",
                     "unit",
                     "confidence"
@@ -3301,9 +3317,18 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "canonicalName": {
+                      "type": "string",
+                      "minLength": 1
+                    },
                     "canonicalEnglishName": {
                       "type": "string",
                       "minLength": 1
+                    },
+                    "language": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 16
                     },
                     "quantity": {
                       "type": "number",
@@ -3352,7 +3377,6 @@
                   },
                   "required": [
                     "originalText",
-                    "canonicalEnglishName",
                     "quantity",
                     "unit",
                     "confidence"
@@ -3570,9 +3594,18 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "canonicalName": {
+                  "type": "string",
+                  "minLength": 1
+                },
                 "canonicalEnglishName": {
                   "type": "string",
                   "minLength": 1
+                },
+                "language": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 16
                 },
                 "quantity": {
                   "type": "number",
@@ -3621,7 +3654,6 @@
               },
               "required": [
                 "originalText",
-                "canonicalEnglishName",
                 "quantity",
                 "unit",
                 "confidence"
@@ -4192,9 +4224,18 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "canonicalName": {
+                  "type": "string",
+                  "minLength": 1
+                },
                 "canonicalEnglishName": {
                   "type": "string",
                   "minLength": 1
+                },
+                "language": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 16
                 },
                 "quantity": {
                   "type": "number",
@@ -4243,7 +4284,6 @@
               },
               "required": [
                 "originalText",
-                "canonicalEnglishName",
                 "quantity",
                 "unit",
                 "confidence"
@@ -4263,9 +4303,18 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "canonicalName": {
+                      "type": "string",
+                      "minLength": 1
+                    },
                     "canonicalEnglishName": {
                       "type": "string",
                       "minLength": 1
+                    },
+                    "language": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 16
                     },
                     "quantity": {
                       "type": "number",
@@ -4314,7 +4363,6 @@
                   },
                   "required": [
                     "originalText",
-                    "canonicalEnglishName",
                     "quantity",
                     "unit",
                     "confidence"

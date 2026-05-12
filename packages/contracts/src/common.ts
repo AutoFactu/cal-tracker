@@ -76,7 +76,9 @@ export const mealItemSchema = z.object({
 
 export const foodMentionSchema = z.object({
   originalText: z.string().min(1),
-  canonicalEnglishName: z.string().min(1),
+  canonicalName: z.string().min(1).optional(),
+  canonicalEnglishName: z.string().min(1).optional(),
+  language: z.string().min(2).max(16).optional(),
   quantity: z.number().positive(),
   unit: z.string().min(1),
   rawUnitText: z.string().min(1).optional(),
@@ -87,6 +89,14 @@ export const foodMentionSchema = z.object({
   barcode: z.string().optional(),
   confidence: z.number().min(0).max(1),
   marketProduct: z.boolean().default(false)
+}).superRefine((mention, ctx) => {
+  if (!mention.canonicalName && !mention.canonicalEnglishName) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "canonicalName or canonicalEnglishName is required",
+      path: ["canonicalName"]
+    });
+  }
 });
 
 export const foodCandidateSchema = z.object({

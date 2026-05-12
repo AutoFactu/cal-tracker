@@ -54,6 +54,7 @@ function testFoodRepository(): InMemoryRepository {
 function mention(name: string, originalText = name): FoodMention {
   return {
     originalText,
+    canonicalName: name,
     canonicalEnglishName: name,
     quantity: 100,
     unit: "g",
@@ -253,12 +254,14 @@ describe("FoodResolver", () => {
       expect.arrayContaining([
         expect.objectContaining({
           originalText: "pan",
+          canonicalName: "pan",
           canonicalEnglishName: "pan",
           quantity: 100,
           unit: "g",
         }),
         expect.objectContaining({
           originalText: "jamon",
+          canonicalName: "jamon",
           canonicalEnglishName: "jamon",
           quantity: 100,
           unit: "g",
@@ -267,7 +270,7 @@ describe("FoodResolver", () => {
     );
   });
 
-  it("uses OpenRouter translation before USDA for Spanish bread and butter", async () => {
+  it("uses the request language before English fallback for Spanish bread and butter", async () => {
     const queries: string[] = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -281,7 +284,9 @@ describe("FoodResolver", () => {
                     mentions: [
                       {
                         originalText: "pan",
+                        canonicalName: "pan",
                         canonicalEnglishName: "bread",
+                        language: "es",
                         quantity: 100,
                         unit: "g",
                         rawUnitText: "gramos",
@@ -291,7 +296,9 @@ describe("FoodResolver", () => {
                       },
                       {
                         originalText: "mantequilla",
+                        canonicalName: "mantequilla",
                         canonicalEnglishName: "butter",
+                        language: "es",
                         quantity: 100,
                         unit: "g",
                         rawUnitText: "gramos",
@@ -314,9 +321,12 @@ describe("FoodResolver", () => {
         queries.push(query);
         return new Response(
           JSON.stringify({
-            foods: query.includes("butter")
-              ? [usdaFood(502, "Butter, salted")]
-              : [usdaFood(501, "Bread, white, commercially prepared")],
+            foods:
+              query === "butter"
+                ? [usdaFood(502, "Butter, salted")]
+                : query === "bread"
+                  ? [usdaFood(501, "Bread, white, commercially prepared")]
+                  : [],
           }),
           { status: 200 },
         );
@@ -343,17 +353,23 @@ describe("FoodResolver", () => {
       "Añade a mi desayuno 100 gramos de pan y 100 gramos de mantequilla.",
     );
 
-    expect(queries).toEqual(expect.arrayContaining(["bread", "butter"]));
+    expect(queries).toEqual(
+      expect.arrayContaining(["pan", "bread", "mantequilla", "butter"]),
+    );
+    expect(queries.indexOf("pan")).toBeLessThan(queries.indexOf("bread"));
+    expect(queries.indexOf("mantequilla")).toBeLessThan(
+      queries.indexOf("butter"),
+    );
     expect(result.clarificationRequired).toBe(false);
     expect(result.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          canonicalName: "bread",
+          canonicalName: "pan",
           externalSource: "usda_fdc",
           externalId: "501",
         }),
         expect.objectContaining({
-          canonicalName: "butter",
+          canonicalName: "mantequilla",
           externalSource: "usda_fdc",
           externalId: "502",
         }),

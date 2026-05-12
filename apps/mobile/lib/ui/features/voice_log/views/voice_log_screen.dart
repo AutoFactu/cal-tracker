@@ -296,7 +296,7 @@ class _ResolverClarificationCardState
           const SizedBox(height: FreshSpacing.sm),
           for (final group in widget.groups) ...[
             Text(
-              '${group.mention.originalText} -> ${group.mention.canonicalEnglishName}',
+              '${group.mention.originalText} -> ${group.mention.canonicalName}',
               style: textTheme.titleSmall,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
@@ -312,7 +312,7 @@ class _ResolverClarificationCardState
                       index++)
                     _PortionChoiceChip(
                       key: ValueKey(
-                        'portion_option_${group.mention.canonicalEnglishName}_$index',
+                        'portion_option_${group.mention.canonicalName}_$index',
                       ),
                       choice: group.portionOptions![index],
                       onSelected: widget.onPortionSelected,
@@ -356,7 +356,7 @@ class _ResolverClarificationCardState
     final mention = group.mention;
     return [
       mention.originalText,
-      mention.canonicalEnglishName,
+      mention.canonicalName,
       mention.quantity.toStringAsFixed(3),
       mention.unit,
     ].join('|');
@@ -391,7 +391,7 @@ class _CandidateList extends StatelessWidget {
         for (final index in visibleIndexes)
           _CandidateMealLine(
             key: ValueKey(
-              'food_candidate_${group.mention.canonicalEnglishName}_$index',
+              'food_candidate_${group.mention.canonicalName}_$index',
             ),
             candidate: candidates[index],
             selected: isCandidateSelected(group, candidates[index]),
@@ -403,7 +403,7 @@ class _CandidateList extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
               key: ValueKey(
-                'food_candidate_toggle_${group.mention.canonicalEnglishName}',
+                'food_candidate_toggle_${group.mention.canonicalName}',
               ),
               onPressed: onToggleExpanded,
               icon: Icon(
@@ -1120,7 +1120,7 @@ class _ProposalCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
               child: Text(
-                '${item.name} ${_formatQuantity(item.quantity)} ${item.unit}',
+                '${_mealItemDisplayName(item)} ${_formatQuantity(item.quantity)} ${item.unit}',
                 style: textTheme.bodyMedium,
               ),
             ),
@@ -1750,7 +1750,7 @@ bool _itemMatchesCandidateGroup(MealItem item, FoodCandidateGroup group) {
   if (group.candidates.any((candidate) => _sameMealItem(candidate, item))) {
     return true;
   }
-  return item.canonicalName == group.mention.canonicalEnglishName ||
+  return item.canonicalName == group.mention.canonicalName ||
       item.originalText == group.mention.originalText;
 }
 
@@ -1870,6 +1870,9 @@ String _formatQuantity(double value) {
   if (value == value.roundToDouble()) return value.toInt().toString();
   return value.toStringAsFixed(1);
 }
+
+String _mealItemDisplayName(MealItem item) =>
+    item.canonicalName?.isNotEmpty == true ? item.canonicalName! : item.name;
 
 String _formatMacro(double value) {
   if (value == value.roundToDouble()) return value.toInt().toString();
