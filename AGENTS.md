@@ -77,13 +77,17 @@ Required local assumptions:
 - Device ID after boot: `emulator-5554`
 - KVM must be available at `/dev/kvm`
 
-Use this exact startup sequence for voice-capable testing. Start the emulator as a transient user systemd service so it is not tied to the coding agent command process.
+Use this exact startup sequence for local development and voice-capable testing. Start the emulator as a transient user systemd service so it is not tied to the coding agent command process, but do not give the service an automatic restart policy. If the emulator crashes, inspect the crash instead of masking it with a restart loop.
 
 ```bash
 export PATH="/home/javier/Android/Sdk/emulator:/home/javier/Android/Sdk/platform-tools:$PATH"
 
-# Remove stale emulator processes only.
+# Stop only Cal Tracker emulator/app services from previous runs.
+systemctl --user stop cal-tracker-app-watch.service 2>/dev/null || true
 systemctl --user stop cal-tracker-emulator.service 2>/dev/null || true
+systemctl --user stop cal-tracker-emulator-test.service 2>/dev/null || true
+
+# Remove stale emulator processes only.
 ps aux | awk '/qemu-system/ && !/awk/ {print $2}' | xargs -r kill -9
 sleep 2
 
@@ -96,7 +100,7 @@ systemd-run --user --unit=cal-tracker-emulator --collect \
   -E DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
   -p StandardOutput=append:/tmp/emulator-systemd.log \
   -p StandardError=append:/tmp/emulator-systemd.log \
-  /home/javier/Android/Sdk/emulator/emulator -avd cal_tracker_api36 -no-snapshot -no-snapshot-save -allow-host-audio -no-boot-anim -gpu software -accel on
+  /home/javier/Android/Sdk/emulator/emulator -avd cal_tracker_api36 -no-snapshot -no-snapshot-save -allow-host-audio -no-boot-anim -gpu off -accel on
 
 adb wait-for-device
 adb -s emulator-5554 shell 'while [[ $(getprop sys.boot_completed) != 1 ]]; do sleep 1; done; echo Boot completed'
@@ -109,7 +113,9 @@ Important constraints:
 - Always cold boot with `-no-snapshot -no-snapshot-save`; corrupted snapshots have caused missing Android services.
 - Do not use `-no-audio` when testing Whisper/STT or microphone flows. `-no-audio` disables emulator audio support.
 - Use `-allow-host-audio` for voice testing. Without it, Android Emulator can zero out host microphone input before it reaches the virtual device.
-- Use `-gpu software` on this emulator version. `-gpu swiftshader_indirect` has caused host `RenderThread` segfaults when opening the Stats UI on Android Emulator 36.5.11.
+- Use `-gpu off` on Android Emulator 36.5.11 for the `cal_tracker_api36` AVD. This was the stable local path for keeping the emulator alive while running Flutter with hot reload. `-gpu software` and `-gpu swiftshader_indirect` have both led to native emulator graphics crashes or host `RenderThread` segfaults on this machine.
+- Do not add `Restart=always` to the emulator service. Repeated `qemu-system-x86_64` `SIGSEGV` failures become a constant restart loop and hide the real crash.
+- Do not use an app watchdog service while using `flutter run`; it can fight the Flutter tool. Let `flutter run` own install, launch, logs, hot reload, and hot restart.
 - Keep emulator logs in `/tmp/emulator-systemd.log` and inspect the service with `systemctl --user status cal-tracker-emulator.service`.
 - Wait for `sys.boot_completed == 1` before `adb install`, `flutter run`, or package-manager checks.
 - Do not use broad kill patterns such as `pkill -f bun`; they may kill the backend.
@@ -140,18 +146,27 @@ systemd-run --user --unit=cal-tracker-emulator --collect \
   -E DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
   -p StandardOutput=append:/tmp/emulator-systemd.log \
   -p StandardError=append:/tmp/emulator-systemd.log \
-  /home/javier/Android/Sdk/emulator/emulator -avd cal_tracker_api36 -no-snapshot -no-snapshot-save -allow-host-audio -audio alsa -no-boot-anim -gpu software -accel on
+  /home/javier/Android/Sdk/emulator/emulator -avd cal_tracker_api36 -no-snapshot -no-snapshot-save -allow-host-audio -audio alsa -no-boot-anim -gpu off -accel on
 ```
 
 Use `-no-audio` only for non-voice tests where microphone input is irrelevant.
 
 ### Installing and Running the Flutter App
 
-For normal development and any "start the whole system" request, start the app with `flutter run` so hot reload and hot restart stay available:
+For normal development and any "start the whole system" request, start the emulator using the Android Emulator Initialization section first, verify `sys.boot_completed == 1`, then start the app with `flutter run` so hot reload and hot restart stay available:
 
 ```bash
 cd /home/javier/dev/cal-tracker/apps/mobile
 flutter run --debug --dart-define=API_BASE_URL=http://10.0.2.2:3000 -d emulator-5554
+```
+
+Keep the `flutter run` process attached. Use these Flutter run keys from that terminal:
+
+```text
+r  Hot reload
+R  Hot restart
+d  Detach from Flutter while leaving the app running
+q  Quit the app and Flutter run session
 ```
 
 Use `flutter build apk` plus `adb install -r` only when you specifically need a one-off APK install without a live Flutter tool session:
@@ -174,7 +189,8 @@ adb -s emulator-5554 pull /data/local/tmp/screen.png /tmp/emulator_screen.png
 
 - `offline` in `adb devices`: still booting; wait and retry.
 - `Can't find service: package`: Android services are not ready; wait for `sys.boot_completed` or cold boot again.
-- Sluggish UI is expected with software GPU rendering.
+- Sluggish UI is expected with the stable `-gpu off` emulator path.
+- Constant emulator restarts usually mean a native emulator `SIGSEGV` is being masked by a systemd restart policy. Stop the service, remove `Restart=always`, and inspect `/tmp/emulator-systemd.log` plus `journalctl --user -u cal-tracker-emulator.service --no-pager`.
 - `adb` not found: export the Android SDK `PATH` shown above.
 
 ---
@@ -325,4 +341,4 @@ bun --env-file=.env scripts/test-groq-whisper.ts
 ```
 
 
-*Last updated: 2026-05-09*
+*Last updated: 2026-05-11*

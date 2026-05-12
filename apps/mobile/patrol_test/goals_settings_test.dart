@@ -37,29 +37,36 @@ void main() {
     await $(const ValueKey('nav_home_button')).tap();
     await $(const ValueKey('dashboard_progress_card')).tap();
     await $(const ValueKey('calorie_calculator_link')).tap();
-    await $('Basic profile').waitUntilVisible(
+    await $('What is your biological sex?').waitUntilVisible(
       timeout: const Duration(seconds: 20),
     );
     await $.pumpAndSettle();
 
-    await $(const ValueKey('calorie_wizard_age_field')).enterText('35');
     await $(const ValueKey('calorie_wizard_sex_female')).tap();
+    await $(const ValueKey('calorie_wizard_next_button')).tap();
+
+    await $(const ValueKey('calorie_wizard_age_field')).enterText('35');
+    await $(const ValueKey('calorie_wizard_next_button')).tap();
+
     await $(const ValueKey('calorie_wizard_height_cm_field')).enterText('165');
+    await $(const ValueKey('calorie_wizard_next_button')).tap();
+
     await $(const ValueKey('calorie_wizard_weight_kg_field')).enterText('70');
     await $(const ValueKey('calorie_wizard_next_button')).tap();
 
-    await $(const ValueKey('calorie_wizard_activity_lightly_active')).tap();
+    await $(const ValueKey('calorie_wizard_goal_lose_fat')).tap();
     await $(const ValueKey('calorie_wizard_next_button')).tap();
 
-    await $(const ValueKey('calorie_wizard_goal_lose_fat')).tap();
     await $(const ValueKey('calorie_wizard_pace_moderate')).tap();
+    await $(const ValueKey('calorie_wizard_next_button')).tap();
+
+    await $(const ValueKey('calorie_wizard_activity_lightly_active')).tap();
     await $(const ValueKey('calorie_wizard_next_button')).tap();
 
     await $(const ValueKey('calorie_wizard_target_value')).waitUntilVisible(
       timeout: const Duration(seconds: 20),
     );
     await $(const ValueKey('calorie_wizard_use_estimate_button')).tap();
-    await $(const ValueKey('dashboard_save_calorie_target_button')).tap();
 
     await $('1620').waitUntilVisible(
       timeout: const Duration(seconds: 20),

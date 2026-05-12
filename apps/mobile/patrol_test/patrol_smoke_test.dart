@@ -12,10 +12,10 @@ const _patrolApiConfig = ApiConfig(baseUrl: 'http://10.0.2.2:3000');
 
 void main() {
   patrolTest('auth screen accepts typed credentials', ($) async {
-    await $.pumpWidgetAndSettle(
-      const CalTrackerBootstrap(apiConfig: _patrolApiConfig),
-    );
+    await _pumpApp($);
 
+    expect($(const ValueKey('auth_brand_icon')), findsOneWidget);
+    expect($(const ValueKey('login_hero_carousel')), findsOneWidget);
     await $(const ValueKey('email_field')).enterText('demo@example.com');
     await $(const ValueKey('password_field')).enterText('password123');
 
@@ -28,7 +28,7 @@ void main() {
 
     await $(const ValueKey('main_nav_stats')).tap();
     await $.pumpAndSettle();
-    expect($('Statistic'), findsOneWidget);
+    expect($('Calories and meal history'), findsOneWidget);
 
     await $(const ValueKey('main_nav_usual')).tap();
     await $.pumpAndSettle();
@@ -112,9 +112,7 @@ Future<void> _pumpAndAuthenticate(
   PatrolIntegrationTester $, {
   bool openMealCreate = true,
 }) async {
-  await $.pumpWidgetAndSettle(
-    const CalTrackerBootstrap(apiConfig: _patrolApiConfig),
-  );
+  await _pumpApp($);
   if ($(const ValueKey('meal_text_field')).exists) return;
 
   if (!$(const ValueKey('dashboard_progress_card')).exists) {
@@ -123,7 +121,7 @@ Future<void> _pumpAndAuthenticate(
     await $(const ValueKey('email_field')).enterText(email);
     await $(const ValueKey('password_field')).enterText('password123');
     FocusManager.instance.primaryFocus?.unfocus();
-    await $.pumpAndSettle();
+    await $.pump(const Duration(milliseconds: 300));
     await $(const ValueKey('auth_submit_button')).scrollTo().tap();
     await $(const ValueKey('dashboard_progress_card')).waitUntilVisible(
       timeout: const Duration(seconds: 20),
@@ -133,6 +131,13 @@ Future<void> _pumpAndAuthenticate(
   if (openMealCreate) {
     await _openMealCreate($);
   }
+}
+
+Future<void> _pumpApp(PatrolIntegrationTester $) async {
+  await $.tester.pumpWidget(
+    const CalTrackerBootstrap(apiConfig: _patrolApiConfig),
+  );
+  await $.pump(const Duration(milliseconds: 500));
 }
 
 Future<void> _openMealCreate(PatrolIntegrationTester $) async {

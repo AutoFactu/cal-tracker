@@ -55,6 +55,18 @@ void main() {
     expect(find.byKey(DarkModeToggle.toggleKey), findsOneWidget);
     expect(
         find.byKey(const ValueKey('dashboard_progress_card')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('dashboard_macro_carbs_icon')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('dashboard_macro_protein_icon')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('dashboard_macro_fats_icon')),
+      findsOneWidget,
+    );
     expect(find.byKey(const ValueKey('dashboard_goal_line')), findsNothing);
     expect(find.text('Calendar'), findsNothing);
     expect(find.text('Notifications'), findsNothing);
@@ -164,7 +176,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Set your\ndaily calories.'), findsOneWidget);
+    expect(find.text('Set up your'), findsOneWidget);
+    expect(find.text('daily calories'), findsOneWidget);
+    expect(find.text('Here.'), findsOneWidget);
     expect(find.text('Choose a target to track today.'), findsNothing);
     expect(find.text('Tap to set your calorie target'), findsNothing);
     expect(find.text('??'), findsNothing);
@@ -182,7 +196,9 @@ void main() {
 
     expect(nutritionRepository.updatedCalories, 1900);
     expect(nutritionRepository.updateSource, 'manual');
-    expect(find.text('Set your\ndaily calories.'), findsNothing);
+    expect(find.text('Set up your'), findsNothing);
+    expect(find.text('daily calories'), findsNothing);
+    expect(find.text('Here.'), findsNothing);
     expect(
       find.byKey(const ValueKey('dashboard_remaining_calories')),
       findsOneWidget,
