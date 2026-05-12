@@ -1,10 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../../../data/services/app_preferences_repository.dart';
 import '../../../../l10n/app_localizations_context.dart';
 import '../../../core/design_system.dart';
 import '../view_models/auth_view_model.dart';
+
+const _brandIconAsset = 'assets/images/brand_icon.png';
+const _heroAssets = [
+  'assets/images/login/cropped/auth_hero_01.webp',
+  'assets/images/login/cropped/auth_hero_02.webp',
+  'assets/images/login/cropped/auth_hero_03.webp',
+  'assets/images/login/cropped/auth_hero_04.webp',
+  'assets/images/login/cropped/auth_hero_05.webp',
+];
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -18,29 +26,17 @@ class _AuthScreenState extends State<AuthScreen> {
   final _passwordController = TextEditingController(text: 'password123');
   final _nameController = TextEditingController(text: 'Test User');
   bool _registerMode = false;
-  int _heroIndex = 0;
-  bool _loadedHeroIndex = false;
-
-  static const _heroAssets = [
-    'assets/images/hero_food.webp',
-    'assets/images/hero_food.webp',
-    'assets/images/hero_food.webp',
-    'assets/images/hero_food.webp',
-    'assets/images/hero_food.webp',
-  ];
+  bool _preloadedAuthAssets = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_loadedHeroIndex) return;
-    _loadedHeroIndex = true;
-    context
-        .read<AppPreferencesRepository>()
-        .nextAuthHeroIndex(count: _heroAssets.length)
-        .then((index) {
-      if (!mounted) return;
-      setState(() => _heroIndex = index);
-    });
+    if (_preloadedAuthAssets) return;
+    _preloadedAuthAssets = true;
+    precacheImage(const AssetImage(_brandIconAsset), context);
+    for (final asset in _heroAssets) {
+      precacheImage(AssetImage(asset), context);
+    }
   }
 
   @override
@@ -68,10 +64,8 @@ class _AuthScreenState extends State<AuthScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const _AuthTopBar(),
-                  const SizedBox(height: FreshSpacing.xxl),
-                  const _HeroHeadline(),
-                  const SizedBox(height: FreshSpacing.xl),
-                  _FoodHero(assetPath: _heroAssets[_heroIndex]),
+                  const SizedBox(height: FreshSpacing.lg),
+                  const _LoginHeroCarousel(assets: _heroAssets),
                   const SizedBox(height: FreshSpacing.lg),
                   FreshCard(
                     padding: const EdgeInsets.all(18),
@@ -188,17 +182,15 @@ class _AuthTopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: const BoxDecoration(
-            color: FreshColors.limeWash,
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(
-            Icons.local_fire_department_rounded,
-            color: FreshColors.limeDeep,
-            size: 22,
+        ClipRRect(
+          borderRadius: BorderRadius.circular(13),
+          child: Image.asset(
+            _brandIconAsset,
+            key: const ValueKey('auth_brand_icon'),
+            width: 42,
+            height: 42,
+            fit: BoxFit.cover,
+            filterQuality: FilterQuality.high,
           ),
         ),
         const SizedBox(width: FreshSpacing.sm),
@@ -213,119 +205,230 @@ class _AuthTopBar extends StatelessWidget {
   }
 }
 
-class _HeroHeadline extends StatelessWidget {
-  const _HeroHeadline();
+class _LoginHeroCarousel extends StatefulWidget {
+  const _LoginHeroCarousel({required this.assets});
+
+  final List<String> assets;
 
   @override
-  Widget build(BuildContext context) {
-    final style = Theme.of(context).textTheme.displayLarge?.copyWith(
-          fontSize: 46,
-          fontWeight: FontWeight.w700,
-          height: 1.25,
-        );
-    return RichText(
-      text: TextSpan(
-        style: style,
-        children: [
-          TextSpan(text: context.l10n.authHeroHeadline),
-        ],
-      ),
-    );
-  }
+  State<_LoginHeroCarousel> createState() => _LoginHeroCarouselState();
 }
 
-class _FoodHero extends StatelessWidget {
-  const _FoodHero({required this.assetPath});
+class _LoginHeroCarouselState extends State<_LoginHeroCarousel>
+    with TickerProviderStateMixin {
+  static const _panDuration = Duration(milliseconds: 10500);
+  static const _fadeDuration = Duration(milliseconds: 900);
+  static final _fadeCurve = CurveTween(curve: Curves.easeOutCubic);
 
-  final String assetPath;
+  late final AnimationController _panController;
+  late final AnimationController _fadeController;
+  int _currentIndex = 0;
+  int _nextIndex = 1;
+  bool _isFading = false;
+  bool _animationsEnabled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _panController = AnimationController(
+      vsync: this,
+      duration: _panDuration,
+    )..addStatusListener(_handlePanStatus);
+    _fadeController = AnimationController(
+      vsync: this,
+      duration: _fadeDuration,
+    )..addStatusListener(_handleFadeStatus);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final shouldAnimate =
+        !MediaQuery.of(context).disableAnimations && widget.assets.length > 1;
+    if (shouldAnimate == _animationsEnabled) return;
+    _animationsEnabled = shouldAnimate;
+    if (_animationsEnabled) {
+      _panController.forward(from: 0);
+    } else {
+      _panController.stop();
+      _fadeController.stop();
+      _panController.value = 0;
+      _fadeController.value = 0;
+      _isFading = false;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _LoginHeroCarousel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.assets.length == widget.assets.length) return;
+    _currentIndex = 0;
+    _nextIndex = widget.assets.length > 1 ? 1 : 0;
+    _isFading = false;
+    _fadeController.value = 0;
+    if (_animationsEnabled) {
+      _panController.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _panController
+      ..removeStatusListener(_handlePanStatus)
+      ..dispose();
+    _fadeController
+      ..removeStatusListener(_handleFadeStatus)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _handlePanStatus(AnimationStatus status) {
+    if (status != AnimationStatus.completed ||
+        !_animationsEnabled ||
+        _isFading ||
+        widget.assets.length < 2) {
+      return;
+    }
+    setState(() => _isFading = true);
+    _fadeController.forward(from: 0);
+  }
+
+  void _handleFadeStatus(AnimationStatus status) {
+    if (status != AnimationStatus.completed) return;
+    setState(() {
+      _currentIndex = _nextIndex;
+      _nextIndex = (_currentIndex + 1) % widget.assets.length;
+      _isFading = false;
+    });
+    _fadeController.value = 0;
+    if (_animationsEnabled) {
+      _panController.forward(from: 0);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final height = MediaQuery.of(context).size.height < 740 ? 318.0 : 372.0;
+    final palette = context.freshPalette;
+    final staticMode =
+        MediaQuery.of(context).disableAnimations || widget.assets.length == 1;
     return SizedBox(
-      height: 270,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Positioned.fill(
-            top: 40,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(FreshRadii.xl),
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 450),
-                child: Image.asset(
-                  assetPath,
-                  key: ValueKey(assetPath),
-                  fit: BoxFit.cover,
-                  alignment: Alignment.center,
-                  width: double.infinity,
-                  height: double.infinity,
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            right: 0,
-            top: 0,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(90),
-              child: Image.asset(
-                'assets/images/leaf_accent.webp',
-                width: 120,
-                height: 150,
-                fit: BoxFit.cover,
-              ),
-            ),
-          ),
-          const Positioned(
-            left: 26,
-            top: 84,
-            child: _CalorieBubble(label: '504 Kcal'),
-          ),
-          const Positioned(
-            left: 146,
-            top: 18,
-            child: _CalorieBubble(label: '132 Kcal', rotate: 0.14),
-          ),
-          const Positioned(
-            right: 18,
-            top: 120,
-            child: _CalorieBubble(label: '320 Kcal'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CalorieBubble extends StatelessWidget {
-  const _CalorieBubble({required this.label, this.rotate = -0.08});
-
-  final String label;
-  final double rotate;
-
-  @override
-  Widget build(BuildContext context) {
-    return Transform.rotate(
-      angle: rotate,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
+      key: const ValueKey('login_hero_carousel'),
+      height: height,
+      child: DecoratedBox(
         decoration: BoxDecoration(
-          color: FreshColors.surface,
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: FreshColors.ruleSoft),
+          borderRadius: BorderRadius.circular(FreshRadii.xl),
           boxShadow: const [
             BoxShadow(
-              color: Color(0x10080907),
-              blurRadius: 14,
-              offset: Offset(0, 6),
+              color: Color(0x1f080907),
+              blurRadius: 28,
+              offset: Offset(0, 16),
             ),
           ],
         ),
-        child: Text(
-          label,
-          style: Theme.of(context).textTheme.labelLarge?.copyWith(
-            fontFeatures: const [FontFeature.tabularFigures()],
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(FreshRadii.xl),
+          child: AnimatedBuilder(
+            animation: Listenable.merge([_panController, _fadeController]),
+            builder: (context, _) {
+              final fade = _fadeCurve.transform(_fadeController.value);
+              final panProgress = staticMode ? 0.0 : _panController.value;
+              final fadeProgress = staticMode || !_isFading ? 0.0 : fade;
+              return Stack(
+                fit: StackFit.expand,
+                children: [
+                  Opacity(
+                    opacity: 1 - fadeProgress,
+                    child: _LoginHeroImage(
+                      assetPath: widget.assets[_currentIndex],
+                      index: _currentIndex,
+                      progress: panProgress,
+                    ),
+                  ),
+                  if (!staticMode && _isFading)
+                    Opacity(
+                      opacity: fadeProgress,
+                      child: _LoginHeroImage(
+                        assetPath: widget.assets[_nextIndex],
+                        index: _nextIndex,
+                        progress: 0,
+                      ),
+                    ),
+                  const _HeroSloganScrim(),
+                  Positioned(
+                    left: 24,
+                    right: 24,
+                    top: height < 340 ? 22 : 28,
+                    child: Text(
+                      context.l10n.authHeroHeadline,
+                      maxLines: 3,
+                      overflow: TextOverflow.visible,
+                      style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                            color: palette.ink,
+                            fontSize: 38,
+                            fontWeight: FontWeight.w800,
+                            height: 1.08,
+                          ),
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LoginHeroImage extends StatelessWidget {
+  const _LoginHeroImage({
+    required this.assetPath,
+    required this.index,
+    required this.progress,
+  });
+
+  final String assetPath;
+  final int index;
+  final double progress;
+
+  static final AlignmentTween _alignmentTween = AlignmentTween(
+    begin: Alignment.bottomRight,
+    end: Alignment.bottomLeft,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final alignment = _alignmentTween.transform(progress);
+    return Image.asset(
+      assetPath,
+      key: ValueKey('login_hero_image_$index'),
+      fit: BoxFit.cover,
+      alignment: alignment,
+      filterQuality: FilterQuality.high,
+      width: double.infinity,
+      height: double.infinity,
+    );
+  }
+}
+
+class _HeroSloganScrim extends StatelessWidget {
+  const _HeroSloganScrim();
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.freshPalette;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          stops: const [0, 0.46, 0.78],
+          colors: [
+            palette.surface.withValues(alpha: 0.96),
+            palette.surface.withValues(alpha: 0.78),
+            palette.surface.withValues(alpha: 0),
+          ],
         ),
       ),
     );
