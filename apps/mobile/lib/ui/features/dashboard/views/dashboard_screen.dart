@@ -142,7 +142,10 @@ class _Avatar extends StatelessWidget {
         border: Border.all(color: palette.surface, width: 3),
       ),
       clipBehavior: Clip.antiAlias,
-      child: Image.asset('assets/images/leaf_accent.webp', fit: BoxFit.cover),
+      child: Image.asset(
+        'assets/images/icons/protein_icon.png',
+        fit: BoxFit.cover,
+      ),
     );
   }
 }
@@ -295,12 +298,11 @@ class _CalorieSetupProgressCard extends StatelessWidget {
     final l10n = context.l10n;
     final screenWidth = MediaQuery.sizeOf(context).width;
     final cardHeight = (screenWidth * 0.48).clamp(184.0, 206.0);
-    final ringSize = screenWidth < 380 ? 122.0 : 138.0;
     final titleStyle = textTheme.headlineSmall?.copyWith(
       color: palette.ink,
       fontSize: screenWidth < 380 ? 31 : 35,
       height: 1.12,
-      fontWeight: FontWeight.w900,
+      fontWeight: FontWeight.w800,
       letterSpacing: 0,
     );
     final radius = BorderRadius.circular(30);
@@ -312,20 +314,8 @@ class _CalorieSetupProgressCard extends StatelessWidget {
         onTap: onTap,
         child: Ink(
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color(0xffeffadc),
-                Color(0xfff7fde9),
-                Color(0xffe9f8c9),
-              ],
-            ),
+            color: palette.limeSoft,
             borderRadius: radius,
-            border: Border.all(
-              color: const Color(0xffc5e994),
-              width: 1.2,
-            ),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.055),
@@ -347,11 +337,6 @@ class _CalorieSetupProgressCard extends StatelessWidget {
                 clipBehavior: Clip.none,
                 children: [
                   Positioned(
-                    top: 48,
-                    right: 4,
-                    child: _SetupCaloriesRing(size: ringSize),
-                  ),
-                  Positioned(
                     top: 0,
                     left: 0,
                     child: _SetupDatePill(
@@ -361,15 +346,46 @@ class _CalorieSetupProgressCard extends StatelessWidget {
                   Positioned(
                     top: 78,
                     left: 0,
-                    right: ringSize + 18,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Set your\ndaily calories.',
-                        maxLines: 2,
-                        style: titleStyle,
-                      ),
+                    right: 0,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text('Set up your', style: titleStyle),
+                        ),
+                        const SizedBox(height: 8),
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Text('daily calories', style: titleStyle),
+                              const SizedBox(width: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color:
+                                      palette.limeWash.withValues(alpha: 0.86),
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
+                                child: Text(
+                                  'Here.',
+                                  style: titleStyle?.copyWith(
+                                    color: palette.leaf,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -432,48 +448,6 @@ class _SetupDatePill extends StatelessWidget {
   }
 }
 
-class _SetupCaloriesRing extends StatelessWidget {
-  const _SetupCaloriesRing({required this.size});
-
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.freshPalette;
-    return SizedBox.square(
-      dimension: size,
-      child: Container(
-        decoration: BoxDecoration(
-          color: palette.surface,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.055),
-              blurRadius: 22,
-              offset: const Offset(0, 12),
-            ),
-          ],
-        ),
-        child: Center(
-          child: Container(
-            width: size * 0.68,
-            height: size * 0.68,
-            decoration: BoxDecoration(
-              color: palette.limeWash.withValues(alpha: 0.72),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.settings_outlined,
-              color: palette.limeDeep,
-              size: size * 0.42,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _MacroSummaryRow extends StatelessWidget {
   const _MacroSummaryRow({required this.summary});
 
@@ -489,7 +463,8 @@ class _MacroSummaryRow extends StatelessWidget {
       children: [
         Expanded(
           child: _MacroSummaryPill(
-            icon: Icons.bakery_dining_rounded,
+            assetPath: 'assets/images/icons/carbs_icon.png',
+            iconKey: const ValueKey('dashboard_macro_carbs_icon'),
             label: l10n.commonCarbs,
             value: hasConfiguredTarget
                 ? _macroRatio(
@@ -503,7 +478,8 @@ class _MacroSummaryRow extends StatelessWidget {
         const SizedBox(width: FreshSpacing.sm),
         Expanded(
           child: _MacroSummaryPill(
-            icon: Icons.local_drink_rounded,
+            assetPath: 'assets/images/icons/protein_icon.png',
+            iconKey: const ValueKey('dashboard_macro_protein_icon'),
             label: l10n.localeName.startsWith('es') ? 'Proteínas' : 'Proteins',
             value: hasConfiguredTarget
                 ? _macroRatio(
@@ -517,7 +493,8 @@ class _MacroSummaryRow extends StatelessWidget {
         const SizedBox(width: FreshSpacing.sm),
         Expanded(
           child: _MacroSummaryPill(
-            icon: Icons.egg_alt_rounded,
+            assetPath: 'assets/images/icons/fats_icon.png',
+            iconKey: const ValueKey('dashboard_macro_fats_icon'),
             label: l10n.localeName.startsWith('es') ? 'Grasas' : 'Fats',
             value: hasConfiguredTarget
                 ? _macroRatio(
@@ -535,13 +512,15 @@ class _MacroSummaryRow extends StatelessWidget {
 
 class _MacroSummaryPill extends StatelessWidget {
   const _MacroSummaryPill({
-    required this.icon,
+    required this.assetPath,
+    required this.iconKey,
     required this.label,
     required this.value,
     required this.color,
   });
 
-  final IconData icon;
+  final String assetPath;
+  final Key iconKey;
   final String label;
   final String value;
   final Color color;
@@ -550,59 +529,68 @@ class _MacroSummaryPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final palette = context.freshPalette;
-    return Container(
-      constraints: const BoxConstraints(minHeight: 58),
+    return FreshCard(
+      color: palette.surface,
+      radius: FreshRadii.lg,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      decoration: BoxDecoration(
-        color: palette.surface.withValues(alpha: 0.62),
-        borderRadius: BorderRadius.circular(FreshRadii.lg),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.2),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, size: 17, color: palette.ink),
-          ),
-          const SizedBox(width: 7),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: textTheme.labelSmall?.copyWith(
-                    color: palette.inkSoft,
-                    fontWeight: FontWeight.w700,
-                  ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 42),
+        child: Row(
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.2),
+                shape: BoxShape.circle,
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: ClipOval(
+                child: Image.asset(
+                  assetPath,
+                  key: iconKey,
+                  fit: BoxFit.cover,
+                  filterQuality: FilterQuality.medium,
+                  excludeFromSemantics: true,
                 ),
-                if (value.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      value,
-                      maxLines: 1,
-                      style: textTheme.labelLarge?.copyWith(
-                        color: palette.ink,
-                        fontWeight: FontWeight.w800,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
+              ),
+            ),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: textTheme.labelSmall?.copyWith(
+                      color: palette.inkSoft,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
+                  if (value.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        value,
+                        maxLines: 1,
+                        style: textTheme.labelLarge?.copyWith(
+                          color: palette.ink,
+                          fontWeight: FontWeight.w800,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -644,10 +632,10 @@ class _MealSection extends StatelessWidget {
     final l10n = context.l10n;
     final meals = summary?.meals ?? const <Meal>[];
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (meals.isEmpty)
-          FreshEmptyState(
-            icon: Icons.restaurant_menu_rounded,
+          _DashboardEmptyMealsCard(
             title: l10n.dashboardNoMealsLoggedToday,
             message: l10n.dashboardNoMealsMessage,
           )
@@ -661,6 +649,70 @@ class _MealSection extends StatelessWidget {
               ),
             ),
       ],
+    );
+  }
+}
+
+class _DashboardEmptyMealsCard extends StatelessWidget {
+  const _DashboardEmptyMealsCard({
+    required this.title,
+    required this.message,
+  });
+
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.freshPalette;
+    final textTheme = Theme.of(context).textTheme;
+    final cardWidth =
+        (MediaQuery.sizeOf(context).width - 40).clamp(0.0, 720.0).toDouble();
+    return Align(
+      alignment: Alignment.center,
+      child: Container(
+        width: cardWidth,
+        padding: const EdgeInsets.symmetric(
+          horizontal: FreshSpacing.xl,
+          vertical: FreshSpacing.xxl,
+        ),
+        decoration: BoxDecoration(
+          color: palette.surface,
+          borderRadius: BorderRadius.circular(FreshRadii.xl),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x1f080907),
+              blurRadius: 30,
+              offset: Offset(0, 16),
+            ),
+            BoxShadow(
+              color: Color(0x0f080907),
+              blurRadius: 10,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            const FreshIconChip(
+              icon: Icons.restaurant_menu_rounded,
+              color: FreshColors.limeDeep,
+            ),
+            const SizedBox(height: FreshSpacing.md),
+            Text(
+              title,
+              style: textTheme.titleMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: FreshSpacing.sm),
+            Text(
+              message,
+              style: textTheme.bodyMedium?.copyWith(color: palette.inkMuted),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

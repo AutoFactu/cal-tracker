@@ -221,9 +221,14 @@ class FreshRadii {
 
 const _softShadow = [
   BoxShadow(
-    color: Color(0x14080907),
-    blurRadius: 28,
-    offset: Offset(0, 12),
+    color: Color(0x1f080907),
+    blurRadius: 30,
+    offset: Offset(0, 16),
+  ),
+  BoxShadow(
+    color: Color(0x0f080907),
+    blurRadius: 10,
+    offset: Offset(0, 4),
   ),
 ];
 
@@ -750,21 +755,26 @@ class FreshEmptyState extends StatelessWidget {
     final palette = context.freshPalette;
     final textTheme = Theme.of(context).textTheme;
     return FreshCard(
-      shadow: false,
-      color: palette.surfaceSoft,
-      child: Column(
-        children: [
-          FreshIconChip(icon: icon, color: FreshColors.limeDeep),
-          const SizedBox(height: FreshSpacing.md),
-          Text(title,
-              style: textTheme.titleMedium, textAlign: TextAlign.center),
-          const SizedBox(height: FreshSpacing.sm),
-          Text(
-            message,
-            style: textTheme.bodyMedium?.copyWith(color: palette.inkMuted),
-            textAlign: TextAlign.center,
-          ),
-        ],
+      color: palette.surface,
+      child: SizedBox(
+        width: double.infinity,
+        child: Column(
+          children: [
+            FreshIconChip(icon: icon, color: FreshColors.limeDeep),
+            const SizedBox(height: FreshSpacing.md),
+            Text(
+              title,
+              style: textTheme.titleMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: FreshSpacing.sm),
+            Text(
+              message,
+              style: textTheme.bodyMedium?.copyWith(color: palette.inkMuted),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }

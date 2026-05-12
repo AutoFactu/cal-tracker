@@ -115,7 +115,6 @@ Recommended range = 1520-1720 kcal/day
 
 ## Sources
 
-- Local product source of truth: `docs/calorie-calculator-wizard.md`.
 - Mifflin-St Jeor equation record: https://agris.fao.org/search/en/providers/122535/records/65de26fe7c7033e84be9ee76
 - Systematic review comparing RMR equations: https://www.sciencedirect.com/science/article/abs/pii/S0002822305001495
 - NHLBI calorie guidance and low-calorie guardrails: https://www.nhlbi.nih.gov/health/educational/lose_wt/eat/calories.htm
