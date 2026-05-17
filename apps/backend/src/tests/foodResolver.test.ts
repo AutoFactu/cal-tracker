@@ -256,6 +256,7 @@ describe("FoodResolver", () => {
           originalText: "pan",
           canonicalName: "pan",
           canonicalEnglishName: "pan",
+          language: "es",
           quantity: 100,
           unit: "g",
         }),
@@ -263,6 +264,7 @@ describe("FoodResolver", () => {
           originalText: "jamon",
           canonicalName: "jamon",
           canonicalEnglishName: "jamon",
+          language: "es",
           quantity: 100,
           unit: "g",
         }),
@@ -357,6 +359,61 @@ describe("FoodResolver", () => {
     ).resolves.toEqual([
       expect.objectContaining({ externalId: "usda-rice" }),
     ]);
+  });
+
+  it("infers Spanish for deterministic fallback before local food search", async () => {
+    const repository = InMemoryRepository.seeded();
+    await repository.upsertFoodItem({
+      name: "Game meat, bison, ground, cooked, pan-broiled",
+      normalizedName: "game meat bison ground cooked pan broiled",
+      canonicalName: "game meat bison ground cooked pan broiled",
+      source: "usda_fdc",
+      externalSource: "usda_fdc",
+      externalId: "usda-pan-broiled",
+      dataType: "SR Legacy",
+      servingGrams: 100,
+      calories: 238,
+      proteinGrams: 23.8,
+      carbsGrams: 0,
+      fatGrams: 15.2,
+    });
+    await repository.upsertFoodItem({
+      name: "Pan",
+      normalizedName: "pan",
+      canonicalName: "pan",
+      source: "openfoodfacts",
+      externalSource: "openfoodfacts",
+      externalId: "off-pan-es",
+      dataType: "Open Food Facts",
+      foodKey: "es",
+      servingGrams: 100,
+      calories: 269,
+      proteinGrams: 9,
+      carbsGrams: 51,
+      fatGrams: 3.8,
+    });
+    const resolver = new FoodResolver(
+      new DeterministicFoodTextExtractor(),
+      [new LocalFoodDataProvider(repository)],
+      repository,
+      0.65,
+    );
+
+    const result = await resolver.resolveMealText(
+      "user-1",
+      "Añádeme 200 gramos de pan",
+    );
+
+    expect(result.clarificationRequired).toBe(false);
+    expect(result.items[0]).toEqual(
+      expect.objectContaining({
+        name: "Pan",
+        externalSource: "openfoodfacts",
+        externalId: "off-pan-es",
+        calories: 538,
+      }),
+    );
+    expect(result.candidateGroups[0]?.mention.language).toBe("es");
   });
 
   it("uses the request language before English fallback for Spanish bread and butter", async () => {
@@ -1326,7 +1383,7 @@ describe("FoodResolver", () => {
     const items = await provider.resolve("user-1", {
       originalText: "Market Bread",
       canonicalEnglishName: "bread",
-      quantity: 100,
+      quantity: 200,
       unit: "g",
       barcode: "8410000000000",
       confidence: 0.95,
@@ -1340,6 +1397,10 @@ describe("FoodResolver", () => {
         externalSource: "openfoodfacts",
         externalId: "8410000000000",
         license: "ODbL-1.0",
+        calories: 500,
+        proteinGrams: 16,
+        carbsGrams: 96,
+        fatGrams: 4,
       }),
     );
   });

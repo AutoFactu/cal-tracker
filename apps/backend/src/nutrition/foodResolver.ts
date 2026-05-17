@@ -402,8 +402,9 @@ function servingGramsForMealItem(item: MealItem): number {
 export class DeterministicFoodTextExtractor implements FoodTextExtractor {
   async extract(text: string): Promise<FoodMention[]> {
     const normalized = normalizeText(text);
-    const measuredMentions = extractQuantityMentions(normalized);
-    const countedMentions = extractCountMentions(normalized);
+    const language = inferDeterministicFoodLanguage(normalized);
+    const measuredMentions = extractQuantityMentions(normalized, language);
+    const countedMentions = extractCountMentions(normalized, language);
     return mergeDuplicateMentions([...measuredMentions, ...countedMentions]);
   }
 }
@@ -952,7 +953,10 @@ export class UsdaFoodDataProvider implements FoodDataProvider {
   }
 }
 
-function extractQuantityMentions(text: string): FoodMention[] {
+function extractQuantityMentions(
+  text: string,
+  language?: string,
+): FoodMention[] {
   const mentions: FoodMention[] = [];
   const unit =
     "(g|gr|gramo|gramos|gram|grams|kg|kilogram|kilograms|kilo|kilos|oz|ounce|ounces)";
@@ -968,7 +972,15 @@ function extractQuantityMentions(text: string): FoodMention[] {
     const unitValue = normalizeUnit(match[2]!);
     const originalText = match[3]!.trim();
     mentions.push(
-      buildMention(originalText, quantity, unitValue, match[2], "metric"),
+      buildMention(
+        originalText,
+        quantity,
+        unitValue,
+        match[2],
+        "metric",
+        originalText,
+        language,
+      ),
     );
   }
 
@@ -991,13 +1003,14 @@ function extractQuantityMentions(text: string): FoodMention[] {
         rawUnitText,
         "household",
         `${match[1]} ${rawUnitText} ${foodText}`,
+        language,
       ),
     );
   }
   return mergeDuplicateMentions(mentions);
 }
 
-function extractCountMentions(text: string): FoodMention[] {
+function extractCountMentions(text: string, language?: string): FoodMention[] {
   const mentions: FoodMention[] = [];
   const countPattern = countTokenPattern();
   const descriptorPattern = portionDescriptorPattern();
@@ -1029,6 +1042,7 @@ function extractCountMentions(text: string): FoodMention[] {
       portionDescriptor,
       confidence: 0.86,
       marketProduct: false,
+      ...(language ? { language } : {}),
     });
   }
   return mergeDuplicateMentions(mentions);
@@ -1041,6 +1055,7 @@ function buildMention(
   rawUnitText: string,
   unitKind: UnitKind,
   originalText = foodText,
+  language?: string,
 ): FoodMention {
   const canonicalName = normalizeFoodName(foodText);
   return {
@@ -1053,7 +1068,24 @@ function buildMention(
     unitKind,
     confidence: unitKind === "metric" || unitKind === "household" ? 0.86 : 0.78,
     marketProduct: false,
+    ...(language ? { language } : {}),
   };
+}
+
+function inferDeterministicFoodLanguage(text: string): "es" | "en" | undefined {
+  if (
+    /\b(anade|anademe|agrega|agregame|gramo|gramos|kilo|kilos|taza|tazas|cucharada|cucharadas|cucharadita|cucharaditas|rebanada|rebanadas|pieza|piezas|desayuno|comida|cena|almuerzo|merienda|por favor)\b/.test(
+      text,
+    )
+  )
+    return "es";
+  if (
+    /\b(add|please|gram|grams|kilogram|kilograms|ounce|ounces|cup|cups|tablespoon|tablespoons|teaspoon|teaspoons|slice|slices|piece|pieces|breakfast|lunch|dinner|snack)\b/.test(
+      text,
+    )
+  )
+    return "en";
+  return undefined;
 }
 
 function normalizeFoodName(value: string): string {
