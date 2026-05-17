@@ -23,10 +23,12 @@ import { buildToolSchemas } from "./toolSchemas.js";
 import { filterToolsByPolicy } from "./agentPolicy.js";
 import {
   extractReasoningTokens,
+  extractGenerationId,
   extractTokenUsage,
   summarizeError,
   type LocalRunLogger,
 } from "../observability/localRunLogger.js";
+import { withSpan, withSyncSpan } from "../observability/profiler.js";
 
 export type AgentRunResult =
   | {
@@ -89,18 +91,31 @@ export class AgentService {
       { role: "user", content: text },
     ];
 
-    const allowedActions = filterToolsByPolicy(actionDefinitions, context);
-    const toolSchemas = buildToolSchemas();
-    const tools = allowedActions.map((action) => ({
-      type: "function" as const,
-      function: {
-        name: action.id,
-        description: `${action.title}. ${action.description}`,
-        parameters:
-          toolSchemas.find((t) => t.function.name === action.id)?.function
-            .parameters ?? {},
-      },
-    }));
+    const allowedActions = withSyncSpan(
+      "AgentService.filterToolsByPolicy",
+      { scopeCount: context.scopes.length },
+      () => filterToolsByPolicy(actionDefinitions, context),
+    );
+    const toolSchemas = withSyncSpan(
+      "AgentService.buildToolSchemas",
+      undefined,
+      () => buildToolSchemas(),
+    );
+    const tools = withSyncSpan(
+      "AgentService.materializeTools",
+      { allowedActionCount: allowedActions.length },
+      () => allowedActions.map((action) => ({
+        type: "function" as const,
+        function: {
+          name: action.id,
+          description: `${action.title}. ${action.description}`,
+          parameters:
+            toolSchemas.find((t) => t.function.name === action.id)?.function
+              .parameters ?? {},
+        },
+      })),
+    );
+    const modelInputStats = agentModelInputStats(messages, tools);
     const baseLog = {
       type: "agent.run",
       traceId: context.traceId,
@@ -113,18 +128,23 @@ export class AgentService {
       systemPrompt: messages[0]!.content,
       messages,
       availableTools: allowedActions.map((action) => action.id),
+      modelInputStats,
     };
 
     let decision: AgentToolDecision;
     let llmMs: number | undefined;
     try {
       const llmStarted = Date.now();
-      decision = await this.agentProvider.runWithTools({
-        messages,
-        tools,
-        model: this.model,
-        traceId: context.traceId,
-      });
+      decision = await withSpan(
+        "AgentService.llmToolDecision",
+        modelInputStats,
+        () => this.agentProvider.runWithTools({
+          messages,
+          tools,
+          model: this.model,
+          traceId: context.traceId,
+        }),
+      );
       llmMs = Date.now() - llmStarted;
     } catch (error) {
       const fallbackToolCall = fallbackToolCallForText(text);
@@ -218,7 +238,14 @@ export class AgentService {
 
     let parsedInput: unknown;
     try {
-      parsedInput = JSON.parse(toolCall.function.arguments);
+      parsedInput = withSyncSpan(
+        "AgentService.parseToolArguments",
+        {
+          actionId,
+          argumentsChars: toolCall.function.arguments.length,
+        },
+        () => JSON.parse(toolCall.function.arguments),
+      );
     } catch {
       const mapped = {
         kind: "clarification_required",
@@ -252,11 +279,19 @@ export class AgentService {
 
     const actionStarted = Date.now();
     try {
-      const result = await this.actionExecutor.execute(actionId, parsedInput, {
-        ...context,
-        source: "internal_agent",
-      });
-      const mapped = this.mapResult(actionId, result, text);
+      const result = await withSpan(
+        "AgentService.executeAction",
+        { actionId },
+        () => this.actionExecutor.execute(actionId, parsedInput, {
+          ...context,
+          source: "internal_agent",
+        }),
+      );
+      const mapped = withSyncSpan(
+        "AgentService.mapResult",
+        { actionId },
+        () => this.mapResult(actionId, result, text),
+      );
       await this.logRun({
         ...baseLog,
         decisionSource: "model",
@@ -269,6 +304,7 @@ export class AgentService {
         selectedArguments: parsedInput,
         usage: extractTokenUsage(decision.rawResponse),
         reasoningTokens: extractReasoningTokens(decision.rawResponse),
+        generationId: extractGenerationId(decision.rawResponse),
         providerTimingsMs: decision.timingsMs,
         providerRouting: decision.providerRouting,
         modelInteraction: decision.interaction,
@@ -318,13 +354,17 @@ export class AgentService {
   }): Promise<AgentRunResult> {
     const parsedArguments = JSON.parse(input.fallbackToolCall.function.arguments);
     const actionStarted = Date.now();
-    const result = await this.actionExecutor.execute(
-      input.fallbackToolCall.function.name,
-      parsedArguments,
-      {
-        ...input.context,
-        source: "internal_agent",
-      },
+    const result = await withSpan(
+      "AgentService.executeFallbackAction",
+      { actionId: input.fallbackToolCall.function.name },
+      () => this.actionExecutor.execute(
+        input.fallbackToolCall.function.name,
+        parsedArguments,
+        {
+          ...input.context,
+          source: "internal_agent",
+        },
+      ),
     );
     const mapped = this.mapResult(
       input.fallbackToolCall.function.name,
@@ -342,6 +382,9 @@ export class AgentService {
         : undefined,
       reasoningTokens: input.decision
         ? extractReasoningTokens(input.decision.rawResponse)
+        : undefined,
+      generationId: input.decision
+        ? extractGenerationId(input.decision.rawResponse)
         : undefined,
       providerTimingsMs: input.decision?.timingsMs,
       providerRouting: input.decision?.providerRouting,
@@ -526,6 +569,35 @@ export class AgentService {
         };
     }
   }
+}
+
+function agentModelInputStats(
+  messages: AgentMessage[],
+  tools: Array<{ type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } }>,
+) {
+  const toolSummaries = tools.map((tool) => ({
+    name: tool.function.name,
+    chars: JSON.stringify(tool).length,
+  }));
+  const toolsJsonChars = JSON.stringify(tools).length;
+  const messagesJsonChars = JSON.stringify(messages).length;
+  const systemPromptChars = messages[0]?.content.length ?? 0;
+  return {
+    toolCount: tools.length,
+    toolsJsonChars,
+    toolsJsonApproxTokens: approxTokens(toolsJsonChars),
+    messagesJsonChars,
+    messagesJsonApproxTokens: approxTokens(messagesJsonChars),
+    systemPromptChars,
+    requestPayloadChars: toolsJsonChars + messagesJsonChars,
+    topToolsByChars: toolSummaries
+      .sort((a, b) => b.chars - a.chars)
+      .slice(0, 5),
+  };
+}
+
+function approxTokens(chars: number): number {
+  return Math.ceil(chars / 4);
 }
 
 function isMealLoggingIntent(text: string): boolean {

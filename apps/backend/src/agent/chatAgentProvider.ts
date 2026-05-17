@@ -1,3 +1,5 @@
+import { withSpan } from "../observability/profiler.js";
+
 export type AgentMessage =
   | { role: "system"; content: string }
   | { role: "user"; content: string }
@@ -96,25 +98,52 @@ export class RemoteChatAgentProvider implements ChatAgentProvider {
     model: string;
     traceId: string;
   }): Promise<AgentToolDecision> {
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: "POST",
-      signal: timeoutSignal(this.timeoutMs),
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": process.env.APP_BASE_URL ?? "",
-        "X-Title": "Cal Tracker Agent",
-      },
-      body: JSON.stringify({
+    return withSpan(
+      "RemoteChatAgentProvider.runWithTools",
+      {
         model: input.model,
-        messages: input.messages,
-        tools: input.tools,
-        tool_choice: "auto",
-        stream: true,
-        stream_options: { include_usage: true },
-        provider: this.providerRouting,
+        toolCount: input.tools.length,
+        messageCount: input.messages.length,
+        toolsJsonChars: JSON.stringify(input.tools).length,
+        messagesJsonChars: JSON.stringify(input.messages).length,
+      },
+      async () => this.runWithToolsInternal(input),
+    );
+  }
+
+  private async runWithToolsInternal(input: {
+    messages: AgentMessage[];
+    tools: AgentToolDefinition[];
+    model: string;
+    traceId: string;
+  }): Promise<AgentToolDecision> {
+    const requestBody = {
+      model: input.model,
+      messages: input.messages,
+      tools: input.tools,
+      tool_choice: "auto",
+      stream: true,
+      stream_options: { include_usage: true },
+      provider: this.providerRouting,
+    };
+    const res = await withSpan(
+      "OpenRouter.chatCompletions.fetch",
+      {
+        requestBodyChars: JSON.stringify(requestBody).length,
+        toolCount: input.tools.length,
+      },
+      () => fetch(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        signal: timeoutSignal(this.timeoutMs),
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": process.env.APP_BASE_URL ?? "",
+          "X-Title": "Cal Tracker Agent",
+        },
+        body: JSON.stringify(requestBody),
       }),
-    });
+    );
 
     if (!res.ok) {
       const err = await res.text();
@@ -123,7 +152,11 @@ export class RemoteChatAgentProvider implements ChatAgentProvider {
 
     if (!res.body) throw new Error("Empty stream from LLM provider");
 
-    const streamed = await readChatCompletionStream(res.body);
+    const streamed = await withSpan(
+      "OpenRouter.chatCompletions.readStream",
+      undefined,
+      () => readChatCompletionStream(res.body!),
+    );
 
     return {
       toolCalls: streamed.toolCalls.map((tc) => ({
@@ -135,6 +168,7 @@ export class RemoteChatAgentProvider implements ChatAgentProvider {
         },
       })),
       rawResponse: {
+        id: streamed.id,
         choices: [
           {
             message: {
@@ -190,6 +224,7 @@ type StreamedToolCall = {
 };
 
 async function readChatCompletionStream(body: ReadableStream<Uint8Array>): Promise<{
+  id?: string;
   toolCalls: StreamedToolCall[];
   assistantContent: string;
   assistantReasoning: string;
@@ -205,6 +240,7 @@ async function readChatCompletionStream(body: ReadableStream<Uint8Array>): Promi
   let assistantContent = "";
   let assistantReasoning = "";
   let usage: unknown;
+  let id: string | undefined;
   let buffer = "";
   let firstByteMs: number | undefined;
   let firstDeltaMs: number | undefined;
@@ -228,6 +264,7 @@ async function readChatCompletionStream(body: ReadableStream<Uint8Array>): Promi
       if (!data || data === "[DONE]") continue;
 
       const parsed = JSON.parse(data) as Record<string, unknown>;
+      if (!id && typeof parsed.id === "string") id = parsed.id;
       if (parsed.usage) usage = parsed.usage;
       const choices = Array.isArray(parsed.choices) ? parsed.choices : [];
       for (const choice of choices) {
@@ -299,6 +336,7 @@ async function readChatCompletionStream(body: ReadableStream<Uint8Array>): Promi
   const totalMs = Date.now() - started;
   const largestGap = largestStreamGap(streamEvents);
   return {
+    id,
     toolCalls: [...toolCallParts.entries()]
       .sort(([a], [b]) => a - b)
       .map(([, value], index) => ({

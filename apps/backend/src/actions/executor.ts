@@ -30,6 +30,7 @@ import type {
 } from "../nutrition/provider.js";
 import type { AppRepository, FoodFeedbackAction, FoodFeedbackRecord } from "../repository/types.js";
 import type { MemoryRetrievalService } from "../memory/retrieval.js";
+import { withSpan, withSyncSpan } from "../observability/profiler.js";
 import { newId } from "../utils/ids.js";
 import { normalizeText } from "../utils/normalize.js";
 import { sumNutrition } from "../utils/nutrition.js";
@@ -105,6 +106,18 @@ export class ActionExecutor {
     rawInput: unknown,
     context: ActionContext,
   ): Promise<ExecuteActionResult> {
+    return withSpan(
+      "ActionExecutor.execute",
+      { actionId, source: context.source },
+      () => this.executeInternal(actionId, rawInput, context),
+    );
+  }
+
+  private async executeInternal(
+    actionId: string,
+    rawInput: unknown,
+    context: ActionContext,
+  ): Promise<ExecuteActionResult> {
     const definition = actionById.get(actionId);
     if (!definition)
       throw new ActionExecutionError(
@@ -119,29 +132,45 @@ export class ActionExecutor {
     }
 
     const started = Date.now();
-    const input = definition.inputSchema.parse(rawInput);
+    const input = withSyncSpan(
+      "ActionExecutor.parseInput",
+      { actionId },
+      () => definition.inputSchema.parse(rawInput),
+    );
     let actionCallId = newId();
 
     try {
-      const output = await this.dispatch(actionId, input, context);
-      const call = await this.repository.recordActionCall({
-        userId: context.actorUserId,
-        actionId,
-        source: context.source,
-        input,
-        output,
-        confirmationStatus: definition.confirmationPolicy,
-        traceId: context.traceId,
-        latencyMs: Date.now() - started,
-      });
+      const output = await withSpan(
+        "ActionExecutor.dispatch",
+        { actionId },
+        () => this.dispatch(actionId, input, context),
+      );
+      const call = await withSpan(
+        "Repository.recordActionCall",
+        { actionId, status: definition.confirmationPolicy },
+        () => this.repository.recordActionCall({
+          userId: context.actorUserId,
+          actionId,
+          source: context.source,
+          input,
+          output,
+          confirmationStatus: definition.confirmationPolicy,
+          traceId: context.traceId,
+          latencyMs: Date.now() - started,
+        }),
+      );
       actionCallId = call.id;
       if (definition.sideEffect !== "none") {
-        await this.repository.recordAuditEvent({
-          userId: context.actorUserId,
-          eventType: `action.${actionId}`,
-          metadata: { input, output },
-          traceId: context.traceId,
-        });
+        await withSpan(
+          "Repository.recordAuditEvent",
+          { eventType: `action.${actionId}` },
+          () => this.repository.recordAuditEvent({
+            userId: context.actorUserId,
+            eventType: `action.${actionId}`,
+            metadata: { input, output },
+            traceId: context.traceId,
+          }),
+        );
       }
       return {
         actionCallId,
@@ -150,16 +179,20 @@ export class ActionExecutor {
         instrumentation: actionInstrumentation(output),
       };
     } catch (error) {
-      const call = await this.repository.recordActionCall({
-        userId: context.actorUserId,
-        actionId,
-        source: context.source,
-        input,
-        error: error instanceof Error ? { message: error.message } : error,
-        confirmationStatus: "error",
-        traceId: context.traceId,
-        latencyMs: Date.now() - started,
-      });
+      const call = await withSpan(
+        "Repository.recordActionCall",
+        { actionId, status: "error" },
+        () => this.repository.recordActionCall({
+          userId: context.actorUserId,
+          actionId,
+          source: context.source,
+          input,
+          error: error instanceof Error ? { message: error.message } : error,
+          confirmationStatus: "error",
+          traceId: context.traceId,
+          latencyMs: Date.now() - started,
+        }),
+      );
       throw Object.assign(
         error instanceof Error ? error : new Error("action_failed"),
         { actionCallId: call.id },
@@ -190,6 +223,7 @@ export class ActionExecutor {
             context.actorUserId,
             parsed.query,
             parsed.barcode,
+            context.locale,
           ),
         );
         return {
@@ -335,7 +369,11 @@ export class ActionExecutor {
     };
 
     const parseStarted = Date.now();
-    const parsed = proposeMealLogInputSchema.parse(input);
+    const parsed = withSyncSpan(
+      "ActionExecutor.proposeMeal.parseInput",
+      undefined,
+      () => proposeMealLogInputSchema.parse(input),
+    );
     const normalized = normalizeText(parsed.text);
     const providedMentions =
       parsed.mentions && parsed.mentions.length > 0 ? parsed.mentions : null;
@@ -345,8 +383,11 @@ export class ActionExecutor {
     markPhase("parse_and_normalize", parseStarted);
 
     const memoryStarted = Date.now();
-    const memories = (await this.queryMemory(context.actorUserId, normalized))
-      .matches;
+    const memories = (await withSpan(
+      "ActionExecutor.proposeMeal.queryMemory",
+      undefined,
+      () => this.queryMemory(context.actorUserId, normalized),
+    )).matches;
     markPhase("query_memory", memoryStarted);
     const memory = memories[0];
     const template = memory?.template ?? null;
@@ -358,8 +399,16 @@ export class ActionExecutor {
     const resolution = template
       ? null
       : providedMentions
-        ? await this.resolveMealMentions(context.actorUserId, providedMentions)
-        : await this.resolveMealText(context.actorUserId, parsed.text);
+        ? await withSpan(
+            "ActionExecutor.proposeMeal.resolveProvidedMentions",
+            { mentionCount: providedMentions.length },
+            () => this.resolveMealMentions(context.actorUserId, providedMentions, context.locale),
+          )
+        : await withSpan(
+            "ActionExecutor.proposeMeal.resolveMealText",
+            { textChars: parsed.text.length },
+            () => this.resolveMealText(context.actorUserId, parsed.text, context.locale),
+          );
     markPhase(
       template
         ? "resolve_meal_text_skipped_template"
@@ -402,9 +451,13 @@ export class ActionExecutor {
     const items: MealItem[] = template
       ? template.items
       : (resolution?.items ??
-        (await this.nutritionProvider.estimateMeal(
-          context.actorUserId,
-          parsed.text,
+        (await withSpan(
+          "ActionExecutor.proposeMeal.estimateMeal",
+          undefined,
+          () => this.nutritionProvider.estimateMeal(
+            context.actorUserId,
+            parsed.text,
+          ),
         )));
     markPhase(
       template
@@ -415,7 +468,11 @@ export class ActionExecutor {
       itemStarted,
     );
     const nutritionStarted = Date.now();
-    const nutrition = sumNutrition(items);
+    const nutrition = withSyncSpan(
+      "ActionExecutor.proposeMeal.sumNutrition",
+      { itemCount: items.length },
+      () => sumNutrition(items),
+    );
     markPhase("sum_nutrition", nutritionStarted);
     const trustedAutoCommitEligible = Boolean(
       template &&
@@ -426,17 +483,21 @@ export class ActionExecutor {
       items.every((item) => item.source !== "llm_estimate"),
     );
     const proposalStarted = Date.now();
-    const proposal = await this.repository.createProposal(context.actorUserId, {
-      phrase: parsed.text,
-      title: template?.title ?? inferTitle(parsed.text, items),
-      status: "pending",
-      confidence: fromTemplate ? memory!.confidence : 0.68,
-      requiresConfirmation: true,
-      trustedAutoCommitEligible,
-      source: fromTemplate ? "user_template" : "backend_estimate",
-      nutrition,
-      items,
-    });
+    const proposal = await withSpan(
+      "Repository.createProposal",
+      { itemCount: items.length },
+      () => this.repository.createProposal(context.actorUserId, {
+        phrase: parsed.text,
+        title: template?.title ?? inferTitle(parsed.text, items),
+        status: "pending",
+        confidence: fromTemplate ? memory!.confidence : 0.68,
+        requiresConfirmation: true,
+        trustedAutoCommitEligible,
+        source: fromTemplate ? "user_template" : "backend_estimate",
+        nutrition,
+        items,
+      }),
+    );
     markPhase("create_proposal", proposalStarted);
 
     let autoCommittedMeal: Meal | null = null;
@@ -534,9 +595,9 @@ export class ActionExecutor {
     return { proposal };
   }
 
-  private async resolveMealText(userId: string, text: string) {
+  private async resolveMealText(userId: string, text: string, locale?: string) {
     if (hasMealTextResolution(this.nutritionProvider)) {
-      return this.nutritionProvider.resolveMealText(userId, text);
+      return this.nutritionProvider.resolveMealText(userId, text, locale);
     }
     return {
       items: await this.nutritionProvider.estimateMeal(userId, text),
@@ -546,9 +607,9 @@ export class ActionExecutor {
     };
   }
 
-  private async resolveMealMentions(userId: string, mentions: FoodMention[]) {
+  private async resolveMealMentions(userId: string, mentions: FoodMention[], locale?: string) {
     if (hasMealTextResolution(this.nutritionProvider)) {
-      return this.nutritionProvider.resolveMealMentions(userId, mentions);
+      return this.nutritionProvider.resolveMealMentions(userId, mentions, locale);
     }
     return {
       items: [],
@@ -624,10 +685,18 @@ export class ActionExecutor {
 
   private async queryMemory(userId: string, text: string) {
     if (this.memoryRetrievalService) {
-      return this.memoryRetrievalService.query(userId, text);
+      return withSpan(
+        "MemoryRetrievalService.query",
+        undefined,
+        () => this.memoryRetrievalService!.query(userId, text),
+      );
     }
     return {
-      matches: await this.repository.queryMemory(userId, normalizeText(text)),
+      matches: await withSpan(
+        "Repository.queryMemory",
+        undefined,
+        () => this.repository.queryMemory(userId, normalizeText(text)),
+      ),
       vectorUnavailable: true,
     };
   }
@@ -662,11 +731,15 @@ async function recordFoodFeedback(
   input: FoodFeedbackInput,
 ): Promise<void> {
   const action = foodFeedbackActionForEvent(input.eventType);
-  await Promise.all(
-    input.items.map((item) => {
-      const record = foodFeedbackRecordForItem(input, item, action);
-      return record ? repository.recordFoodFeedback(record) : Promise.resolve();
-    }),
+  await withSpan(
+    "Repository.recordFoodFeedback.batch",
+    { itemCount: input.items.length, eventType: input.eventType },
+    () => Promise.all(
+      input.items.map((item) => {
+        const record = foodFeedbackRecordForItem(input, item, action);
+        return record ? repository.recordFoodFeedback(record) : Promise.resolve();
+      }),
+    ),
   );
 }
 

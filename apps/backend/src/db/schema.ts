@@ -120,6 +120,23 @@ export const foodPortions = pgTable("food_portions", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 });
 
+export const foodSearchDocuments = pgTable("food_search_documents", {
+  foodItemId: uuid("food_item_id").primaryKey().references(() => foodItems.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+  locale: text("locale").notNull(),
+  scope: text("scope").notNull(),
+  searchText: text("search_text").notNull(),
+  rankBucket: integer("rank_bucket").notNull(),
+  source: text("source").notNull(),
+  externalSource: text("external_source"),
+  dataType: text("data_type"),
+  foodKey: text("food_key"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+}, (table) => [
+  index("food_search_documents_scope_locale_rank_idx").on(table.scope, table.locale, table.rankBucket),
+  index("food_search_documents_user_idx").on(table.userId)
+]);
+
 export const referenceDataImports = pgTable("reference_data_imports", {
   id: uuid("id").primaryKey().defaultRandom(),
   source: text("source").notNull(),

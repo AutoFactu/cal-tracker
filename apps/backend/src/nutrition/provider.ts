@@ -16,15 +16,17 @@ export interface NutritionProvider {
     userId: string,
     query: string,
     barcode?: string,
+    locale?: string,
   ): Promise<MealItem[] | NutritionSearchResult>;
   estimateMeal(userId: string, text: string): Promise<MealItem[]>;
 }
 
 export interface MealTextResolutionProvider extends NutritionProvider {
-  resolveMealText(userId: string, text: string): Promise<FoodResolutionResult>;
+  resolveMealText(userId: string, text: string, locale?: string): Promise<FoodResolutionResult>;
   resolveMealMentions(
     userId: string,
     mentions: FoodMention[],
+    locale?: string,
   ): Promise<FoodResolutionResult>;
 }
 
@@ -35,8 +37,9 @@ export class ResolverNutritionProvider implements MealTextResolutionProvider {
     userId: string,
     query: string,
     barcode?: string,
+    locale?: string,
   ): Promise<NutritionSearchResult> {
-    return this.resolver.search(userId, query, barcode);
+    return this.resolver.search(userId, query, barcode, locale);
   }
 
   async estimateMeal(userId: string, text: string): Promise<MealItem[]> {
@@ -44,14 +47,15 @@ export class ResolverNutritionProvider implements MealTextResolutionProvider {
     return result.clarificationRequired ? [] : result.items;
   }
 
-  resolveMealText(userId: string, text: string): Promise<FoodResolutionResult> {
-    return this.resolver.resolveMealText(userId, text);
+  resolveMealText(userId: string, text: string, locale?: string): Promise<FoodResolutionResult> {
+    return this.resolver.resolveMealText(userId, text, locale);
   }
 
   resolveMealMentions(
     userId: string,
     mentions: FoodMention[],
+    locale?: string,
   ): Promise<FoodResolutionResult> {
-    return this.resolver.resolveMealMentions(userId, mentions);
+    return this.resolver.resolveMealMentions(userId, mentions, locale);
   }
 }

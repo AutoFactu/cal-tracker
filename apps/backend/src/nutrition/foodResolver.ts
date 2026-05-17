@@ -5,6 +5,7 @@ import type {
   MealItem,
 } from "@cal-tracker/contracts";
 import type { EmbeddingProvider } from "../embeddings/provider.js";
+import { withSpan } from "../observability/profiler.js";
 import type { AppRepository, FoodItemRecord, FoodPortionRecord, FoodSearchCandidate } from "../repository/types.js";
 import { normalizeText } from "../utils/normalize.js";
 import { scaleFood } from "../utils/nutrition.js";
@@ -113,21 +114,63 @@ export class FoodResolver {
   async resolveMealText(
     userId: string,
     text: string,
+    locale?: string,
   ): Promise<FoodResolutionResult> {
-    const mentions = await this.extractor.extract(text);
-    return this.resolveMealMentions(userId, mentions);
+    return withSpan(
+      "FoodResolver.resolveMealText",
+      { textChars: text.length, locale },
+      async () => {
+        const mentions = await withSpan(
+          "FoodTextExtractor.extract",
+          undefined,
+          () => this.extractor.extract(text),
+        );
+        return this.resolveMealMentions(userId, mentions, locale);
+      },
+    );
   }
 
   async resolveMealMentions(
     userId: string,
     mentions: FoodMention[],
+    locale?: string,
+  ): Promise<FoodResolutionResult> {
+    return withSpan(
+      "FoodResolver.resolveMealMentions",
+      { mentionCount: mentions.length, locale },
+      () => this.resolveMealMentionsInternal(userId, mentions, locale),
+    );
+  }
+
+  private async resolveMealMentionsInternal(
+    userId: string,
+    mentions: FoodMention[],
+    locale?: string,
   ): Promise<FoodResolutionResult> {
     const items: MealItem[] = [];
     const unresolvedMentions: FoodMention[] = [];
     const candidateGroups: FoodCandidateGroup[] = [];
+    const localizedMentions = mentions.map((mention) =>
+      mentionWithLocale(mention, locale),
+    );
 
-    for (const mention of mentions) {
-      const resolution = await this.resolveMention(userId, mention);
+    const resolved = await mapWithConcurrency(localizedMentions, 4, async (mention) =>
+      ({
+        mention,
+        resolution: await withSpan(
+          "FoodResolver.resolveMention",
+          {
+            originalText: mention.originalText,
+            canonicalName: canonicalNameForMention(mention),
+            unitKind: mention.unitKind,
+            marketProduct: Boolean(mention.marketProduct || mention.brand || mention.barcode),
+          },
+          () => this.resolveMention(userId, mention),
+        ),
+      }),
+    );
+
+    for (const { mention, resolution } of resolved) {
       const candidates = resolution.candidates;
       candidateGroups.push({
         mention,
@@ -153,7 +196,7 @@ export class FoodResolver {
       unresolvedMentions,
       candidateGroups,
       clarificationRequired:
-        mentions.length === 0 || unresolvedMentions.length > 0,
+        localizedMentions.length === 0 || unresolvedMentions.length > 0,
     };
   }
 
@@ -161,6 +204,20 @@ export class FoodResolver {
     userId: string,
     query: string,
     barcode?: string,
+    locale?: string,
+  ): Promise<FoodSearchResult> {
+    return withSpan(
+      "FoodResolver.search",
+      { query, hasBarcode: Boolean(barcode), locale },
+      () => this.searchInternal(userId, query, barcode, locale),
+    );
+  }
+
+  private async searchInternal(
+    userId: string,
+    query: string,
+    barcode?: string,
+    locale?: string,
   ): Promise<FoodSearchResult> {
     const canonicalName = normalizeFoodName(query);
     const mention: FoodMention = {
@@ -171,6 +228,7 @@ export class FoodResolver {
       unit: "g",
       rawUnitText: "g",
       unitKind: "metric",
+      language: languageFromLocale(locale),
       barcode,
       confidence: 0.95,
       marketProduct: Boolean(barcode),
@@ -223,7 +281,11 @@ export class FoodResolver {
       let resolved: FoodProviderResolution;
       try {
         resolved = normalizeProviderResolution(
-          await provider.resolve(userId, mention),
+          await withSpan(
+            "FoodDataProvider.resolve",
+            { provider: provider.id },
+            () => provider.resolve(userId, mention),
+          ),
         );
       } catch {
         resolved = { items: [] };
@@ -263,23 +325,62 @@ export class FoodResolver {
   private async cacheExternalCandidate(item: MealItem): Promise<void> {
     if ((item as MealItemWithLocalMarker)[localCandidateSymbol]) return;
     if (!item.externalSource || !item.externalId) return;
-    await this.repository.upsertFoodItem({
-      name: item.name,
-      normalizedName: normalizeText(item.canonicalName ?? item.name),
-      canonicalName: item.canonicalName ?? item.name,
-      source: item.source,
-      externalSource: item.externalSource,
-      externalId: item.externalId,
-      sourceUrl: item.sourceUrl,
-      license: item.license,
-      fetchedAt: new Date().toISOString(),
-      servingGrams: servingGramsForMealItem(item),
-      calories: item.calories,
-      proteinGrams: item.proteinGrams,
-      carbsGrams: item.carbsGrams,
-      fatGrams: item.fatGrams,
-    });
+    await withSpan(
+      "Repository.upsertFoodItem.cacheExternalCandidate",
+      { externalSource: item.externalSource },
+      () => this.repository.upsertFoodItem({
+        name: item.name,
+        normalizedName: normalizeText(item.canonicalName ?? item.name),
+        canonicalName: item.canonicalName ?? item.name,
+        source: item.source,
+        externalSource: item.externalSource,
+        externalId: item.externalId,
+        sourceUrl: item.sourceUrl,
+        license: item.license,
+        fetchedAt: new Date().toISOString(),
+        servingGrams: servingGramsForMealItem(item),
+        calories: item.calories,
+        proteinGrams: item.proteinGrams,
+        carbsGrams: item.carbsGrams,
+        fatGrams: item.fatGrams,
+      }),
+    );
   }
+}
+
+function mentionWithLocale(mention: FoodMention, locale?: string): FoodMention {
+  if (mention.language) return mention;
+  const language = languageFromLocale(locale);
+  return language ? { ...mention, language } : mention;
+}
+
+function languageFromLocale(locale?: string): string | undefined {
+  const normalized = locale?.toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized.startsWith("es")) return "es";
+  if (normalized.startsWith("en")) return "en";
+  return undefined;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(concurrency, Math.max(items.length, 1)) },
+    async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await mapper(items[index]!, index);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
 }
 
 function servingGramsForMealItem(item: MealItem): number {
@@ -385,6 +486,7 @@ export class CompositeFoodTextExtractor implements FoodTextExtractor {
 
 export class LocalFoodDataProvider implements FoodDataProvider {
   readonly id = "local";
+  private readonly searchCache = new Map<string, Array<FoodItemRecord & Partial<FoodSearchCandidate>>>();
 
   constructor(
     private readonly repository: AppRepository,
@@ -395,6 +497,20 @@ export class LocalFoodDataProvider implements FoodDataProvider {
   ) {}
 
   async resolve(
+    userId: string,
+    mention: FoodMention,
+  ): Promise<FoodProviderResolution> {
+    return withSpan(
+      "LocalFoodDataProvider.resolve",
+      {
+        canonicalName: canonicalNameForMention(mention),
+        marketProduct: hasMarketProductIntent(mention),
+      },
+      () => this.resolveInternal(userId, mention),
+    );
+  }
+
+  private async resolveInternal(
     userId: string,
     mention: FoodMention,
   ): Promise<FoodProviderResolution> {
@@ -422,12 +538,7 @@ export class LocalFoodDataProvider implements FoodDataProvider {
       this.options.embeddingProvider &&
       !hasMarketProductIntent(mention)
     ) {
-      compatibleFoods = (await this.repository.searchFoodsHybrid(userId, {
-        query: canonicalNameForMention(mention),
-        barcode: mention.barcode,
-        excludeBranded: true,
-        limit: 50,
-      }))
+      compatibleFoods = (await this.searchFoods(userId, mention, canonicalNameForMention(mention)))
         .filter((food) => cachedFoodIsCompatible(food, mention))
         .sort(
           (a, b) =>
@@ -486,34 +597,94 @@ export class LocalFoodDataProvider implements FoodDataProvider {
     mention: FoodMention,
     query = canonicalNameForMention(mention),
   ): Promise<Array<FoodItemRecord & Partial<FoodSearchCandidate>>> {
-    if (!mention.barcode && this.options.embeddingProvider) {
+    return withSpan(
+      "LocalFoodDataProvider.searchFoods",
+      {
+        query,
+        hasEmbeddingProvider: Boolean(this.options.embeddingProvider),
+        excludeBranded: !hasMarketProductIntent(mention),
+      },
+      () => this.searchFoodsInternal(userId, mention, query),
+    );
+  }
+
+  private async searchFoodsInternal(
+    userId: string,
+    mention: FoodMention,
+    query: string,
+  ): Promise<Array<FoodItemRecord & Partial<FoodSearchCandidate>>> {
+    const locale = mention.language;
+    const marketIntent = hasMarketProductIntent(mention);
+    const cacheKey = JSON.stringify({ userId, query, barcode: mention.barcode, locale, marketIntent });
+    const cached = this.searchCache.get(cacheKey);
+    if (cached) return cached.map(cloneLocalFoodCandidate);
+
+    const lexical = await withSpan(
+      "Repository.searchFoodsHybrid",
+      { query, mode: "lexical", locale, marketIntent },
+      () => this.repository.searchFoodsHybrid(userId, {
+        query,
+        barcode: mention.barcode,
+        excludeBranded: !marketIntent,
+        limit: 50,
+        locale,
+        scope: marketIntent ? "market" : "generic",
+      }),
+    );
+    if (lexical.length > 0 || mention.barcode) {
+      this.setSearchCache(cacheKey, lexical);
+      return lexical.map(cloneLocalFoodCandidate);
+    }
+
+    if (this.options.embeddingProvider) {
       try {
-        const model = await this.repository.getActiveEmbeddingModel();
+        const model = await withSpan(
+          "Repository.getActiveEmbeddingModel",
+          undefined,
+          () => this.repository.getActiveEmbeddingModel(),
+        );
         if (model) {
-          const embedding = (await this.options.embeddingProvider.embed([
-            query,
-          ])).data[0]?.embedding;
+          const embedding = (await withSpan(
+            "EmbeddingProvider.embed",
+            { inputCount: 1 },
+            () => this.options.embeddingProvider!.embed([query]),
+          )).data[0]?.embedding;
           if (embedding) {
-            return await this.repository.searchFoodsHybrid(userId, {
-              query,
-              barcode: mention.barcode,
-              embedding,
-              embeddingModelId: model.id,
-              limit: 50,
-              excludeBranded: !hasMarketProductIntent(mention),
-            });
+            const vector = await withSpan(
+              "Repository.searchFoodsHybrid",
+              { query, mode: "hybrid" },
+              () => this.repository.searchFoodsHybrid(userId, {
+                query,
+                barcode: mention.barcode,
+                embedding,
+                embeddingModelId: model.id,
+                limit: 50,
+                excludeBranded: !marketIntent,
+                locale,
+                scope: marketIntent ? "market" : "generic",
+              }),
+            );
+            this.setSearchCache(cacheKey, vector);
+            return vector.map(cloneLocalFoodCandidate);
           }
         }
       } catch {
         // Fall back to lexical search if embeddings are unavailable.
       }
     }
-    return this.repository.searchFoodsHybrid(userId, {
-      query,
-      barcode: mention.barcode,
-      excludeBranded: !hasMarketProductIntent(mention),
-      limit: 50,
-    });
+    this.setSearchCache(cacheKey, []);
+    return [];
+  }
+
+  private setSearchCache(
+    key: string,
+    value: Array<FoodItemRecord & Partial<FoodSearchCandidate>>,
+  ): void {
+    if (this.searchCache.size >= 250) {
+      const oldest = this.searchCache.keys().next().value;
+      if (oldest) this.searchCache.delete(oldest);
+    }
+    this.searchCache.set(key, value.map(cloneLocalFoodCandidate));
   }
 }
 
@@ -524,6 +695,13 @@ function cachedFoodIsCompatible(
   if (isBrandedFood(food) && !hasMarketProductIntent(mention)) return false;
   if (food.externalSource !== "usda_fdc") return true;
   return Boolean(scoreUsdaCandidate(usdaFoodFromRecord(food), mention));
+}
+
+function cloneLocalFoodCandidate<T extends FoodItemRecord & Partial<FoodSearchCandidate>>(food: T): T {
+  return {
+    ...food,
+    portions: food.portions?.map((portion) => ({ ...portion })),
+  };
 }
 
 function hasMarketProductIntent(mention: FoodMention): boolean {
@@ -558,22 +736,32 @@ export class OpenFoodFactsFoodDataProvider implements FoodDataProvider {
   ) {}
 
   async resolve(_userId: string, mention: FoodMention): Promise<MealItem[]> {
-    const product = mention.barcode
-      ? await this.fetchBarcode(mention.barcode)
-      : await this.searchFirst(mention);
-    const item = product ? mapOpenFoodFactsProduct(product, mention) : null;
-    return item ? [item] : [];
+    return withSpan(
+      "OpenFoodFactsFoodDataProvider.resolve",
+      { hasBarcode: Boolean(mention.barcode), canonicalName: canonicalNameForMention(mention) },
+      async () => {
+        const product = mention.barcode
+          ? await this.fetchBarcode(mention.barcode)
+          : await this.searchFirst(mention);
+        const item = product ? mapOpenFoodFactsProduct(product, mention) : null;
+        return item ? [item] : [];
+      },
+    );
   }
 
   private async fetchBarcode(
     barcode: string,
   ): Promise<OpenFoodFactsProduct | null> {
-    const response = await fetch(
-      `${this.baseUrl}/api/v2/product/${encodeURIComponent(barcode)}.json`,
-      {
-        signal: timeoutSignal(this.timeoutMs),
-        headers: { "User-Agent": this.userAgent },
-      },
+    const response = await withSpan(
+      "OpenFoodFacts.fetchBarcode",
+      undefined,
+      () => fetch(
+        `${this.baseUrl}/api/v2/product/${encodeURIComponent(barcode)}.json`,
+        {
+          signal: timeoutSignal(this.timeoutMs),
+          headers: { "User-Agent": this.userAgent },
+        },
+      ),
     );
     if (!response.ok) return null;
     const json = (await response.json()) as {
@@ -596,10 +784,14 @@ export class OpenFoodFactsFoodDataProvider implements FoodDataProvider {
       url.searchParams.set("action", "process");
       url.searchParams.set("json", "1");
       url.searchParams.set("page_size", "1");
-      const response = await fetch(url, {
-        signal: timeoutSignal(this.timeoutMs),
-        headers: { "User-Agent": this.userAgent },
-      });
+      const response = await withSpan(
+        "OpenFoodFacts.search",
+        { query },
+        () => fetch(url, {
+          signal: timeoutSignal(this.timeoutMs),
+          headers: { "User-Agent": this.userAgent },
+        }),
+      );
       if (!response.ok) continue;
       const json = (await response.json()) as {
         products?: OpenFoodFactsProduct[];
@@ -625,6 +817,16 @@ export class UsdaFoodDataProvider implements FoodDataProvider {
     _userId: string,
     mention: FoodMention,
   ): Promise<FoodProviderResolution> {
+    return withSpan(
+      "UsdaFoodDataProvider.resolve",
+      { canonicalName: canonicalNameForMention(mention) },
+      () => this.resolveInternal(mention),
+    );
+  }
+
+  private async resolveInternal(
+    mention: FoodMention,
+  ): Promise<FoodProviderResolution> {
     if (!this.apiKey)
       return {
         items: [],
@@ -641,9 +843,13 @@ export class UsdaFoodDataProvider implements FoodDataProvider {
       url.searchParams.set("query", query);
       url.searchParams.set("pageSize", "25");
       url.searchParams.set("dataType", "Foundation,SR Legacy");
-      const response = await fetch(url, {
-        signal: timeoutSignal(this.timeoutMs),
-      });
+      const response = await withSpan(
+        "USDA.foods.search",
+        { query },
+        () => fetch(url, {
+          signal: timeoutSignal(this.timeoutMs),
+        }),
+      );
       if (!response.ok) continue;
       let json: { foods?: UsdaFood[] };
       try {
@@ -717,7 +923,11 @@ export class UsdaFoodDataProvider implements FoodDataProvider {
   private async fetchPortionOptions(fdcId: number): Promise<PortionOption[]> {
     const cached = this.portionCache.get(fdcId);
     if (cached) return cached;
-    const detail = await this.fetchFoodDetail(fdcId);
+    const detail = await withSpan(
+      "USDA.fetchFoodDetail.forPortions",
+      { fdcId },
+      () => this.fetchFoodDetail(fdcId),
+    );
     const options = detail ? normalizeUsdaPortions(detail, String(fdcId)) : [];
     this.portionCache.set(fdcId, options);
     return options;
@@ -727,9 +937,13 @@ export class UsdaFoodDataProvider implements FoodDataProvider {
     const url = new URL(`${this.baseUrl}/food/${fdcId}`);
     url.searchParams.set("api_key", this.apiKey!);
     try {
-      const response = await fetch(url, {
-        signal: timeoutSignal(this.timeoutMs),
-      });
+      const response = await withSpan(
+        "USDA.food.detail",
+        { fdcId },
+        () => fetch(url, {
+          signal: timeoutSignal(this.timeoutMs),
+        }),
+      );
       if (!response.ok) return null;
       return (await response.json()) as UsdaFood;
     } catch {

@@ -108,6 +108,8 @@ export type FoodSearchCandidate = FoodItemRecord & {
   finalScore: number;
 };
 
+export type FoodSearchScope = "generic" | "market";
+
 export type FoodFeedbackAction = "selected" | "logged" | "corrected" | "dismissed" | "rejected";
 
 export type FoodFeedbackRecord = {
@@ -137,6 +139,8 @@ export type FoodHybridSearchInput = {
   embeddingModelId?: string;
   limit?: number;
   excludeBranded?: boolean;
+  locale?: string;
+  scope?: FoodSearchScope;
 };
 
 export type UpsertFoodItemEmbeddingInput = {

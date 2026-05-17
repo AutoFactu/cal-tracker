@@ -270,6 +270,73 @@ describe("FoodResolver", () => {
     );
   });
 
+  it("routes local food search by locale and generic market scope", async () => {
+    const repository = InMemoryRepository.seeded();
+    await repository.upsertFoodItem({
+      name: "Arroz",
+      normalizedName: "arroz",
+      canonicalName: "arroz",
+      source: "openfoodfacts",
+      externalSource: "openfoodfacts",
+      externalId: "es-arroz",
+      dataType: "Open Food Facts",
+      foodKey: "es",
+      servingGrams: 100,
+      calories: 130,
+      proteinGrams: 2.7,
+      carbsGrams: 28,
+      fatGrams: 0.3,
+    });
+    await repository.upsertFoodItem({
+      name: "Rice, white, cooked",
+      normalizedName: "rice",
+      canonicalName: "rice",
+      source: "usda_fdc",
+      externalSource: "usda_fdc",
+      externalId: "usda-rice",
+      dataType: "SR Legacy",
+      servingGrams: 100,
+      calories: 130,
+      proteinGrams: 2.7,
+      carbsGrams: 28,
+      fatGrams: 0.3,
+    });
+    await repository.upsertFoodItem({
+      name: "Rice Brand Snack",
+      normalizedName: "rice brand snack",
+      canonicalName: "rice snack",
+      source: "openfoodfacts",
+      externalSource: "openfoodfacts",
+      externalId: "en-rice-product",
+      dataType: "Open Food Facts",
+      foodKey: "en",
+      servingGrams: 100,
+      calories: 420,
+      proteinGrams: 8,
+      carbsGrams: 72,
+      fatGrams: 12,
+    });
+
+    await expect(
+      repository.searchFoodsHybrid("user-1", {
+        query: "arroz",
+        locale: "es-ES",
+        scope: "generic",
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ externalId: "es-arroz", foodKey: "es" }),
+    ]);
+    await expect(
+      repository.searchFoodsHybrid("user-1", {
+        query: "rice",
+        locale: "en-US",
+        scope: "generic",
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ externalId: "usda-rice" }),
+    ]);
+  });
+
   it("uses the request language before English fallback for Spanish bread and butter", async () => {
     const queries: string[] = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {

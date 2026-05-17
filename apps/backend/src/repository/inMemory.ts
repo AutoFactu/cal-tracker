@@ -179,6 +179,8 @@ export class InMemoryRepository implements AppRepository {
     const visibleFoods = [...this.foods.values()].filter((food) => {
       if (food.userId && food.userId !== userId) return false;
       if (input.excludeBranded && food.dataType === "Branded") return false;
+      if (!foodMatchesSearchScope(food, input)) return false;
+      if (!foodMatchesSearchLocale(food, input)) return false;
       return true;
     });
 
@@ -589,6 +591,39 @@ function lexicalFoodScore(food: FoodItemRecord, normalizedQuery: string): number
     if (matchedTokens === queryTokens.length) return 0.68;
   }
   return 0;
+}
+
+function foodMatchesSearchScope(food: FoodItemRecord, input: FoodHybridSearchInput): boolean {
+  if (!input.scope) return true;
+  const scope =
+    food.userId ||
+    (food.source === "openfoodfacts" && food.foodKey === "es") ||
+    (food.dataType !== "Branded" && food.source !== "usda_branded" && food.source !== "openfoodfacts")
+      ? "generic"
+      : "market";
+  return scope === input.scope;
+}
+
+function foodMatchesSearchLocale(food: FoodItemRecord, input: FoodHybridSearchInput): boolean {
+  const locale = normalizeSearchLocale(input.locale);
+  if (!locale) return true;
+  const foodLocale =
+    food.foodKey === "es" || food.foodKey === "en"
+      ? food.foodKey
+      : food.externalSource === "usda_fdc"
+        ? "en"
+        : "any";
+  if (locale === "es") return foodLocale === "es" || foodLocale === "any";
+  if (locale === "en") return foodLocale === "en" || foodLocale === "any";
+  return true;
+}
+
+function normalizeSearchLocale(locale?: string): "es" | "en" | undefined {
+  const normalized = locale?.toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized.startsWith("es")) return "es";
+  if (normalized.startsWith("en")) return "en";
+  return undefined;
 }
 
 function sanitizeLimit(limit?: number): number {

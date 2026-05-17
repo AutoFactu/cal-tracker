@@ -1,5 +1,6 @@
 import { mkdir, appendFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
+import { activeProfileSnapshot } from "./profiler.js";
 
 export type LocalRunLogger = {
   enabled: boolean;
@@ -31,9 +32,10 @@ class JsonlRunLogger implements LocalRunLogger {
       `runs-${timestamp.toISOString().slice(0, 10)}.jsonl`,
     );
     await mkdir(this.directory, { recursive: true });
+    const profile = activeProfileSnapshot();
     await appendFile(
       file,
-      `${JSON.stringify({ timestamp: timestamp.toISOString(), ...event })}\n`,
+      `${JSON.stringify({ timestamp: timestamp.toISOString(), ...event, profile })}\n`,
       "utf8",
     );
   }
@@ -56,6 +58,12 @@ export function extractReasoningTokens(rawResponse: unknown): number | undefined
     if (typeof value === "number") return value;
   }
   return undefined;
+}
+
+export function extractGenerationId(rawResponse: unknown): string | undefined {
+  if (!isRecord(rawResponse)) return undefined;
+  const id = rawResponse.id;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
 }
 
 export function summarizeError(error: unknown): Record<string, unknown> {

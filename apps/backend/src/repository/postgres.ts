@@ -1,6 +1,7 @@
 import postgres, { type Sql } from "postgres";
 import { defaultUserScopes, type CalorieTargetSource, type DailyGoals, type Meal, type MealItem, type MealLabel, type MealProposal, type MealTemplate, type NutritionSnapshot, type PermissionScope } from "@cal-tracker/contracts";
 import { newId } from "../utils/ids.js";
+import { withSpan, withSyncSpan } from "../observability/profiler.js";
 import { normalizeText } from "../utils/normalize.js";
 import { subtractNutrition, sumNutrition } from "../utils/nutrition.js";
 import type {
@@ -31,12 +32,24 @@ const VECTOR_SCORE_WEIGHT = 0.25;
 const LEXICAL_ONLY_SCORE_WEIGHT = 0.95;
 const PREFERENCE_SCORE_WEIGHT = 0.05;
 const PREFERENCE_SCORE_NORMALIZER = 10;
+const FOOD_SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
+const FOOD_SEARCH_CACHE_MAX_ENTRIES = 500;
+
+type FoodSearchProfile = {
+  scope: "generic" | "market";
+  locales: string[];
+};
 
 export class PostgresRepository implements AppRepository {
   private readonly sql: Sql;
+  private readonly foodSearchCache = new Map<string, { expiresAt: number; value: FoodSearchCandidate[] }>();
 
   constructor(databaseUrl: string) {
     this.sql = postgres(databaseUrl);
+  }
+
+  async close(): Promise<void> {
+    await this.sql.end();
   }
 
   async createUser(input: { email: string; displayName: string; passwordHash?: string; scopes: PermissionScope[] }): Promise<StoredUser> {
@@ -175,74 +188,67 @@ export class PostgresRepository implements AppRepository {
   }
 
   async searchFoodsHybrid(userId: string, input: FoodHybridSearchInput): Promise<FoodSearchCandidate[]> {
+    return withSpan(
+      "PostgresRepository.searchFoodsHybrid",
+      {
+        query: input.query,
+        hasBarcode: Boolean(input.barcode),
+        hasEmbedding: Boolean(input.embedding),
+        excludeBranded: Boolean(input.excludeBranded),
+        limit: input.limit,
+      },
+      () => this.searchFoodsHybridInternal(userId, input),
+    );
+  }
+
+  private async searchFoodsHybridInternal(userId: string, input: FoodHybridSearchInput): Promise<FoodSearchCandidate[]> {
     const limit = sanitizeLimit(input.limit);
     const normalized = normalizeText(input.query);
+    const cacheKey = foodSearchCacheKey(userId, input, normalized, limit);
+    const cached = this.getCachedFoodSearch(cacheKey);
+    if (cached) return cached.map(cloneFoodSearchCandidate);
+
     const candidateRows = new Map<string, { row: Record<string, unknown>; lexicalScore: number; vectorScore?: number }>();
     const includeBranded = !input.excludeBranded;
 
     if (input.barcode) {
-      const rows = await this.sql`
+      const barcode = input.barcode;
+      const rows = await withSpan(
+        "PostgresRepository.searchFoodsHybrid.barcodeQuery",
+        { limit },
+        () => this.sql`
         SELECT *, 1::float AS search_score
         FROM food_items
-        WHERE (user_id IS NULL OR user_id = ${userId}) AND barcode = ${input.barcode}
+        WHERE (user_id IS NULL OR user_id = ${userId}) AND barcode = ${barcode}
         LIMIT ${limit}
-      `;
+      `);
       for (const row of rows) {
         candidateRows.set(row.id as string, { row, lexicalScore: 1 });
       }
     } else if (normalized.length > 0) {
-      const rows = await this.sql`
-          WITH food_query AS (SELECT ${normalized}::text AS q)
-          SELECT food_items.*,
-                 GREATEST(
-                   similarity(food_items.normalized_name, food_query.q),
-                   similarity(COALESCE(food_items.canonical_name, ''), food_query.q),
-                   similarity(COALESCE(food_items.brand, ''), food_query.q)
-                 ) AS search_score
-          FROM food_items, food_query
-          WHERE (food_items.user_id IS NULL OR food_items.user_id = ${userId})
-            AND (${includeBranded} OR food_items.data_type IS DISTINCT FROM 'Branded')
-            AND (
-              food_items.normalized_name % food_query.q
-              OR COALESCE(food_items.canonical_name, '') % food_query.q
-              OR COALESCE(food_items.brand, '') % food_query.q
-              OR food_query.q LIKE '%' || food_items.normalized_name || '%'
-              OR food_items.normalized_name LIKE '%' || food_query.q || '%'
-              OR food_query.q LIKE '%' || COALESCE(food_items.canonical_name, food_items.normalized_name) || '%'
-              OR COALESCE(food_items.canonical_name, food_items.normalized_name) LIKE '%' || food_query.q || '%'
-            )
-          ORDER BY
-            CASE WHEN food_items.user_id = ${userId} THEN 0 ELSE 1 END,
-            CASE food_items.data_type
-              WHEN 'SR Legacy' THEN 0
-              WHEN 'Foundation' THEN 1
-              WHEN 'Survey (FNDDS)' THEN 2
-              WHEN 'Branded' THEN 3
-              ELSE 2
-            END,
-            search_score DESC,
-            char_length(food_items.normalized_name),
-            food_items.name
-          LIMIT ${Math.max(limit, DEFAULT_FOOD_SEARCH_LIMIT)}
-        `;
+      const rows = await this.searchFoodDocuments(userId, input, normalized, limit, includeBranded);
       for (const row of rows) {
         candidateRows.set(row.id as string, { row, lexicalScore: clampScore(Number(row.search_score ?? 0)) });
       }
     }
 
-    if (!input.barcode && input.embedding && input.embeddingModelId) {
+    if (candidateRows.size === 0 && !input.barcode && input.embedding && input.embeddingModelId) {
       const vectorLiteral = toVectorLiteral(input.embedding);
-      const rows = await this.sql`
+      const embeddingModelId = input.embeddingModelId;
+      const rows = await withSpan(
+        "PostgresRepository.searchFoodsHybrid.vectorQuery",
+        { limit: Math.max(limit, DEFAULT_FOOD_SEARCH_LIMIT), includeBranded },
+        () => this.sql`
         SELECT food_items.*,
                1 - (food_item_embeddings.embedding <=> ${vectorLiteral}::vector) AS vector_score
         FROM food_item_embeddings
         JOIN food_items ON food_items.id = food_item_embeddings.food_item_id
-        WHERE food_item_embeddings.embedding_model_id = ${input.embeddingModelId}
+        WHERE food_item_embeddings.embedding_model_id = ${embeddingModelId}
           AND (food_items.user_id IS NULL OR food_items.user_id = ${userId})
           AND (${includeBranded} OR food_items.data_type IS DISTINCT FROM 'Branded')
         ORDER BY food_item_embeddings.embedding <=> ${vectorLiteral}::vector
         LIMIT ${Math.max(limit, DEFAULT_FOOD_SEARCH_LIMIT)}
-      `;
+      `);
       for (const row of rows) {
         const foodId = row.id as string;
         const existing = candidateRows.get(foodId);
@@ -256,14 +262,27 @@ export class PostgresRepository implements AppRepository {
     }
 
     const merged = [...candidateRows.values()];
-    if (merged.length === 0) return [];
+    if (merged.length === 0) {
+      this.setCachedFoodSearch(cacheKey, []);
+      return [];
+    }
 
-    const foods = await this.mapFoodsWithPortions(merged.map((candidate) => candidate.row));
+    const foods = await withSpan(
+      "PostgresRepository.mapFoodsWithPortions",
+      { rowCount: merged.length },
+      () => this.mapFoodsWithPortions(merged.map((candidate) => candidate.row)),
+    );
     const scoresByFoodId = new Map(merged.map((candidate) => [candidate.row.id as string, candidate]));
-    const preferenceScores = await this.getPreferenceScoreMap(userId, foods.map((food) => food.id));
+    const preferenceScores = await withSpan(
+      "PostgresRepository.getPreferenceScoreMap",
+      { foodCount: foods.length },
+      () => this.getPreferenceScoreMap(userId, foods.map((food) => food.id)),
+    );
 
-    return foods
-      .map((food) => {
+    const ranked = withSyncSpan(
+      "PostgresRepository.rankFoodCandidates",
+      { foodCount: foods.length, limit },
+      () => foods.map((food) => {
         const scores = scoresByFoodId.get(food.id);
         const lexicalScore = clampScore(scores?.lexicalScore ?? 0);
         const vectorScore = scores?.vectorScore == null ? undefined : clampScore(scores.vectorScore);
@@ -280,7 +299,160 @@ export class PostgresRepository implements AppRepository {
         };
       })
       .sort((a, b) => b.finalScore - a.finalScore || b.lexicalScore - a.lexicalScore || (b.vectorScore ?? 0) - (a.vectorScore ?? 0))
-      .slice(0, limit);
+      .slice(0, limit),
+    );
+    this.setCachedFoodSearch(cacheKey, ranked);
+    return ranked.map(cloneFoodSearchCandidate);
+  }
+
+  private async searchFoodDocuments(
+    userId: string,
+    input: FoodHybridSearchInput,
+    normalized: string,
+    limit: number,
+    includeBranded: boolean,
+  ): Promise<Record<string, unknown>[]> {
+    const rows: Record<string, unknown>[] = [];
+    const seen = new Set<string>();
+    const profiles = foodSearchProfiles(input, includeBranded);
+    for (const profile of profiles) {
+      const profileRows = await withSpan(
+        "PostgresRepository.searchFoodsHybrid.documentQuery",
+        { limit: Math.max(limit * 4, DEFAULT_FOOD_SEARCH_LIMIT), scope: profile.scope, locales: profile.locales },
+        () => this.queryFoodSearchDocuments(userId, normalized, profile, limit),
+      );
+      for (const row of profileRows) {
+        const id = row.id as string;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        rows.push(row);
+      }
+      if (rows.length >= limit) break;
+    }
+    return rows;
+  }
+
+  private async queryFoodSearchDocuments(
+    userId: string,
+    normalized: string,
+    profile: FoodSearchProfile,
+    limit: number,
+  ): Promise<Record<string, unknown>[]> {
+    const exactRows = await this.queryFoodSearchDocumentsExact(userId, normalized, profile, limit);
+    if (exactRows.length >= limit) return exactRows;
+    const seen = new Set(exactRows.map((row) => row.id as string));
+    const fuzzyRows = await this.queryFoodSearchDocumentsFuzzy(userId, normalized, profile, limit);
+    return [
+      ...exactRows,
+      ...fuzzyRows.filter((row) => !seen.has(row.id as string)),
+    ];
+  }
+
+  private async queryFoodSearchDocumentsExact(
+    userId: string,
+    normalized: string,
+    profile: FoodSearchProfile,
+    limit: number,
+  ): Promise<Record<string, unknown>[]> {
+    const searchLimit = Math.max(limit * 4, DEFAULT_FOOD_SEARCH_LIMIT);
+    const prefix = `${normalized}%`;
+    const tokenContains = `% ${normalized}%`;
+    const locale0 = profile.locales[0] ?? "any";
+    const locale1 = profile.locales[1] ?? locale0;
+    const locale2 = profile.locales[2] ?? locale1;
+    const locale3 = profile.locales[3] ?? locale2;
+    return this.sql`
+      SELECT food_items.*,
+             GREATEST(
+               CASE WHEN food_search_documents.search_text = ${normalized} THEN 1::float ELSE 0::float END,
+               CASE WHEN food_search_documents.search_text LIKE ${prefix} THEN 0.92::float ELSE 0::float END,
+               CASE WHEN food_search_documents.search_text LIKE ${tokenContains} THEN 0.84::float ELSE 0::float END
+             ) AS search_score
+      FROM food_search_documents
+      JOIN food_items ON food_items.id = food_search_documents.food_item_id
+      WHERE (food_search_documents.user_id IS NULL OR food_search_documents.user_id = ${userId})
+        AND food_search_documents.scope = ${profile.scope}
+        AND food_search_documents.locale IN ${this.sql(profile.locales)}
+        AND (
+          food_search_documents.search_text = ${normalized}
+          OR food_search_documents.search_text LIKE ${prefix}
+          OR food_search_documents.search_text LIKE ${tokenContains}
+        )
+      ORDER BY
+        CASE WHEN food_search_documents.user_id = ${userId} THEN 0 ELSE 1 END,
+        CASE
+          WHEN food_search_documents.locale = ${locale0} THEN 0
+          WHEN food_search_documents.locale = ${locale1} THEN 1
+          WHEN food_search_documents.locale = ${locale2} THEN 2
+          WHEN food_search_documents.locale = ${locale3} THEN 3
+          ELSE 4
+        END,
+        food_search_documents.rank_bucket,
+        search_score DESC,
+        char_length(food_search_documents.search_text),
+        food_items.name
+      LIMIT ${searchLimit}
+    `;
+  }
+
+  private async queryFoodSearchDocumentsFuzzy(
+    userId: string,
+    normalized: string,
+    profile: FoodSearchProfile,
+    limit: number,
+  ): Promise<Record<string, unknown>[]> {
+    const searchLimit = Math.max(limit * 4, DEFAULT_FOOD_SEARCH_LIMIT);
+    const locale0 = profile.locales[0] ?? "any";
+    const locale1 = profile.locales[1] ?? locale0;
+    const locale2 = profile.locales[2] ?? locale1;
+    const locale3 = profile.locales[3] ?? locale2;
+    return this.sql`
+      SELECT food_items.*,
+             similarity(food_search_documents.search_text, ${normalized}) AS search_score
+      FROM food_search_documents
+      JOIN food_items ON food_items.id = food_search_documents.food_item_id
+      WHERE (food_search_documents.user_id IS NULL OR food_search_documents.user_id = ${userId})
+        AND food_search_documents.scope = ${profile.scope}
+        AND food_search_documents.locale IN ${this.sql(profile.locales)}
+        AND food_search_documents.search_text % ${normalized}
+      ORDER BY
+        CASE WHEN food_search_documents.user_id = ${userId} THEN 0 ELSE 1 END,
+        CASE
+          WHEN food_search_documents.locale = ${locale0} THEN 0
+          WHEN food_search_documents.locale = ${locale1} THEN 1
+          WHEN food_search_documents.locale = ${locale2} THEN 2
+          WHEN food_search_documents.locale = ${locale3} THEN 3
+          ELSE 4
+        END,
+        food_search_documents.rank_bucket,
+        search_score DESC,
+        char_length(food_search_documents.search_text),
+        food_items.name
+      LIMIT ${searchLimit}
+    `;
+  }
+
+  private getCachedFoodSearch(key: string): FoodSearchCandidate[] | undefined {
+    const cached = this.foodSearchCache.get(key);
+    if (!cached) return undefined;
+    if (cached.expiresAt < Date.now()) {
+      this.foodSearchCache.delete(key);
+      return undefined;
+    }
+    this.foodSearchCache.delete(key);
+    this.foodSearchCache.set(key, cached);
+    return cached.value;
+  }
+
+  private setCachedFoodSearch(key: string, value: FoodSearchCandidate[]): void {
+    if (this.foodSearchCache.size >= FOOD_SEARCH_CACHE_MAX_ENTRIES) {
+      const oldest = this.foodSearchCache.keys().next().value;
+      if (oldest) this.foodSearchCache.delete(oldest);
+    }
+    this.foodSearchCache.set(key, {
+      expiresAt: Date.now() + FOOD_SEARCH_CACHE_TTL_MS,
+      value: value.map(cloneFoodSearchCandidate),
+    });
   }
 
   async upsertFoodItem(input: Omit<FoodItemRecord, "id">): Promise<FoodItemRecord> {
@@ -331,6 +503,8 @@ export class PostgresRepository implements AppRepository {
         WHERE id = ${existing.id as string}
         RETURNING *
       `;
+      this.foodSearchCache.clear();
+      await this.upsertFoodSearchDocument(mapFood(row));
       return mapFood(row);
     }
     const [row] = await this.sql`
@@ -354,7 +528,36 @@ export class PostgresRepository implements AppRepository {
       )
       RETURNING *
     `;
+    this.foodSearchCache.clear();
+    await this.upsertFoodSearchDocument(mapFood(row));
     return mapFood(row);
+  }
+
+  private async upsertFoodSearchDocument(food: FoodItemRecord): Promise<void> {
+    const document = foodSearchDocumentForFood(food);
+    if (!document) return;
+    await this.sql`
+      INSERT INTO food_search_documents (
+        food_item_id, user_id, locale, scope, search_text, rank_bucket,
+        source, external_source, data_type, food_key, updated_at
+      )
+      VALUES (
+        ${food.id}, ${food.userId ?? null}, ${document.locale}, ${document.scope},
+        ${document.searchText}, ${document.rankBucket}, ${food.source},
+        ${food.externalSource ?? null}, ${food.dataType ?? null}, ${food.foodKey ?? null}, now()
+      )
+      ON CONFLICT (food_item_id) DO UPDATE SET
+        user_id = EXCLUDED.user_id,
+        locale = EXCLUDED.locale,
+        scope = EXCLUDED.scope,
+        search_text = EXCLUDED.search_text,
+        rank_bucket = EXCLUDED.rank_bucket,
+        source = EXCLUDED.source,
+        external_source = EXCLUDED.external_source,
+        data_type = EXCLUDED.data_type,
+        food_key = EXCLUDED.food_key,
+        updated_at = now()
+    `;
   }
 
   async recordFoodFeedback(input: FoodFeedbackRecord): Promise<UserFoodPreference | undefined> {
@@ -403,6 +606,7 @@ export class PostgresRepository implements AppRepository {
         RETURNING *
       `;
     });
+    this.foodSearchCache.clear();
     return preference ? mapUserFoodPreference(preference) : undefined;
   }
 
@@ -576,18 +780,28 @@ export class PostgresRepository implements AppRepository {
   }
 
   async createProposal(userId: string, proposal: Omit<MealProposal, "id" | "createdAt">): Promise<MealProposal> {
-    return this.sql.begin(async (tx) => {
-      const id = newId();
-      const [row] = await tx`
-        INSERT INTO meal_proposals (id, user_id, phrase, title, status, confidence, requires_confirmation, trusted_auto_commit_eligible, source, calories, protein_grams, carbs_grams, fat_grams)
-        VALUES (${id}, ${userId}, ${proposal.phrase}, ${proposal.title}, ${proposal.status}, ${proposal.confidence}, ${proposal.requiresConfirmation}, ${proposal.trustedAutoCommitEligible}, ${proposal.source}, ${proposal.nutrition.calories}, ${proposal.nutrition.proteinGrams}, ${proposal.nutrition.carbsGrams}, ${proposal.nutrition.fatGrams})
-        RETURNING *
-      `;
-      for (const item of proposal.items) {
-        await insertProposalItem(tx, id, item);
-      }
-      return this.mapProposal(row, proposal.title, tx);
-    });
+    return withSpan(
+      "PostgresRepository.createProposal",
+      { itemCount: proposal.items.length },
+      () => this.sql.begin(async (tx) => {
+        const id = newId();
+        const [row] = await withSpan(
+          "PostgresRepository.createProposal.insertProposal",
+          undefined,
+          () => tx`
+          INSERT INTO meal_proposals (id, user_id, phrase, title, status, confidence, requires_confirmation, trusted_auto_commit_eligible, source, calories, protein_grams, carbs_grams, fat_grams)
+          VALUES (${id}, ${userId}, ${proposal.phrase}, ${proposal.title}, ${proposal.status}, ${proposal.confidence}, ${proposal.requiresConfirmation}, ${proposal.trustedAutoCommitEligible}, ${proposal.source}, ${proposal.nutrition.calories}, ${proposal.nutrition.proteinGrams}, ${proposal.nutrition.carbsGrams}, ${proposal.nutrition.fatGrams})
+          RETURNING *
+        `,
+        );
+        await withSpan(
+          "PostgresRepository.createProposal.insertItems",
+          { itemCount: proposal.items.length },
+          () => Promise.all(proposal.items.map((item) => insertProposalItem(tx, id, item))),
+        );
+        return this.mapProposal(row, proposal.title, tx);
+      }),
+    );
   }
 
   async getProposal(userId: string, proposalId: string): Promise<MealProposal | undefined> {
@@ -732,20 +946,28 @@ export class PostgresRepository implements AppRepository {
   }
 
   async recordActionCall(input: Omit<ActionCallRecord, "id" | "createdAt">): Promise<ActionCallRecord> {
-    const [row] = await this.sql`
+    const [row] = await withSpan(
+      "PostgresRepository.recordActionCall",
+      { actionId: input.actionId, status: input.confirmationStatus },
+      () => this.sql`
       INSERT INTO action_calls (user_id, action_id, source, input_json, output_json, error_json, confirmation_status, trace_id, latency_ms)
       VALUES (${input.userId}, ${input.actionId}, ${input.source}, ${this.sql.json(input.input as never)}, ${this.sql.json((input.output ?? null) as never)}, ${this.sql.json((input.error ?? null) as never)}, ${input.confirmationStatus}, ${input.traceId}, ${input.latencyMs})
       RETURNING *
-    `;
+    `,
+    );
     return mapActionCall(row);
   }
 
   async recordAuditEvent(input: Omit<AuditEventRecord, "id" | "createdAt">): Promise<AuditEventRecord> {
-    const [row] = await this.sql`
+    const [row] = await withSpan(
+      "PostgresRepository.recordAuditEvent",
+      { eventType: input.eventType },
+      () => this.sql`
       INSERT INTO audit_events (user_id, event_type, metadata_json, trace_id)
       VALUES (${input.userId ?? null}, ${input.eventType}, ${this.sql.json(input.metadata as never)}, ${input.traceId})
       RETURNING *
-    `;
+    `,
+    );
     return mapAuditEvent(row);
   }
 
@@ -1133,6 +1355,123 @@ function stripFoodSearchCandidate(candidate: FoodSearchCandidate): FoodItemRecor
     ...food
   } = candidate;
   return food;
+}
+
+function cloneFoodSearchCandidate(candidate: FoodSearchCandidate): FoodSearchCandidate {
+  return {
+    ...candidate,
+    portions: candidate.portions?.map((portion) => ({ ...portion })),
+  };
+}
+
+function foodSearchCacheKey(
+  userId: string,
+  input: FoodHybridSearchInput,
+  normalized: string,
+  limit: number,
+): string {
+  return JSON.stringify({
+    userId,
+    query: normalized,
+    barcode: input.barcode,
+    locale: normalizeSearchLocale(input.locale),
+    scope: input.scope,
+    excludeBranded: input.excludeBranded,
+    limit,
+  });
+}
+
+function foodSearchProfiles(
+  input: FoodHybridSearchInput,
+  includeBranded: boolean,
+): FoodSearchProfile[] {
+  const locale = normalizeSearchLocale(input.locale);
+  const scope = input.scope ?? (includeBranded ? "market" : "generic");
+  if (scope === "market") {
+    return [
+      {
+        scope: "market",
+        locales: uniqueStrings([locale, "en", "es", "any"].filter(Boolean) as string[]),
+      },
+      {
+        scope: "generic",
+        locales: uniqueStrings([locale, "en", "es", "any"].filter(Boolean) as string[]),
+      },
+    ];
+  }
+  if (locale === "es") {
+    return [
+      { scope: "generic", locales: ["es", "any"] },
+      { scope: "generic", locales: ["en"] },
+    ];
+  }
+  if (locale === "en") {
+    return [
+      { scope: "generic", locales: ["en", "any"] },
+      { scope: "generic", locales: ["es"] },
+    ];
+  }
+  return [
+    { scope: "generic", locales: ["en", "any"] },
+    { scope: "generic", locales: ["es"] },
+  ];
+}
+
+function foodSearchDocumentForFood(food: FoodItemRecord):
+  | { locale: string; scope: "generic" | "market"; searchText: string; rankBucket: number }
+  | undefined {
+  const searchText = normalizeText(
+    [
+      food.normalizedName,
+      food.canonicalName,
+      food.name,
+      food.brand,
+      food.foodCategory,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join(" "),
+  );
+  if (!searchText) return undefined;
+  const locale =
+    food.foodKey === "es" || food.foodKey === "en"
+      ? food.foodKey
+      : food.externalSource === "usda_fdc"
+        ? "en"
+        : "any";
+  const scope =
+    food.userId ||
+    (food.source === "openfoodfacts" && food.foodKey === "es") ||
+    (food.dataType !== "Branded" && food.source !== "usda_branded" && food.source !== "openfoodfacts")
+      ? "generic"
+      : "market";
+  const rankBucket = food.userId
+    ? 0
+    : food.source === "openfoodfacts" && food.foodKey === "es"
+      ? 1
+      : food.dataType === "SR Legacy"
+        ? 2
+        : food.dataType === "Foundation"
+          ? 3
+          : food.dataType === "Survey (FNDDS)"
+            ? 4
+            : food.source === "openfoodfacts" && food.foodKey === "en"
+              ? 7
+              : food.dataType === "Branded"
+                ? 8
+                : 6;
+  return { locale, scope, searchText, rankBucket };
+}
+
+function normalizeSearchLocale(locale?: string): "es" | "en" | undefined {
+  const normalized = locale?.toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized.startsWith("es")) return "es";
+  if (normalized.startsWith("en")) return "en";
+  return undefined;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)];
 }
 
 function sanitizeLimit(limit?: number): number {
