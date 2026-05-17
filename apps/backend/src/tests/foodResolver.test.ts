@@ -270,6 +270,28 @@ describe("FoodResolver", () => {
     );
   });
 
+  it("does not include polite trailing text in the canonical food name", async () => {
+    const mentions = await new DeterministicFoodTextExtractor().extract(
+      "Añádeme 200 gramos de pechuga de pollo y 300 gramos de arroz por favor",
+    );
+
+    expect(mentions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          canonicalName: "pechuga pollo",
+          quantity: 200,
+          unit: "g",
+        }),
+        expect.objectContaining({
+          originalText: "arroz por favor",
+          canonicalName: "arroz",
+          quantity: 300,
+          unit: "g",
+        }),
+      ]),
+    );
+  });
+
   it("routes local food search by locale and generic market scope", async () => {
     const repository = InMemoryRepository.seeded();
     await repository.upsertFoodItem({

@@ -1058,6 +1058,7 @@ function buildMention(
 
 function normalizeFoodName(value: string): string {
   const normalized = normalizeText(value)
+    .replace(/\b(por favor|please)\b/g, " ")
     .replace(/\b(de|del|of|a|mi|my|the|fresh|cooked|raw|sliced)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();

@@ -112,7 +112,7 @@ describe("AgentService", () => {
     );
   });
 
-  it("forces a meal logging request to a meal proposal when the model chooses lookup", async () => {
+  it("does not override the model-selected tool with meal logging heuristics", async () => {
     const { request } = buildTestApp({
       agentProvider: new FakeChatAgentProvider({
         toolCalls: [
@@ -141,14 +141,73 @@ describe("AgentService", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       kind: string;
-      proposal: { title: string; items: { name: string; quantity: number }[] };
+      items: { name: string }[];
+    };
+    expect(body.kind).toBe("nutrition_search");
+    expect(body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "Bread" }),
+        expect.objectContaining({ name: "Butter" }),
+      ]),
+    );
+  });
+
+  it("defaults to a complete Spanish meal proposal when the model returns no tool", async () => {
+    const { request, repository } = buildTestApp({
+      agentProvider: new FakeChatAgentProvider({
+        toolCalls: [],
+        rawResponse: {},
+      }),
+    });
+    await repository.upsertFoodItem({
+      name: "Pechuga de pollo",
+      normalizedName: "pechuga de pollo",
+      canonicalName: "pechuga pollo",
+      source: "openfoodfacts",
+      externalSource: "openfoodfacts",
+      externalId: "es-pechuga-pollo",
+      dataType: "Open Food Facts",
+      foodKey: "es",
+      servingGrams: 100,
+      calories: 165,
+      proteinGrams: 31,
+      carbsGrams: 0,
+      fatGrams: 3.6,
+    });
+    await repository.upsertFoodItem({
+      name: "Arroz",
+      normalizedName: "arroz",
+      canonicalName: "arroz",
+      source: "openfoodfacts",
+      externalSource: "openfoodfacts",
+      externalId: "es-arroz",
+      dataType: "Open Food Facts",
+      foodKey: "es",
+      servingGrams: 100,
+      calories: 130,
+      proteinGrams: 2.7,
+      carbsGrams: 28,
+      fatGrams: 0.3,
+    });
+    const { authHeader } = await registerAndAuth(request);
+    const res = await request("http://localhost/v1/agent/runs", {
+      method: "POST",
+      headers: { ...authHeader, "accept-language": "es-ES" },
+      body: JSON.stringify({
+        text: "Añádeme 200 gramos de pechuga de pollo y 300 gramos de arroz por favor",
+        source: "flutter",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      kind: string;
+      proposal: { items: { name: string; quantity: number }[] };
     };
     expect(body.kind).toBe("proposal");
-    expect(body.proposal.title).toBe("Bread and Butter");
     expect(body.proposal.items).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: "Bread", quantity: 100 }),
-        expect.objectContaining({ name: "Butter", quantity: 20 }),
+        expect.objectContaining({ name: "Pechuga de pollo", quantity: 200 }),
+        expect.objectContaining({ name: "Arroz", quantity: 300 }),
       ]),
     );
   });

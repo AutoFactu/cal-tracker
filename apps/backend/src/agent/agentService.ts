@@ -104,16 +104,19 @@ export class AgentService {
     const tools = withSyncSpan(
       "AgentService.materializeTools",
       { allowedActionCount: allowedActions.length },
-      () => allowedActions.map((action) => ({
-        type: "function" as const,
-        function: {
-          name: action.id,
-          description: `${action.title}. ${action.description}`,
-          parameters:
-            toolSchemas.find((t) => t.function.name === action.id)?.function
-              .parameters ?? {},
-        },
-      })),
+      () =>
+        prioritizeDefaultTool(allowedActions).map((action) => ({
+          type: "function" as const,
+          function: {
+            name: action.id,
+            description:
+              toolSchemas.find((t) => t.function.name === action.id)?.function
+                .description ?? `${action.title}. ${action.description}`,
+            parameters:
+              toolSchemas.find((t) => t.function.name === action.id)?.function
+                .parameters ?? {},
+          },
+        })),
     );
     const modelInputStats = agentModelInputStats(messages, tools);
     const baseLog = {
@@ -272,10 +275,6 @@ export class AgentService {
     }
 
     const originalActionId = actionId;
-    if (isMealLoggingIntent(text) && actionId !== "propose_meal_log") {
-      actionId = "propose_meal_log";
-      parsedInput = { text };
-    }
 
     const actionStarted = Date.now();
     try {
@@ -297,10 +296,6 @@ export class AgentService {
         decisionSource: "model",
         selectedTool: originalActionId,
         executedTool: actionId,
-        forcedToolOverride:
-          originalActionId !== actionId
-            ? { from: originalActionId, to: actionId }
-            : undefined,
         selectedArguments: parsedInput,
         usage: extractTokenUsage(decision.rawResponse),
         reasoningTokens: extractReasoningTokens(decision.rawResponse),
@@ -600,25 +595,16 @@ function approxTokens(chars: number): number {
   return Math.ceil(chars / 4);
 }
 
-function isMealLoggingIntent(text: string): boolean {
-  const normalized = normalizeIntentText(text);
-
-  if (/^(how|cuanto|cuanta|cuantas|cuantos|que|what)\b/.test(normalized))
-    return false;
-  if (
-    /\b(delete|remove|borrar|eliminar|corrige|correct|corregir)\b/.test(
-      normalized,
-    )
-  )
-    return false;
-  return /\b(log|add|ate|had|consumed|record|registrar|registro|anade|anadir|agrega|agregar|apunta|apuntar|comi|comido|tome|consumi|desayuno|almuerzo|comida|cena|merienda|snack)\b/.test(
-    normalized,
-  );
+function prioritizeDefaultTool<T extends { id: string }>(actions: T[]): T[] {
+  return [...actions].sort((a, b) => {
+    if (a.id === "propose_meal_log") return -1;
+    if (b.id === "propose_meal_log") return 1;
+    return 0;
+  });
 }
 
 function fallbackToolCallForText(text: string): AgentToolCall | null {
   const normalized = normalizeIntentText(text);
-  if (isMealLoggingIntent(text)) return toolCall("propose_meal_log", { text });
   if (
     /\b(remaining|left|quedan|restan|calorias restantes|calories left)\b/.test(
       normalized,
@@ -646,7 +632,7 @@ function fallbackToolCallForText(text: string): AgentToolCall | null {
       query: nutritionSearch[1].trim(),
     });
 
-  return null;
+  return toolCall("propose_meal_log", { text });
 }
 
 function toolCall(name: string, input: unknown): AgentToolCall {

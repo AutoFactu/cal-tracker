@@ -9,9 +9,36 @@ export function buildToolSchemas(): AgentToolDefinition[] {
     type: "function",
     function: {
       name: action.id,
-      description: `${action.title}. ${action.description}`,
+      description: toolDescription(action),
       parameters: zodToJsonSchema(action.inputSchema) as Record<string, unknown>,
     },
   }));
   return cachedToolSchemas;
+}
+
+function toolDescription(action: (typeof actionDefinitions)[number]): string {
+  switch (action.id) {
+    case "propose_meal_log":
+      return [
+        `${action.title}.`,
+        "Primary/default tool for turning typed or transcribed food text into a meal proposal.",
+        "Use for one or many foods, quantities, and natural-language add/record meal requests in any language.",
+        "Do not use nutrition lookup tools first for these requests.",
+        action.description,
+      ].join(" ");
+    case "search_nutrition_database":
+      return [
+        `${action.title}.`,
+        "Use only for explicit nutrition lookup/search requests where the user is not asking to add food to their log.",
+        action.description,
+      ].join(" ");
+    case "query_food_memory":
+      return [
+        `${action.title}.`,
+        "Use only to retrieve stored usual-meal aliases or memories, not as the final action for logging food.",
+        action.description,
+      ].join(" ");
+    default:
+      return `${action.title}. ${action.description}`;
+  }
 }
